@@ -12,6 +12,7 @@ Routes:
 from __future__ import annotations
 
 import io
+import logging
 import os
 from datetime import datetime
 from typing import List
@@ -33,6 +34,7 @@ from apps.api.schemas import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 #: The product's provider surface: OpenAI on the server key (paid in credits),
 #: the ChatGPT-subscription helper, and Gemini on the user's own credential.
@@ -234,8 +236,19 @@ def create_run(
     ):
         try:
             remaining = clerk_users.debit_credit(user_id)
-        except HTTPException:
-            raise
+        except (clerk_users.CreditDebitUncertain, HTTPException) as exc:
+            # The debit may have been applied (or, for an unexpected HTTPException,
+            # we can't tell): fail closed, start nothing, and never invite a blind
+            # retry that could charge twice.
+            logger.warning("credit debit unconfirmed for %s: %s", user_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "credit_debit_unconfirmed",
+                    "message": "We couldn't confirm whether a credit was spent, so no analysis "
+                               "was started. Check your credit balance before trying again.",
+                },
+            ) from exc
         except Exception:
             # Clerk API unreachable: fail closed on spend, but as a retriable
             # 503 rather than a misleading "out of credits".

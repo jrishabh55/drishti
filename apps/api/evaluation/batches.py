@@ -226,6 +226,23 @@ def _retryable(exc: HTTPException) -> bool:
     return code == 400 and isinstance(exc.detail, dict) and exc.detail.get("code") == "no_market_data"
 
 
+def _uncertain_debit(exc: HTTPException) -> bool:
+    """A credit may have been spent with no run started: never retried."""
+    return isinstance(exc.detail, dict) and exc.detail.get("code") == "credit_debit_unconfirmed"
+
+
+def _collision(exc: HTTPException) -> bool:
+    """The user's own run of this ticker is active: wait for it, at no cost."""
+    return exc.status_code == 409 and "already queued or running" in _detail_text(exc.detail)
+
+
+BILLING_REVIEW = ("stopped: a credit debit for {cell} could not be confirmed, so no further cells "
+                  "of your batches were started. Check your credit balance, then start a new "
+                  "batch for what you still need.")
+#: A collision with the user's own active run re-checks this soon (no attempt is used).
+COLLISION_DELAY = timedelta(seconds=30)
+
+
 def _user_wide(exc: HTTPException) -> bool:
     """A failure every cell of this user would hit (not specific to one ticker)."""
     return not (exc.status_code == 400)
@@ -275,12 +292,19 @@ def pump(user_id: str, store: Optional[JobStore] = None) -> int:
             update: Dict[str, Any] = {"state": "submitted", "run_id": None, "error": None,
                                       "next_attempt_at": None}
             hold_all = None
+            stop_all = None
             try:
                 update["run_id"] = _submit(req, user_id)
             except HTTPException as exc:
                 attempts = row["attempts"] + 1
                 error = _detail_text(exc.detail)
-                if _retryable(exc) and attempts < MAX_ATTEMPTS:
+                if _uncertain_debit(exc):        # never retried: stops the user's queue below
+                    stop_all = BILLING_REVIEW.format(cell=f"{ticker} {row['date']}")
+                    update.update(state="rejected", attempts=attempts, error=stop_all)
+                elif _collision(exc):            # free deferral: no attempt used
+                    update.update(state="queued", error=f"waiting for your {ticker} run to finish",
+                                  next_attempt_at=(now + COLLISION_DELAY).isoformat())
+                elif _retryable(exc) and attempts < MAX_ATTEMPTS:
                     retry_at = (now + min(RETRY_BASE * 2 ** (attempts - 1), RETRY_CAP)).isoformat()
                     update.update(state="queued", attempts=attempts, error=error, next_attempt_at=retry_at)
                     if _user_wide(exc):
@@ -300,16 +324,53 @@ def pump(user_id: str, store: Optional[JobStore] = None) -> int:
                 c.execute("UPDATE eval_cells SET state='cancelled', next_attempt_at=NULL " + where[0] +
                           " AND state='queued' AND EXISTS (SELECT 1 FROM eval_batches b "
                           "WHERE b.id=eval_cells.batch_id AND b.cancelled=1)", where[1])
+                if stop_all:
+                    # Otherwise the next cell would simply charge again: stop the
+                    # user's whole queue, explicitly, for a human to check the balance.
+                    c.execute(
+                        "UPDATE eval_cells SET state='rejected', error=?, next_attempt_at=NULL "
+                        "WHERE state='queued' AND batch_id IN "
+                        "(SELECT id FROM eval_batches WHERE user_id=? AND cancelled=0)",
+                        (stop_all, user_id))
                 if hold_all:
                     c.execute(
                         "UPDATE eval_cells SET next_attempt_at=? WHERE state='queued' "
                         "AND (next_attempt_at IS NULL OR next_attempt_at<?) "
                         "AND batch_id IN (SELECT id FROM eval_batches WHERE user_id=?)",
                         (hold_all, hold_all, user_id))
-            if update["state"] == "rejected":
+            if update["state"] == "rejected" and not stop_all:
                 continue  # specific to this cell and nothing was spent: try the next one
             return 1 if update["state"] == "submitted" else 0
     return 0
+
+
+def due_users(store: Optional[JobStore] = None, now: Optional[datetime] = None,
+              limit: int = 100) -> List[str]:
+    """Users with a queued cell that is due now in a batch they haven't
+    cancelled, and no active run (that run's end pumps them anyway)."""
+    store = store or get_store()
+    now = now or datetime.now(timezone.utc)
+    with _conn(store) as c:
+        users = [r[0] for r in c.execute(
+            "SELECT DISTINCT b.user_id FROM eval_cells c JOIN eval_batches b ON b.id=c.batch_id "
+            "WHERE b.cancelled=0 AND c.state='queued' "
+            "AND (c.next_attempt_at IS NULL OR c.next_attempt_at<=?) ORDER BY b.user_id",
+            (now.isoformat(),))]
+    return [u for u in users if not store.has_active_run_for_user(u)][:limit]
+
+
+def sweep(store: Optional[JobStore] = None, now: Optional[datetime] = None,
+          limit: int = 100) -> List[str]:
+    """Pump every due user once, so confirmed batches keep going (retries,
+    deferrals) without the batch page open. Returns the users pumped."""
+    store = store or get_store()
+    users = due_users(store, now, limit)
+    for uid in users:
+        try:
+            pump(uid, store)
+        except Exception:  # noqa: BLE001 — one user's failure must not stop the sweep
+            logger.exception("batch sweep failed for %s", uid)
+    return users
 
 
 def _detail_text(detail: Any) -> str:

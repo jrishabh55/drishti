@@ -108,6 +108,11 @@ def _fetch_gate(user_id: str) -> Gate:
     return Gate(activated=activated, credits=credits if isinstance(credits, int) else 0)
 
 
+def _forget(user_id: str) -> None:
+    with _cache_lock:
+        _cache.pop(user_id, None)
+
+
 def _cache_put(user_id: str, gate: Gate) -> None:
     with _cache_lock:
         _cache[user_id] = (gate, time.monotonic() + _CACHE_TTL)
@@ -165,6 +170,12 @@ def get_google_oauth_token(user_id: str) -> Optional[str]:
     return None
 
 
+class CreditDebitUncertain(RuntimeError):
+    """The decremented balance was sent to Clerk but no clear answer came back:
+    the credit may or may not have been spent. Never retry automatically — a
+    human checks the balance first."""
+
+
 def _debit_lock(user_id: str) -> threading.Lock:
     with _debit_locks_guard:
         return _debit_locks.setdefault(user_id, threading.Lock())
@@ -185,6 +196,15 @@ def debit_credit(user_id: str) -> Optional[int]:
             _cache_put(user_id, gate)
             return None
         spent = Gate(activated=True, credits=gate.credits - 1)
-        _patch_credits(user_id, spent.credits)
+        try:
+            _patch_credits(user_id, spent.credits)
+        except urllib.error.HTTPError as exc:
+            if 400 <= exc.code < 500:
+                raise          # Clerk answered and refused: nothing was spent
+            _forget(user_id)
+            raise CreditDebitUncertain(f"Clerk answered HTTP {exc.code} to the debit") from exc
+        except Exception as exc:  # noqa: BLE001 — timeout / dropped connection after sending
+            _forget(user_id)
+            raise CreditDebitUncertain(f"no answer from Clerk to the debit: {exc}") from exc
         _cache_put(user_id, spent)
         return spent.credits
