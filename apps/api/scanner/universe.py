@@ -23,6 +23,9 @@ DATA_CSV = Path(__file__).parent / "data" / "nse_universe.csv"
 #: Stocks with NSE F&O contracts, from NSE's fo_mktlots.csv (snapshot
 #: 2026-10-29; refresh_fo_csv() regenerates it). Drives the "fno" universe.
 FO_CSV = Path(__file__).parent / "data" / "nse_fo.csv"
+FO_SNAPSHOT_DATE = "2026-10-29"
+#: A real lot file lists ~200 stock underlyings; fewer means a bad parse.
+FO_MIN_UNDERLYINGS = 100
 
 #: All-listed-equities master file — the source of truth for the universe.
 #: If this one is unreachable, refresh_universe_csv() bails out entirely
@@ -46,16 +49,55 @@ def fo_symbols() -> set[str]:
         return {r["symbol"] for r in csv.DictReader(f)}
 
 
-def apply_fo_membership(store: ScannerStore) -> int:
-    """Set each instrument's fno flag from the bundled F&O list (idempotent;
-    for stores seeded before the list existed). Returns how many are F&O."""
-    fo = fo_symbols()
+def official_fo_symbols() -> tuple[set[str], dict]:
+    """NSE's current F&O stock list (fo_mktlots.csv via the desk dataset
+    client: cached, breaker-protected, block pages rejected), else the
+    bundled verified snapshot. The second value says which, and how old."""
+    from apps.api.desk import datasets
+
+    try:
+        got = datasets.fetch("nse.fo_lots")
+        lots = datasets.parse_fo_lots(got["text"])
+        if len(lots) >= FO_MIN_UNDERLYINGS:
+            return set(lots), {"source": "nse.fo_lots", "as_of": got["fetched_at"],
+                               "stale": bool(got.get("stale"))}
+        why = f"only {len(lots)} underlyings parsed"
+    except (datasets.FeedUnavailable, ValueError) as exc:
+        why = str(exc)
+    logger.warning("F&O list from NSE unavailable (%s); using the bundled %s snapshot",
+                   why, FO_SNAPSHOT_DATE)
+    return fo_symbols(), {"source": "bundled", "as_of": FO_SNAPSHOT_DATE, "stale": True,
+                          "reason": why[:300]}
+
+
+def fo_membership_source(store: ScannerStore) -> dict | None:
+    """Where the stored fno flags came from (set by apply_fo_membership)."""
+    import json
+
+    with store._conn() as c:
+        row = c.execute("SELECT v FROM meta WHERE k='fno_source'").fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def apply_fo_membership(store: ScannerStore, fo: set[str] | None = None) -> int:
+    """Set each instrument's fno flag from NSE's current F&O list (bundled
+    snapshot when NSE can't be read). Only the flag changes: sector, market
+    cap and fundamentals are kept. Idempotent; run at startup and daily.
+    Returns how many instruments are F&O."""
+    import json
+
+    info = {"source": "given", "as_of": None, "stale": False}
+    if fo is None:
+        fo, info = official_fo_symbols()
     inst = store.instruments_df()
     rows = [{"symbol": sym, "yf_symbol": r["yf_symbol"], "name": r["name"],
              "index_memberships": r["index_memberships"], "fno": sym in fo}
             for sym, r in inst.iterrows() if bool(r.get("fno", False)) != (sym in fo)]
     if rows:
         store.upsert_instruments(rows)
+    with store._conn() as c:
+        c.execute("INSERT INTO meta (k, v) VALUES ('fno_source', ?) "
+                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (json.dumps(info),))
     return sum(1 for sym in inst.index if sym in fo)
 
 
@@ -80,7 +122,6 @@ def enrich_universe(store: ScannerStore, limit: int | None = None,
                     sleep_s: float = 0.25) -> int:
     """Fill sector/mcap/fundamentals from yfinance. Weekly cadence; failures skip."""
     inst = store.instruments_df()
-    fo = fo_symbols()
     done = 0
     for symbol, row in inst.iterrows():
         if limit is not None and done >= limit:
@@ -100,7 +141,7 @@ def enrich_universe(store: ScannerStore, limit: int | None = None,
             "industry": info.get("industry") or row.get("industry"),
             "market_cap": info.get("marketCap"),
             "index_memberships": row["index_memberships"],
-            "fno": symbol in fo,
+            "fno": bool(row.get("fno", False)),   # owned by apply_fo_membership
             "fundamentals": fundamentals,
         }])
         done += 1

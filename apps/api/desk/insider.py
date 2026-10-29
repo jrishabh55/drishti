@@ -18,7 +18,8 @@ from apps.api.desk.market.session import NSE
 
 IST = NSE.tz
 MAX_DAYS = 365
-PROMOTER = ("promoter", "promoter group")
+#: NSE writes "Promoters", "Promoter Group", "Promoter & Director"…: all start so.
+PROMOTER_PREFIX = "promoter"
 
 
 def _d(v: Any, fmt: str = "%d-%b-%Y") -> Optional[date]:
@@ -47,7 +48,7 @@ def parse_pit(text: str) -> List[Dict[str, Any]]:
             "symbol": str(r.get("symbol") or "").upper(),
             "person": clean_text(r.get("acqName"), 120),
             "category": category,
-            "promoter": category.lower() in PROMOTER,
+            "promoter": category.lower().startswith(PROMOTER_PREFIX),
             "transaction": clean_text(r.get("tdpTransactionType"), 40),
             "mode": clean_text(r.get("acqMode"), 60),
             "security": clean_text(r.get("secType"), 60),
@@ -157,7 +158,7 @@ def latest_deals(watch: List[str], *, only_watchlist: bool, now: Optional[dateti
                 found = [r for r in found if r["on_watchlist"]]
             rows += found
             sources.append(status_of(name, got, count=len(found)))
-        except FeedUnavailable as exc:
+        except (FeedUnavailable, ValueError) as exc:
             sources.append(status_of(name, error=str(exc)))
     for r in rows:   # CSV dates are "28-OCT-2026"
         d = _d(str(r.get("date") or "").title())

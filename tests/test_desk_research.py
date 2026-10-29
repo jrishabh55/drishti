@@ -298,7 +298,10 @@ def test_facts_unavailable_are_never_reported_as_clean(live):
     _, _, mp = live
     mp.setattr(datasets, "_http_get", down)
     got = research.symbol_facts("SAIL", now=NOW)
-    assert got["status"] == "unavailable" and got["facts"] == {}
+    # nothing claimed from a source that couldn't be read; F&O membership falls
+    # back to the bundled snapshot and says so
+    assert got["status"] == "unavailable"
+    assert set(got["facts"]) == {"fno", "fno_source"} and "snapshot" in got["facts"]["fno_source"]
     assert len(got["sources"]) == 5
 
 

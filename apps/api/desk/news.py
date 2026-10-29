@@ -224,13 +224,37 @@ def _overall(sources: List[Dict[str, Any]]) -> str:
     return "unavailable" if bad == len(sources) else "partial" if bad else "ok"
 
 
-WATCHLIST_CAP = 10   # ponytail: sequential, ~1 req/s per host; parallelise if it drags
+WATCHLIST_CAP = 10
+#: Symbols fetched at once. Each host is still paced to 1 req/s by the shared
+#: throttle; this only stops one slow host from serialising the others.
+WATCHLIST_WORKERS = 4
+#: The whole watchlist answers within this; symbols still fetching are
+#: reported unavailable rather than holding the page (their fetches finish in
+#: the background and warm the cache for the next look).
+WATCHLIST_DEADLINE_S = 20.0
 
 
-def watchlist_news(symbols: List[str], *, days: int = 3, now: Optional[datetime] = None
-                   ) -> Dict[str, Any]:
+def watchlist_news(symbols: List[str], *, days: int = 3, now: Optional[datetime] = None,
+                   deadline_s: float = WATCHLIST_DEADLINE_S) -> Dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    window(days, now)    # bad params fail before any fetch
     picked = symbols[:WATCHLIST_CAP]
-    per = [symbol_news(s, days=days, now=now) for s in picked]
+    pool = ThreadPoolExecutor(max_workers=WATCHLIST_WORKERS, thread_name_prefix="desk-news")
+    try:
+        futs = {s: pool.submit(symbol_news, s, days=days, now=now) for s in picked}
+        wait(list(futs.values()), timeout=deadline_s)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    per = []
+    for s, f in futs.items():
+        if f.done() and not f.cancelled() and f.exception() is None:
+            per.append(f.result())
+            continue
+        err = (f"{type(f.exception()).__name__}: {f.exception()}" if f.done() and not f.cancelled()
+               and f.exception() is not None else f"no answer within {deadline_s:.0f}s")
+        per.append({"symbol": s, "window": None, "items": [],
+                    "sources": [status_of("nse.announcements", error=err)]})
     items = sorted((i for p in per for i in p["items"]), key=lambda x: x["published_at"],
                    reverse=True)
     sources = [dict(s, symbol=p["symbol"]) for p in per for s in p["sources"]]
@@ -239,5 +263,6 @@ def watchlist_news(symbols: List[str], *, days: int = 3, now: Optional[datetime]
         notes.append(f"Showing news for the first {WATCHLIST_CAP} of {len(symbols)} "
                      "watchlist symbols.")
     status = "empty" if not picked else _overall(sources) if sources else "ok"
-    return {"symbols": picked, "window": per[0]["window"] if per else None, "items": items,
+    span = next((p["window"] for p in per if p["window"]), None)
+    return {"symbols": picked, "window": span, "items": items,
             "sources": sources, "status": status, "notes": notes}

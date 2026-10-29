@@ -38,6 +38,12 @@ def symbol_facts(symbol: str, *, now: Optional[datetime] = None) -> Dict[str, An
 
     read("nse.price_bands", datasets.parse_price_bands, band)
     read("nse.fo_lots", datasets.parse_fo_lots, lots)
+    if "fno" not in facts:
+        # NSE's lot file couldn't be read: say what the bundled snapshot says, and that it is one.
+        from apps.api.scanner.universe import FO_SNAPSHOT_DATE, fo_symbols
+
+        facts["fno"] = symbol in fo_symbols()
+        facts["fno_source"] = f"bundled NSE F&O list snapshot of {FO_SNAPSHOT_DATE} (live list unavailable)"
     read("nse.fo_ban", datasets.parse_fo_ban, lambda ban: facts.__setitem__("fo_ban", symbol in ban))
     read("nse.asm", lambda t: datasets.parse_surveillance(t, None),
          lambda s: facts.__setitem__("asm", s.get(symbol, {}).get("asm")))

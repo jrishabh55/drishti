@@ -57,7 +57,10 @@ def test_enrich_survives_per_symbol_failure(tmp_path):
 def test_fo_membership_from_the_recorded_nse_lot_file(tmp_path):
     from apps.api.desk.datasets import parse_fo_lots
     from apps.api.desk.orb import pick_universe
+    from apps.api.desk.store import reset_desk_store_for_tests
     from apps.api.scanner.universe import apply_fo_membership, fo_symbols
+
+    reset_desk_store_for_tests(tmp_path / "desk.sqlite")   # NSE unreachable -> bundled list
 
     recorded = parse_fo_lots((Path(__file__).parent / "fixtures" / "desk" / "sources"
                               / "nse_fo_mktlots.csv").read_text())
