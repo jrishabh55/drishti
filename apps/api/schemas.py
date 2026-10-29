@@ -66,6 +66,8 @@ def canonicalize_request(request: "RunRequest") -> Dict[str, Any]:
         value = getattr(request, key)
         if value and value.lower() != request.llm_provider.lower():
             canonical[key] = value.lower()
+    if request.evaluation_batch_id:
+        canonical['evaluation_batch_id'] = request.evaluation_batch_id
     canonical["_app_engine"] = engine_identity()
     # Only an opted-in run carries a book, so every pre-existing hash is unchanged.
     if raw.get("portfolio_snapshot") is not None:
@@ -91,6 +93,7 @@ class RunRequest(BaseModel):
     )
     research_depth: int = Field(1, ge=1, le=5, description="Both max_debate_rounds and max_risk_discuss_rounds.")
     llm_provider: str = Field(..., description="Default model provider")
+    evaluation_batch_id: Optional[str] = None
     quick_think_provider: Optional[str] = None
     deep_think_provider: Optional[str] = None
     backend_url: Optional[str] = Field(None, description="Provider base_url override; None means provider default.")

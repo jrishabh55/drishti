@@ -3,6 +3,7 @@ import type { FlowState } from './FlowLanding'
 import { HelperSetup } from './FlowLanding'
 import { GeminiSetup } from './GeminiSetup'
 import { ProviderKeySetup } from './ProviderKeySetup'
+import { PaperPortfolioOptIn } from '#/components/evaluation/PaperPortfolioOptIn'
 
 const ANALYSTS = [
   { id: 'market', name: 'Market', desc: 'Technicals, charts, indicators' },
@@ -355,6 +356,7 @@ export function FlowAdvanced({
                   </select>
                 </Field>
               </div>
+              <p className="text-xs text-[var(--text-3)]">A server-funded model tier uses one app credit per analysis. Personal provider keys and the ChatGPT helper use your own provider account.</p>
               <Field label="Custom model IDs (optional)">
                 <div className="grid gap-2 sm:grid-cols-2">
                   <input className="fld-input" aria-label="Quick model ID" value={form.shallowThinker} onChange={e => patch({shallowThinker:e.target.value})} />
@@ -387,6 +389,7 @@ export function FlowAdvanced({
               <div className="cfg-sub">Final report language and crash-safety.</div>
             </div>
             <div className="cfg-control" style={{ display: 'grid', gap: 12 }}>
+              <PaperPortfolioOptIn checked={form.usePaperPortfolio ?? false} onCheckedChange={value => patch({usePaperPortfolio:value})} />
               <Field label="Language">
                 <select
                   className="fld-input"

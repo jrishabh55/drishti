@@ -516,3 +516,14 @@ def test_html_report_is_standalone_escaped_and_owned(job_store):
     assert "RELIANCE.NS" in html and "Buy" in html and "Accumulate on dips" in html
     assert "sk-" not in html
     assert _client(router, {"id": "user_b"}).get(f"/api/runs/{run_id}/report.html").status_code == 404
+
+
+def test_batch_memory_is_isolated_from_normal_analysis(tmp_path):
+    from apps.api.schemas import RunRequest, request_hash
+    from apps.api.integrations.graph_factory import _build_config
+    base=dict(ticker='RELIANCE.NS',analysis_date='2026-10-28',analysts=['market'],
+              llm_provider='openai',shallow_thinker='quick',deep_thinker='deep')
+    normal=RunRequest(**base)
+    batch=RunRequest(**base,evaluation_batch_id='00000000-0000-0000-0000-000000000001')
+    assert _build_config(normal,user_id='alice')['memory_log_path'] != _build_config(batch,user_id='alice')['memory_log_path']
+    assert request_hash(normal) != request_hash(batch)

@@ -12,11 +12,14 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AnalyseRouteImport } from './routes/analyse'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ScannersIndexRouteImport } from './routes/scanners.index'
+import { Route as EvaluationIndexRouteImport } from './routes/evaluation.index'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as ScannersNewRouteImport } from './routes/scanners.new'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
+import { Route as EvaluationIdRouteImport } from './routes/evaluation.$id'
 import { Route as DeskSettingsRouteImport } from './routes/desk.settings'
+import { Route as DeskPerformanceRouteImport } from './routes/desk.performance'
 import { Route as DeskPaperRouteImport } from './routes/desk.paper'
 import { Route as DeskAlertsRouteImport } from './routes/desk.alerts'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
@@ -39,6 +42,11 @@ const ScannersIndexRoute = ScannersIndexRouteImport.update({
   path: '/scanners/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EvaluationIndexRoute = EvaluationIndexRouteImport.update({
+  id: '/evaluation/',
+  path: '/evaluation/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskIndexRoute = DeskIndexRouteImport.update({
   id: '/desk/',
   path: '/desk/',
@@ -59,9 +67,19 @@ const RunsIdRoute = RunsIdRouteImport.update({
   path: '/runs/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EvaluationIdRoute = EvaluationIdRouteImport.update({
+  id: '/evaluation/$id',
+  path: '/evaluation/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskSettingsRoute = DeskSettingsRouteImport.update({
   id: '/desk/settings',
   path: '/desk/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeskPerformanceRoute = DeskPerformanceRouteImport.update({
+  id: '/desk/performance',
+  path: '/desk/performance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeskPaperRoute = DeskPaperRouteImport.update({
@@ -101,11 +119,14 @@ export interface FileRoutesByFullPath {
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
   '/desk/paper': typeof DeskPaperRoute
+  '/desk/performance': typeof DeskPerformanceRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
   '/settings/models': typeof SettingsModelsRoute
   '/desk/': typeof DeskIndexRoute
+  '/evaluation/': typeof EvaluationIndexRoute
   '/scanners/': typeof ScannersIndexRoute
   '/desk/plans/$id': typeof DeskPlansIdRoute
   '/scanners/$id/edit': typeof ScannersIdEditRoute
@@ -117,11 +138,14 @@ export interface FileRoutesByTo {
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
   '/desk/paper': typeof DeskPaperRoute
+  '/desk/performance': typeof DeskPerformanceRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
   '/settings/models': typeof SettingsModelsRoute
   '/desk': typeof DeskIndexRoute
+  '/evaluation': typeof EvaluationIndexRoute
   '/scanners': typeof ScannersIndexRoute
   '/desk/plans/$id': typeof DeskPlansIdRoute
   '/scanners/$id/edit': typeof ScannersIdEditRoute
@@ -134,11 +158,14 @@ export interface FileRoutesById {
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
   '/desk/paper': typeof DeskPaperRoute
+  '/desk/performance': typeof DeskPerformanceRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
   '/settings/models': typeof SettingsModelsRoute
   '/desk/': typeof DeskIndexRoute
+  '/evaluation/': typeof EvaluationIndexRoute
   '/scanners/': typeof ScannersIndexRoute
   '/desk/plans/$id': typeof DeskPlansIdRoute
   '/scanners/$id/edit': typeof ScannersIdEditRoute
@@ -152,11 +179,14 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/desk/alerts'
     | '/desk/paper'
+    | '/desk/performance'
     | '/desk/settings'
+    | '/evaluation/$id'
     | '/runs/$id'
     | '/scanners/new'
     | '/settings/models'
     | '/desk/'
+    | '/evaluation/'
     | '/scanners/'
     | '/desk/plans/$id'
     | '/scanners/$id/edit'
@@ -168,11 +198,14 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/desk/alerts'
     | '/desk/paper'
+    | '/desk/performance'
     | '/desk/settings'
+    | '/evaluation/$id'
     | '/runs/$id'
     | '/scanners/new'
     | '/settings/models'
     | '/desk'
+    | '/evaluation'
     | '/scanners'
     | '/desk/plans/$id'
     | '/scanners/$id/edit'
@@ -184,11 +217,14 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/desk/alerts'
     | '/desk/paper'
+    | '/desk/performance'
     | '/desk/settings'
+    | '/evaluation/$id'
     | '/runs/$id'
     | '/scanners/new'
     | '/settings/models'
     | '/desk/'
+    | '/evaluation/'
     | '/scanners/'
     | '/desk/plans/$id'
     | '/scanners/$id/edit'
@@ -201,11 +237,14 @@ export interface RootRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   DeskAlertsRoute: typeof DeskAlertsRoute
   DeskPaperRoute: typeof DeskPaperRoute
+  DeskPerformanceRoute: typeof DeskPerformanceRoute
   DeskSettingsRoute: typeof DeskSettingsRoute
+  EvaluationIdRoute: typeof EvaluationIdRoute
   RunsIdRoute: typeof RunsIdRoute
   ScannersNewRoute: typeof ScannersNewRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   DeskIndexRoute: typeof DeskIndexRoute
+  EvaluationIndexRoute: typeof EvaluationIndexRoute
   ScannersIndexRoute: typeof ScannersIndexRoute
   DeskPlansIdRoute: typeof DeskPlansIdRoute
   ScannersIdEditRoute: typeof ScannersIdEditRoute
@@ -233,6 +272,13 @@ declare module '@tanstack/react-router' {
       path: '/scanners'
       fullPath: '/scanners/'
       preLoaderRoute: typeof ScannersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/evaluation/': {
+      id: '/evaluation/'
+      path: '/evaluation'
+      fullPath: '/evaluation/'
+      preLoaderRoute: typeof EvaluationIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desk/': {
@@ -263,11 +309,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RunsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/evaluation/$id': {
+      id: '/evaluation/$id'
+      path: '/evaluation/$id'
+      fullPath: '/evaluation/$id'
+      preLoaderRoute: typeof EvaluationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/desk/settings': {
       id: '/desk/settings'
       path: '/desk/settings'
       fullPath: '/desk/settings'
       preLoaderRoute: typeof DeskSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/desk/performance': {
+      id: '/desk/performance'
+      path: '/desk/performance'
+      fullPath: '/desk/performance'
+      preLoaderRoute: typeof DeskPerformanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desk/paper': {
@@ -321,11 +381,14 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   DeskAlertsRoute: DeskAlertsRoute,
   DeskPaperRoute: DeskPaperRoute,
+  DeskPerformanceRoute: DeskPerformanceRoute,
   DeskSettingsRoute: DeskSettingsRoute,
+  EvaluationIdRoute: EvaluationIdRoute,
   RunsIdRoute: RunsIdRoute,
   ScannersNewRoute: ScannersNewRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   DeskIndexRoute: DeskIndexRoute,
+  EvaluationIndexRoute: EvaluationIndexRoute,
   ScannersIndexRoute: ScannersIndexRoute,
   DeskPlansIdRoute: DeskPlansIdRoute,
   ScannersIdEditRoute: ScannersIdEditRoute,

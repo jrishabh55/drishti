@@ -132,6 +132,13 @@ def create_run(
         raise HTTPException(status_code=400, detail="analysis_date cannot be in the future")
 
     store = get_store()
+    if request.evaluation_batch_id:
+        from apps.api.evaluation.batches import _batch_row
+        if _batch_row(store, request.evaluation_batch_id, user_id) is None:
+            raise HTTPException(404, 'evaluation batch not found')
+        request.use_paper_portfolio = False
+    from apps.api.evaluation.portfolio import apply_portfolio_snapshot
+    request = apply_portfolio_snapshot(request, user_id)
     req_hash = request_hash(request)
 
     # Cache lookup before submitting work. Scoped per-user: GET /runs/{id}

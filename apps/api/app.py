@@ -140,6 +140,8 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router, prefix="/api")
     from apps.api.routes.watch_rules import router as watch_rules_router
     app.include_router(watch_rules_router, prefix="/api")
+    from apps.api.routes.evaluation import router as evaluation_router
+    app.include_router(evaluation_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(scanners_router, prefix="/api")

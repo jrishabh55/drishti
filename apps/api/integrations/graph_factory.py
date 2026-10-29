@@ -238,7 +238,8 @@ def _build_config(request: RunRequest, *, user_id: Optional[str] = None) -> Dict
             "WEBAPP_PER_USER_MEMORY_DIR",
             str(Path.home() / ".tradingagents" / "memory_per_user"),
         )
-        config["memory_log_path"] = str(
-            Path(base_dir) / _safe_user_dir(user_id) / "trading_memory.md"
-        )
+        memory_dir = Path(base_dir) / _safe_user_dir(user_id)
+        if request.evaluation_batch_id:
+            memory_dir = memory_dir / 'evaluation' / _safe_user_dir(request.evaluation_batch_id)
+        config["memory_log_path"] = str(memory_dir / "trading_memory.md")
     return config

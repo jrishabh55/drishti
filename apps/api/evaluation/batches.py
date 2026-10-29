@@ -77,12 +77,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def billable(provider: str, user_id: str) -> bool:
+def billable(provider: str | RunRequest, user_id: str) -> bool:
     """Mirror of create_run's debit condition: whether a fresh cell costs a credit."""
     from apps.api import clerk_users
     from apps.api.auth import ANONYMOUS_USER_ID, SHARED_BEARER_USER_ID
 
-    return (provider.strip().lower() == "openai" and clerk_users.enabled()
+    from apps.api.integrations.product_providers import uses_server_credit
+    server_funded = uses_server_credit(provider) if isinstance(provider, RunRequest) else provider.strip().lower() in ('openai','azure','bedrock')
+    return (server_funded and clerk_users.enabled()
             and user_id not in (ANONYMOUS_USER_ID, SHARED_BEARER_USER_ID))
 
 
@@ -107,7 +109,7 @@ def plan_cells(tickers: List[str], start_date: str, end_date: str,
 
 
 def quote(base: RunRequest, cells: List[Tuple[str, str]], user_id: str) -> Dict[str, Any]:
-    per_cell = 1 if billable(base.llm_provider, user_id) else 0
+    per_cell = 1 if billable(base, user_id) else 0
     out: Dict[str, Any] = {"cells": len(cells), "max_credits": per_cell * len(cells),
                            "credits_per_cell": per_cell, "credits_available": None}
     if per_cell:
@@ -146,6 +148,7 @@ def create_batch(user_id: str, base: RunRequest, cells: List[Tuple[str, str]],
                        "wait for one or stop it first"})
     base = base.model_copy(update={"use_paper_portfolio": False, "portfolio_snapshot": None})
     bid = str(uuid.uuid4())
+    base = base.model_copy(update={'evaluation_batch_id':bid})
     with _conn(store) as c:
         c.execute("INSERT INTO eval_batches(id, user_id, created_at, request_json, quoted_credits) "
                   "VALUES (?,?,?,?,?)", (bid, user_id, _now(), base.model_dump_json(), q["max_credits"]))
