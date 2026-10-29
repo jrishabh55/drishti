@@ -1,10 +1,10 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
+import { DeskSymbolSearch } from '#/components/desk/DeskSymbolSearch'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
 import { SourceBadge } from '#/components/desk/SourceBadge'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
-import { Input } from '#/components/ui/input'
 import { Switch } from '#/components/ui/switch'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -31,7 +31,6 @@ function DeskToday() {
   const [auto, setAuto] = useState(true)
   const [watch, setWatch] = useState<string[]>([])
   const [statuses, setStatuses] = useState<Record<string, EntryStatus | string>>({})
-  const [newSym, setNewSym] = useState('')
   const [ledger, setLedger] = useState<PaperLedger | null>(null)
   const [events, setEvents] = useState<AlertEvent[]>([])
   const [planning, setPlanning] = useState<string | null>(null)
@@ -88,15 +87,10 @@ function DeskToday() {
     }
   }
 
-  async function addWatch() {
-    const s = newSym.trim()
-    if (!s) return
-    try {
-      const w = await api.desk.watch(s)
-      setWatch(w); setNewSym(''); refreshWatch(w)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
+  async function addWatch(symbol: string) {
+    const w = await api.desk.watch(symbol)
+    setWatch(w)
+    refreshWatch(w)
   }
 
   async function removeWatch(s: string) {
@@ -202,6 +196,7 @@ function DeskToday() {
                         <TableCell className="es-mono">{h.volume_x?.toFixed(2) ?? '—'}</TableCell>
                         <TableCell className="es-mono">{h.avg_value_cr ?? '—'}</TableCell>
                         <TableCell className="whitespace-nowrap text-right">
+                          <Link to="/analyse" search={{ ticker: `${h.symbol}.NS` }} className="es-btn sm no-underline">Analyse</Link>
                           <Button size="sm" variant="ghost" onClick={() => api.desk.watch(h.symbol)
                             .then((w) => { setWatch(w); refreshWatch(w) })}>Watch</Button>
                           <Button size="sm" onClick={() => plan(h.symbol)} disabled={planning === h.symbol}>
@@ -225,10 +220,7 @@ function DeskToday() {
         <section className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-semibold">Watchlist entry timer</h2>
-            <Input className="w-40" placeholder="Add symbol" value={newSym}
-              onChange={(e) => setNewSym(e.target.value.toUpperCase())}
-              onKeyDown={(e) => { if (e.key === 'Enter') addWatch() }} />
-            <Button size="sm" variant="outline" onClick={addWatch}>Add</Button>
+            <DeskSymbolSearch onAdd={addWatch} />
             <Button size="sm" variant="ghost" onClick={() => refreshWatch(watch)}>Refresh</Button>
           </div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -249,6 +241,7 @@ function DeskToday() {
                     {typeof st === 'string' ? st : st?.reason ?? 'checking…'}
                   </p>
                   <div className="flex gap-1">
+                    <Link to="/analyse" search={{ ticker: `${s}.NS` }} className="es-btn sm no-underline">Analyse</Link>
                     {typeof st === 'object' && st.status === 'triggered' && (
                       <Button size="sm" onClick={() => plan(s)} disabled={planning === s}>Plan →</Button>
                     )}
