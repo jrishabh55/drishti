@@ -21,13 +21,17 @@ say "DELAYED" honestly.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from apps.api.auth import current_user_id
 from apps.api.desk import bars as bars_mod, bars_source, timemachine as tm
@@ -35,7 +39,27 @@ from apps.api.desk.market.session import NSE as NSE_SPEC
 from apps.api.desk.profile import DeskProfile, load_profile
 from apps.api.desk.store import get_desk_store
 
-router = APIRouter()
+
+class SafeErrorsRoute(APIRoute):
+    """422s that never echo the rejected input.
+
+    FastAPI's default body repeats each bad value, and a NaN/Infinity cannot be
+    JSON-encoded, so refusing one would surface as a 500 instead of a 422.
+    """
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def route(request):
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                return JSONResponse(status_code=422, content={"detail": [
+                    {"loc": list(e.get("loc", ())), "msg": e.get("msg", ""), "type": e.get("type", "")}
+                    for e in exc.errors()]})
+        return route
+
+
+router = APIRouter(route_class=SafeErrorsRoute)
 
 
 def _now() -> datetime:
@@ -107,7 +131,7 @@ def remove_watch(symbol: str, user_id: str = Depends(current_user_id)) -> Respon
 # ---------------------------------------------------------------- time machine
 
 class TimeMachineBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     mode: Literal["intraday", "swing"] = "intraday"
     interval: Literal["1m", "5m"] = "5m"
@@ -222,8 +246,9 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
 
 @router.get("/desk/entry/{symbol}")
 def entry_status(symbol: str, interval: Literal["1m", "5m"] = "5m", setup: Literal["orb", "level"] = "orb",
-                 level: Optional[float] = None, or_minutes: Optional[int] = None,
-                 min_volume_x: Optional[float] = None,
+                 level: Optional[float] = Query(None, gt=0, allow_inf_nan=False),
+                 or_minutes: Optional[int] = None,
+                 min_volume_x: Optional[float] = Query(None, gt=0, le=100, allow_inf_nan=False),
                  user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     from apps.api.desk import entry as entry_mod
 
@@ -253,7 +278,7 @@ class PlanBody(BaseModel):
     from the entry timer (it must have triggered) — upstream's
     ``exit.py plan`` reading trader/entry.json."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     symbol: str
     interval: Literal["1m", "5m"] = "5m"
@@ -485,6 +510,15 @@ def size_plan(body: SizeBody, user_id: str = Depends(current_user_id)) -> Dict[s
 class RiskBody(BaseModel):
     orders: List[Dict[str, Any]] = Field(min_length=1, max_length=20)
 
+    @field_validator("orders")
+    @classmethod
+    def _finite(cls, orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for o in orders:
+            for k, v in o.items():
+                if isinstance(v, float) and not math.isfinite(v):
+                    raise ValueError(f"order {k} must be a finite number")
+        return orders
+
 
 @router.post("/desk/risk")
 def check_risk(body: RiskBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
@@ -605,6 +639,8 @@ def get_paper(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
 
 
 class CloseBody(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     price: Optional[float] = Field(None, gt=0)
 
 
@@ -680,7 +716,7 @@ def evaluate_alerts(user_id: str) -> List[Dict[str, Any]]:
 
 
 class AlertBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     type: Literal["above", "below", "target", "stop", "pct_move", "time", "opening_bell"]
     symbol: Optional[str] = None

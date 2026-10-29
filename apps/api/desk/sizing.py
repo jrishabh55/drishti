@@ -55,7 +55,7 @@ def size_trade(plan: Dict[str, Any], profile: DeskProfile, *, cash: Optional[flo
                         "is for its own day — make a new plan")
     entry_plan, stop, target = (float(plan.get(k) or 0) for k in ("entry", "stop", "target"))
     for name, v in (("entry", entry_plan), ("stop", stop), ("target", target)):
-        if v <= 0:
+        if not (v > 0 and math.isfinite(v)):  # NaN fails every comparison: test the good case
             raise SizeError(f"the plan needs a positive {name}")
     if sym in set(profile.blocked):
         raise SizeError(f"{sym} is on your blocked list")

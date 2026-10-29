@@ -6,6 +6,7 @@ and IST. Defaults are deliberately conservative and every one is editable on
 """
 from __future__ import annotations
 
+import math
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -22,7 +23,7 @@ def _clock(v: Optional[str]) -> Optional[str]:
 
 
 class DeskProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     capital: float = Field(100_000, gt=0, description="Account size in ₹ for sizing and caps")
     cash_buffer_pct: float = Field(10, ge=0, lt=100)
@@ -97,7 +98,9 @@ def load_profile(user_id: str, store=None) -> DeskProfile:
     try:
         return DeskProfile(**doc)
     except Exception:  # noqa: BLE001 — a profile saved by an older schema: keep what still parses
-        known = {k: v for k, v in doc.items() if k in DeskProfile.model_fields}
+        # A non-finite number (saved before they were refused) falls back to its default.
+        known = {k: v for k, v in doc.items() if k in DeskProfile.model_fields
+                 and not (isinstance(v, float) and not math.isfinite(v))}
         try:
             return DeskProfile(**known)
         except Exception:  # noqa: BLE001
