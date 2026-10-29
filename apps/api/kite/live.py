@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -55,6 +56,11 @@ class Hub:
     backfill_task: Optional[asyncio.Task] = None
     dropped: bool = False
     on_state: Optional[Callable[[str, Optional[str]], None]] = None
+    pump: Optional["PostbackPump"] = None
+
+    def __post_init__(self) -> None:
+        if self.pump is None:
+            self.pump = PostbackPump(self.user_id)
 
 
 _hubs: Dict[str, Hub] = {}
@@ -76,27 +82,86 @@ def _rows(candles: List[list]) -> List[Any]:
              float(c[4]), float(c[5] if len(c) > 5 else 0)) for c in candles]
 
 
+#: Waits before each retry of symbols whose history failed (429, timeout…).
+#: Bounded: after the last one the symbol stays DELAYED and says why.
+BACKFILL_RETRY_S = (5, 15, 30, 60, 60, 60)
+
+
 async def _backfill(hub: Hub, client: rest.KiteClient, table: Dict[str, Dict[str, Any]],
                     clock: Callable[[], datetime]) -> None:
     """Fill each symbol's session so far from the user's Kite minute candles
-    (per user, in memory). Until a symbol is filled it isn't served live."""
-    for sym in list(hub.symbols):
-        if sym in hub.backfilled:
-            continue
-        now = clock()
-        try:
-            candles = await asyncio.to_thread(client.historical, table[sym]["token"], "minute",
-                                              session_open(now), now.astimezone(IST))
-        except rest.KiteError as exc:
-            hub.backfill_errors[sym] = f"session history unavailable: {exc}"
-            if exc.token_error:
-                auth.mark_revoked(hub.user_id)
+    (per user, in memory). Until a symbol is filled it isn't served live.
+    Transient failures are retried with a bounded backoff; a token failure
+    stops at once (the session is gone)."""
+    for attempt in range(len(BACKFILL_RETRY_S) + 1):
+        if attempt:
+            await asyncio.sleep(BACKFILL_RETRY_S[attempt - 1])
+        for sym in list(hub.symbols):
+            if sym in hub.backfilled:
+                continue
+            now = clock()
+            try:
+                candles = await asyncio.to_thread(client.historical, table[sym]["token"],
+                                                  "minute", session_open(now),
+                                                  now.astimezone(IST))
+            except rest.KiteError as exc:
+                left = len(BACKFILL_RETRY_S) - attempt
+                hub.backfill_errors[sym] = (f"session history unavailable: {exc}"
+                                            + (f"; retrying ({left} more)" if left and
+                                               not exc.token_error else ""))
+                if exc.token_error:
+                    auth.mark_revoked(hub.user_id)
+                    return
+                continue
+            hub.builder.seed(sym, _rows(candles))
+            hub.backfilled.add(sym)
+            hub.backfill_errors.pop(sym, None)
+            await asyncio.sleep(BACKFILL_SPACING_S)
+        if all(s in hub.backfilled for s in hub.symbols):
+            return
+
+
+class PostbackPump:
+    """Runs the order-postback listeners (blocking: Kite REST and the user's
+    broker lock) on ONE worker thread per hub, never on the event loop.
+    Postbacks arriving while it runs coalesce into a single re-run: the
+    listener re-reads Kite's whole order book, so only "something changed"
+    matters, not each message."""
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        self._lock = threading.Lock()
+        self._running = False
+        self._pending: Optional[Dict[str, Any]] = None
+        self.runs = 0
+
+    def submit(self, data: Dict[str, Any]) -> None:
+        with self._lock:
+            if self._running:
+                self._pending = data
                 return
-            continue
-        hub.builder.seed(sym, _rows(candles))
-        hub.backfilled.add(sym)
-        hub.backfill_errors.pop(sym, None)
-        await asyncio.sleep(BACKFILL_SPACING_S)
+            self._running = True
+        threading.Thread(target=self._work, args=(data,), daemon=True,
+                         name=f"kite-postback-{self.user_id}").start()
+
+    def _work(self, data: Dict[str, Any]) -> None:
+        while True:
+            for fn in list(order_listeners):
+                try:
+                    fn(self.user_id, data)
+                except Exception:  # noqa: BLE001
+                    logger.exception("order postback listener failed")
+            with self._lock:
+                self.runs += 1
+                if self._pending is None:
+                    self._running = False
+                    return
+                data, self._pending = self._pending, None
+
+    @property
+    def busy(self) -> bool:
+        with self._lock:
+            return self._running
 
 
 def _schedule_backfill(hub: Hub, client, table, clock) -> None:
@@ -148,11 +213,7 @@ async def start(user_id: str, symbols: List[str], *, transport: Optional[rest.Tr
 
     def on_text(msg: Dict[str, Any]) -> None:
         if msg.get("type") == "order":
-            for fn in list(order_listeners):
-                try:
-                    fn(user_id, msg.get("data") or {})
-                except Exception:  # noqa: BLE001
-                    logger.exception("order postback listener failed")
+            hub.pump.submit(msg.get("data") or {})      # never blocks the event loop
         elif msg.get("type") == "error":
             hub.detail = str(msg.get("data"))
 

@@ -252,9 +252,16 @@ def _send_ticket(user_id: str, tk: Dict[str, Any], confirm_text: str, source: st
             if isinstance(exc, execution.ExecRefused):
                 raise _refused(exc) from exc
             raise _auth_http(exc) from exc
-        tk.update(status="sent", broker="kite", kite_trade_id=trade["id"], verdict=verdict,
-                  sent_at=now.astimezone(execution.NSE.tz).isoformat(),
-                  confirmed_at=now.isoformat())
+        if trade.get("rejected_by_broker"):
+            # Kite definitively refused it (4xx): nothing is live, and it isn't
+            # an entry today; the ticket says so instead of "sent".
+            tk.update(status="rejected", broker="kite", kite_trade_id=trade["id"],
+                      verdict=verdict, rejected_reason=trade["rejected_by_broker"],
+                      confirmed_at=now.isoformat())
+        else:
+            tk.update(status="sent", broker="kite", kite_trade_id=trade["id"], verdict=verdict,
+                      sent_at=now.astimezone(execution.NSE.tz).isoformat(),
+                      confirmed_at=now.isoformat())
         store.update_ticket(tk["id"], user_id, tk)
         return trade
 

@@ -35,6 +35,13 @@ class FakeKite:
         self.faults: List[tuple] = []
         #: called after each request is applied, to script fills between requests
         self.after: List[Any] = []
+        #: MIS quantity the user holds outside the engine (manual trades), per symbol
+        self.manual: Dict[str, int] = {}
+        self.positions_down = False
+        #: order types whose new orders Kite accepts but hides from GET /orders
+        #: until ``reveal()`` — a lagging order book
+        self.hidden_types: set = set()
+        self._hidden: set = set()
 
     # ------------------------------------------------------------ transport
     def __call__(self, method, url, params, data, headers):
@@ -90,6 +97,8 @@ class FakeKite:
                                     average_price=0)
             if data["order_type"] in ("SL-M", "SL"):
                 self.orders[oid]["status"] = "TRIGGER PENDING"
+            if data["order_type"] in self.hidden_types:
+                self._hidden.add(oid)
             return self._ok({"order_id": oid})
         if method == "PUT" and path.startswith("/orders/regular/"):
             o = self.orders[path.rsplit("/", 1)[1]]
@@ -109,9 +118,19 @@ class FakeKite:
             o["status"] = "CANCELLED"
             return self._ok({"order_id": o["order_id"]})
         if path == "/orders":
-            return self._ok(list(self.orders.values()))
+            return self._ok([o for k, o in self.orders.items() if k not in self._hidden])
         if path == "/portfolio/positions":
-            return self._ok({"net": [], "day": []})
+            if self.positions_down:
+                return 503, json.dumps({"status": "error", "message": "positions unavailable",
+                                        "error_type": "NetworkException"})
+            net: Dict[str, int] = dict(self.manual)
+            for o in self.orders.values():
+                q = int(o["filled_quantity"] or 0)
+                sign = 1 if o["transaction_type"] == "BUY" else -1
+                net[o["tradingsymbol"]] = net.get(o["tradingsymbol"], 0) + sign * q
+            rows = [{"tradingsymbol": k, "exchange": "NSE", "product": "MIS", "quantity": v}
+                    for k, v in net.items()]
+            return self._ok({"net": rows, "day": rows})
         return 404, json.dumps({"status": "error", "message": "no route", "error_type": "GeneralException"})
 
     @staticmethod
@@ -133,6 +152,11 @@ class FakeKite:
         avg = ((o["average_price"] or 0) * done + price * add) / total if total else 0
         o.update(filled_quantity=total, average_price=round(avg, 4),
                  status="COMPLETE" if total >= int(o["quantity"]) else "OPEN")
+
+    def reveal(self) -> None:
+        """The order book catches up: every hidden order becomes visible."""
+        self._hidden.clear()
+        self.hidden_types.clear()
 
     def sold(self) -> int:
         return sum(int(o["filled_quantity"]) for o in self.orders.values()

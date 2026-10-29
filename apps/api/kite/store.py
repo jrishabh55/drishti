@@ -74,6 +74,10 @@ class KiteStore:
         with self._conn() as c:
             c.executescript(_SCHEMA)
 
+    @property
+    def path(self) -> str:
+        return self._path
+
     @contextlib.contextmanager
     def _conn(self):
         conn = sqlite3.connect(self._path, timeout=15)

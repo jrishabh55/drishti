@@ -68,19 +68,23 @@ def test_entry_kite_received_but_answer_lost_is_adopted_and_protected(env, kind)
     assert sum(is_entry(d) for d in fake.placed()) == 1          # one BUY, ever
 
 
-def test_entry_never_received_waits_for_proof_and_never_resends(env):
+def test_entry_never_received_is_tracked_all_session_and_never_resent(env):
     client, desk, _, fake, clock = env
     _armed(client, fake, clock)
     fake.faults.append(("POST", ORDERS, is_entry, "down"))
     t = _send(client, _ticket(desk)).json()
-    assert t["status"] == "entry_sent" and t["legs"]["entry"]["status"] == "UNKNOWN"
-    clock["now"] = ist(10, 0, 40)
-    t = refresh(client, t)
-    assert t["status"] == "entry_sent"                  # absent, but not yet proof
+    # flagged at once, never "rejected" on a lost answer
+    assert t["status"] == "needs_attention" and t["attention_kind"] == "ambiguous"
+    assert t["legs"]["entry"]["status"] == "UNKNOWN"
     clock["now"] = ist(10, 1, 40)
     t = refresh(client, t)
+    t = refresh(client, t)
+    # absent for 100 s is NOT proof: still tracked, still flagged, nothing re-sent
+    assert t["status"] == "needs_attention" and t["legs"]["entry"]["status"] == "ABSENT"
+    clock["now"] = ist(15, 36)            # every DAY order has expired: now it is proof
+    t = refresh(client, t)
     assert t["status"] == "entry_rejected"
-    assert any("never received it" in e["what"] for e in t["events"])
+    assert any("not placed" in e["what"] for e in t["events"])
     assert fake.placed() == [] and not fake.orders           # nothing was ever re-sent
 
 
@@ -104,7 +108,7 @@ def test_stop_answer_lost_is_adopted_not_doubled_by_a_market_exit(env):
     never_short(fake)
 
 
-def test_stop_never_received_is_proved_missing_then_exits_only_what_is_held(env):
+def test_stop_never_acknowledged_flags_unprotected_at_once_and_never_market_exits(env):
     client, desk, _, fake, clock = env
     _armed(client, fake, clock)
     t = _send(client, _ticket(desk)).json()
@@ -112,14 +116,15 @@ def test_stop_never_received_is_proved_missing_then_exits_only_what_is_held(env)
     fake.faults.append(("POST", ORDERS, is_stop, "down"))
     clock["now"] = ist(10, 0, 20)
     t = refresh(client, t)
+    # immediately actionable: the user is told the position may be unprotected
+    assert t["status"] == "needs_attention" and "UNPROTECTED" in t["attention"]
     assert t["legs"]["stop"]["status"] == "UNKNOWN" and "target" not in t["legs"]
-    assert fake.sell_exposure() == 0                    # nothing more until Kite shows it
     clock["now"] = ist(10, 2, 0)
     t = refresh(client, t)
-    assert t["status"] == "exit_sent" and t["exit_reason"] == "protection_lost"
-    assert fake.sell_exposure() == 50                   # one market exit, for what is held
-    fake.fill("X", 799.0)
-    assert refresh(client, t)["status"] == "closed"
+    t = refresh(client, t)
+    # 100 s of absence: no speculative market exit, no second stop
+    assert t["legs"]["stop"]["status"] == "ABSENT" and fake.sell_exposure() == 0
+    assert t["status"] == "needs_attention"
     never_short(fake)
 
 
@@ -366,10 +371,13 @@ def test_backfill_failure_keeps_the_symbol_on_delayed_and_says_why(env, monkeypa
     fake = _hub_env(env)
     now = ist(10, 0, 1)
     monkeypatch.setattr(live, "_now", lambda: now)
+    monkeypatch.setattr(live, "BACKFILL_RETRY_S", (0, 0))   # bounded: 3 tries in all
     real = fake.__call__
+    tries = []
 
     def no_history(method, url, params, data, headers):
         if "/instruments/historical/" in url:
+            tries.append(url)
             return 429, '{"status":"error","message":"Too many requests","error_type":"NetworkException"}'
         return real(method, url, params, data, headers)
 
@@ -385,6 +393,33 @@ def test_backfill_failure_keeps_the_symbol_on_delayed_and_says_why(env, monkeypa
         await live.stop("user_a")
 
     asyncio.run(scenario())
+    assert len(tries) == 3                                   # retried, then gave up
+
+
+def test_backfill_retries_a_transient_failure_then_serves_live(env, monkeypatch):
+    fake = _hub_env(env)
+    now = ist(10, 0, 1)
+    monkeypatch.setattr(live, "_now", lambda: now)
+    monkeypatch.setattr(live, "BACKFILL_RETRY_S", (0, 0, 0))
+    real = fake.__call__
+    tries = []
+
+    def flaky_history(method, url, params, data, headers):
+        if "/instruments/historical/" in url:
+            tries.append(url)
+            if len(tries) == 1:
+                return 429, '{"status":"error","message":"Too many requests","error_type":"NetworkException"}'
+        return real(method, url, params, data, headers)
+
+    async def scenario():
+        hub = await live.start("user_a", ["SBIN"], transport=flaky_history, now=now,
+                               connect=lambda url: _ret(FakeSocket([])))
+        await hub.backfill_task
+        assert "SBIN" in hub.backfilled and not hub.backfill_errors
+        await live.stop("user_a")
+
+    asyncio.run(scenario())
+    assert len(tries) == 2
 
 
 async def _ret(x):

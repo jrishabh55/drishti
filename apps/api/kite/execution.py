@@ -28,16 +28,31 @@ Kite is the source of truth. Every decision is made from a fresh read of
 
 * the held quantity is entry fills minus all sell fills; the stop (SL-M)
   and target (LIMIT) are sized — and resized on partial fills — to it;
-* a request Kite didn't clearly answer leaves its leg UNKNOWN; the trade
-  waits until the order book shows the tag or provably doesn't, and the leg
-  is never re-sent blind;
+* a request Kite didn't clearly answer leaves its leg UNKNOWN, then ABSENT.
+  Absence is not proof: the trade is ``needs_attention`` at once, its tags
+  are looked up on every pass and adopted whenever they appear, and it
+  resumes by itself; nothing is re-sent or market-exited on a guess, and an
+  ambiguous trade never closes. Only once the session's DAY orders have
+  expired is an absent leg NOT_PLACED;
 * an exit first cancels every other working order and waits for Kite to
-  confirm each cancel, then sells only what is still held.
+  confirm each cancel; any exit, and the final close, also require Kite's
+  ``/portfolio/positions`` (net of what the account held before the trade)
+  to agree with the ledger, so the user's other positions are never sold.
 
-Residual broker risk this cannot remove: Kite has no OCO for MIS orders, so
-if the stop and target fill within the same instant before the engine can
-resize or cancel, the account can be briefly short; that is detected and
-raised as needs_attention, never "fixed" with another blind order.
+Guarantees this CANNOT give, and what happens instead:
+
+* No OCO for MIS at Kite: if the stop and target fill before the engine
+  sees the first fill (or between a partial target fill and the stop's
+  resize), the account is oversold. Detected from the order book (held < 0)
+  and raised as needs_attention; never "fixed" with another order.
+* A protective order Kite never acknowledges leaves the position
+  unprotected until Kite lists it or the user acts: the engine flags this
+  immediately ("may be UNPROTECTED") but will not place a second stop or a
+  market exit while the first may exist (either could oversell).
+* Positions can lag fills by moments; a mismatch is acted on only after
+  POSITIONS_SETTLE_S, so the engine may wait that long before an exit.
+* Execution runs in ONE process (``engine_lease``); a second worker or
+  replica refuses orders rather than racing the first.
 """
 from __future__ import annotations
 
@@ -76,6 +91,38 @@ def _today(now: datetime) -> str:
     return _local(now).date().isoformat()
 
 
+# ---------------------------------------------------------------- one process
+#
+# The per-user broker lock below is an in-process lock, so execution must run
+# in exactly ONE process. That is enforced, not assumed: the first process to
+# use the engine takes an exclusive flock on ``<kite db>.engine.lock`` and
+# keeps it for its lifetime; any other process (a second uvicorn worker, a
+# second replica on the same volume) refuses orders and skips reconciliation.
+
+_lease: Dict[str, Any] = {}
+_lease_guard = threading.Lock()
+
+
+def engine_lease() -> bool:
+    import fcntl
+
+    path = str(get_kite_store().path) + ".engine.lock"
+    with _lease_guard:
+        if path in _lease:
+            return _lease[path] is not None
+        fh = open(path, "a+")
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fh.close()
+            logger.error("Kite execution is owned by another process (%s); this one refuses "
+                         "orders", path)
+            _lease[path] = None
+            return False
+        _lease[path] = fh          # held for the process lifetime
+        return True
+
+
 def owner_binding(user_id: str) -> Optional[str]:
     """The Zerodha client id this app user may trade ("" if listed without
     one), or None when the user isn't an owner. ``AUTOTRADE_USER_IDS`` is
@@ -111,6 +158,9 @@ def gate_reasons(user_id: str, now: datetime, profile: DeskProfile, *,
     out = []
     if not orders_enabled():
         out.append(f"live orders are disabled on this server ({ORDERS_ENABLED_ENV} is not 1)")
+    if not engine_lease():
+        out.append("another server process owns Kite execution: live orders run in exactly "
+                   "one process (one uvicorn worker, one replica)")
     bound = owner_binding(user_id)
     if bound is None:
         out.append(f"order placement is owner-only: your user id is not in {OWNER_ENV}")
@@ -139,6 +189,21 @@ def gate_reasons(user_id: str, now: datetime, profile: DeskProfile, *,
     return out
 
 
+#: Guards every read-modify-write of a user's control doc. Held only for a
+#: SQLite round trip — never across the network — so the kill switch can
+#: record itself immediately, before it waits for the user's broker lock.
+_control_lock = threading.Lock()
+
+
+def _update_control(user_id: str, fn: Callable[[Dict[str, Any]], None]) -> Dict[str, Any]:
+    with _control_lock:
+        store = get_kite_store()
+        doc = store.get_control(user_id)
+        fn(doc)
+        store.put_control(user_id, doc)
+        return doc
+
+
 def arm(user_id: str, now: datetime, ack: str, profile: DeskProfile) -> Dict[str, Any]:
     want = f"ARM {_today(now)}"
     if ack.strip() != want:
@@ -146,18 +211,18 @@ def arm(user_id: str, now: datetime, ack: str, profile: DeskProfile) -> Dict[str
     reasons = gate_reasons(user_id, now, profile, for_arming=True)
     if reasons:
         raise ExecRefused(reasons)
-    store = get_kite_store()
-    doc = store.get_control(user_id)
-    doc.update(armed_on=_today(now), armed_at=now.isoformat())
-    store.put_control(user_id, doc)
+
+    def arm_doc(doc: Dict[str, Any]) -> None:
+        if doc.get("killed_on") == _today(now):     # a kill that landed meanwhile wins
+            raise ExecRefused(["the kill switch was used today; orders resume next trading day"])
+        doc.update(armed_on=_today(now), armed_at=now.isoformat())
+
+    _update_control(user_id, arm_doc)
     return control(user_id, now)
 
 
 def disarm(user_id: str, now: datetime) -> Dict[str, Any]:
-    store = get_kite_store()
-    doc = store.get_control(user_id)
-    doc.update(armed_on=None, armed_at=None)
-    store.put_control(user_id, doc)
+    _update_control(user_id, lambda d: d.update(armed_on=None, armed_at=None))
     return control(user_id, now)
 
 
@@ -166,15 +231,29 @@ def disarm(user_id: str, now: datetime) -> Dict[str, Any]:
 # Every order is a *leg* of a trade, tagged ``D<trade id><letter>``. Before a
 # leg is sent, its intent (status PENDING) is saved, so a crash or timeout
 # mid-request leaves a record. A request that fails without a definite answer
-# (network error, timeout, 5xx) leaves the leg UNKNOWN. Nothing more is done
-# for that trade until Kite's order book shows the tag (adopted) or has
-# provably not shown it for UNKNOWN_GRACE_S over at least two reads
-# (NOT_PLACED). A leg is never re-sent blind.
+# (network error, timeout, 5xx) leaves the leg UNKNOWN; if Kite's order book
+# still doesn't list it after ABSENT_AFTER_S (two reads) it is ABSENT.
+#
+# Absence is NOT proof: Kite's order book can lag exactly when requests time
+# out. So an UNKNOWN/ABSENT leg is never re-sent, never replaced by a market
+# exit, and its trade never closes; the trade is ``needs_attention`` at once
+# (the user sees it is possibly unprotected), the tag keeps being looked up on
+# every pass and adopted whenever it appears, and the trade resumes by itself
+# when nothing is ambiguous any more. Only after the session — when every DAY
+# order has expired at the exchange — does an ABSENT leg become NOT_PLACED.
 
-UNKNOWN, PENDING, NOT_PLACED = "UNKNOWN", "PENDING", "NOT_PLACED"
+UNKNOWN, PENDING, ABSENT, NOT_PLACED = "UNKNOWN", "PENDING", "ABSENT", "NOT_PLACED"
+AMBIGUOUS = (UNKNOWN, PENDING, ABSENT)
 TERMINAL = {"COMPLETE", "CANCELLED", "REJECTED", NOT_PLACED}
-UNKNOWN_GRACE_S = 90
+ABSENT_AFTER_S = 20
+#: DAY orders are dead at the exchange after this (IST): absence is now proof.
+ORDERS_EXPIRE_AT = "15:35"
 CANCEL_RETRY_S = 10
+#: Kite caps modifications per order (25); stay clear and hand over instead.
+MAX_MODIFIES = 20
+#: A position mismatch this long (fills reach positions a moment after the
+#: order book) is a real discrepancy.
+POSITIONS_SETTLE_S = 30
 SELL_LEGS = ("stop", "target", "exit", "exit2", "exit3")
 EXIT_LEGS = ("exit", "exit2", "exit3")
 
@@ -200,7 +279,7 @@ def definite(exc: rest.KiteError) -> bool:
 
 
 def _unknown(rec: Optional[Dict[str, Any]]) -> bool:
-    return bool(rec) and rec.get("status") in (UNKNOWN, PENDING)
+    return bool(rec) and rec.get("status") in AMBIGUOUS
 
 
 def _terminal(rec: Optional[Dict[str, Any]]) -> bool:
@@ -217,6 +296,10 @@ def _filled(rec: Optional[Dict[str, Any]]) -> int:
 
 class Ambiguous(RuntimeError):
     """Kite may or may not have the order; the leg is UNKNOWN."""
+
+
+class ModifyCap(RuntimeError):
+    """A leg is near Kite's modification limit: a human resizes it."""
 
 
 def _place(client: rest.KiteClient, t: Dict[str, Any], leg: str, orders: Dict[str, Dict],
@@ -254,9 +337,18 @@ def _place(client: rest.KiteClient, t: Dict[str, Any], leg: str, orders: Dict[st
     return rec
 
 
+def orders_expired(t: Dict[str, Any], now: datetime) -> bool:
+    """Every DAY order of this trade's session has expired at the exchange."""
+    local = _local(now)
+    return local.date().isoformat() > t["trade_date"] or \
+        local.hour * 60 + local.minute >= parse_clock(ORDERS_EXPIRE_AT)
+
+
 def _sync(t: Dict[str, Any], orders: Dict[str, Dict], now: datetime) -> None:
-    """Fold Kite's order book into the legs: adopt tagged orders we never
-    heard back about, and declare a leg NOT_PLACED only on proof."""
+    """Fold Kite's order book into the legs. Any of our tags that appears —
+    however late, whatever the leg's state — is adopted. A leg Kite never
+    answered for becomes ABSENT (still tracked), and NOT_PLACED only once the
+    session's DAY orders have expired."""
     legs = t.setdefault("legs", {})
     for leg in LEGS:
         tag = tag_for(t["id"], leg)
@@ -266,14 +358,21 @@ def _sync(t: Dict[str, Any], orders: Dict[str, Dict], now: datetime) -> None:
             if _unknown(rec):
                 rec["absent_reads"] = int(rec.get("absent_reads") or 0) + 1
                 age = (now - datetime.fromisoformat(rec["intent_at"])).total_seconds()
-                if age >= UNKNOWN_GRACE_S and rec["absent_reads"] >= 2:
+                if orders_expired(t, now):
                     rec.update(status=NOT_PLACED, filled=0)
-                    _ev(t, now, f"{leg} order is not in Kite's order book {int(age)} s after "
-                                f"it was sent: Kite never received it")
+                    _ev(t, now, f"{leg} order never appeared in Kite's order book and the "
+                                "session's orders have expired: it was not placed")
+                elif rec["status"] != ABSENT and age >= ABSENT_AFTER_S and rec["absent_reads"] >= 2:
+                    rec["status"] = ABSENT
+                    _ev(t, now, f"{leg} order still isn't in Kite's order book {int(age)} s "
+                                "after it was sent; it may yet appear, so nothing is re-sent")
             continue
-        if rec is None or rec.get("order_id") is None:
+        if rec is None or rec.get("order_id") is None or rec.get("status") == NOT_PLACED:
             _ev(t, now, f"adopted {leg} order {o['order_id']} found at Kite")
             rec = legs[leg] = dict(rec or {}, tag=tag)
+        if rec.get("resize_to") is not None and int(o.get("quantity") or 0) == rec["resize_to"]:
+            rec.pop("resize_to", None)
+            rec.pop("resize_at", None)
         rec.update(order_id=o["order_id"], status=o.get("status"),
                    qty=int(o.get("quantity") or rec.get("qty") or 0),
                    filled=int(o.get("filled_quantity") or 0),
@@ -300,11 +399,24 @@ def _cancel(client: rest.KiteClient, t: Dict[str, Any], leg: str, now: datetime)
 
 def _modify_qty(client: rest.KiteClient, t: Dict[str, Any], leg: str, total: int,
                 now: datetime) -> bool:
+    """Resize a working leg to ``total``. Never PUTs the same size twice in a
+    row (an unconfirmed resize is not repeated until Kite shows a different
+    size), and hands over before Kite's per-order modification cap."""
     rec = t["legs"][leg]
+    asked = rec.get("resize_at")
+    if rec.get("resize_to") == total and asked and \
+            (now - datetime.fromisoformat(asked)).total_seconds() < CANCEL_RETRY_S:
+        return False                      # already asked for exactly this; wait for Kite
+    if int(rec.get("modifies") or 0) >= MAX_MODIFIES:
+        raise ModifyCap(f"{leg} has been resized {rec['modifies']} times (Kite allows 25 "
+                        f"changes per order); set its quantity to {total} in the Kite app")
+    rec["modifies"] = int(rec.get("modifies") or 0) + 1
+    rec["resize_to"], rec["resize_at"] = total, now.isoformat()
     try:
         client.modify_order(rec["order_id"], quantity=total)
     except rest.KiteError as exc:
         if definite(exc):
+            rec.pop("resize_to", None)
             raise
         _ev(t, now, f"resize {leg} unconfirmed ({exc}); re-reading Kite")
         return True
@@ -396,6 +508,15 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
             raise ExecRefused([f"{doc['symbol']} already has a live trade in flight"])
         client = client_factory()
         verify_ticks(client, doc, now, user_id)     # Kite's own tick, before anything is sent
+        try:
+            # What the account already holds in this symbol (manual trades):
+            # every later exit/close is checked against Kite's position net of it.
+            doc["baseline_qty"] = _net_position(client, doc["symbol"])
+        except rest.KiteError as exc:
+            if exc.token_error:
+                auth.mark_revoked(user_id)
+            raise ExecRefused([f"couldn't read your positions from Kite ({exc}); nothing was "
+                               "sent"]) from exc
         t = store.create_trade(user_id, doc)
         params = {"transaction_type": "BUY", "quantity": t["qty"]}
         if t["order_type"] == "LIMIT":
@@ -412,8 +533,11 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
                 _sync(t, _by_tag(client), now)
             except rest.KiteError:
                 pass
+            if _unknown(t["legs"].get("entry")):
+                _attention(t, now, _ambiguity(t, ["entry"], 0), "ambiguous")
         except rest.KiteError as exc:
             t["status"] = "entry_rejected"
+            t["rejected_by_broker"] = str(exc)
             _ev(t, now, f"Kite refused the entry: {exc}")
             if exc.token_error:
                 auth.mark_revoked(user_id)
@@ -455,32 +579,92 @@ def verify_ticks(client: rest.KiteClient, doc: Dict[str, Any], now: datetime,
     doc["tick_size"] = tick
 
 
-def _attention(t: Dict[str, Any], now: datetime, why: str) -> None:
-    t["status"], t["attention"] = "needs_attention", why
+def _attention(t: Dict[str, Any], now: datetime, why: str, kind: str = "manual") -> None:
+    """``kind="ambiguous"`` clears itself once Kite shows every leg; any other
+    kind waits for a human."""
+    t["status"], t["attention"], t["attention_kind"] = "needs_attention", why, kind
     _ev(t, now, why)
+
+
+def _ambiguity(t: Dict[str, Any], amb: List[str], held: int) -> str:
+    absent = [k for k in amb if t["legs"][k]["status"] == ABSENT]
+    tags = ", ".join(t["legs"][k]["tag"] for k in amb)
+    sells = [k for k in amb if k != "entry"]
+    if absent:
+        head = (f"Kite hasn't listed the {', '.join(absent)} order (tag {tags}) since it was "
+                "sent. It may still appear, so nothing is re-sent automatically.")
+    else:
+        head = (f"Kite didn't confirm the {', '.join(amb)} order (tag {tags}); checking its "
+                "order book.")
+    if held > 0 and any(k in ("stop", "target") for k in sells):
+        tail = (f" {held} {t['symbol']} may be UNPROTECTED: if the order isn't in the Kite app, "
+                "place a stop or exit there now.")
+    elif held > 0:
+        tail = f" {held} {t['symbol']} is still held: check the Kite app."
+    else:
+        tail = " If you see this order in the Kite app, the engine will adopt it."
+    return head + tail
+
+
+def _net_position(client: rest.KiteClient, symbol: str) -> int:
+    """Net NSE MIS quantity Kite reports for ``symbol`` (all of the user's)."""
+    for p in (client.positions() or {}).get("net") or []:
+        if p.get("tradingsymbol") == symbol and p.get("exchange", "NSE") == "NSE" \
+                and p.get("product", "MIS") == "MIS":
+            return int(p.get("quantity") or 0)
+    return 0
+
+
+def _positions_agree(t: Dict[str, Any], client: rest.KiteClient, now: datetime,
+                     expected: int, *, at_least: bool) -> Optional[bool]:
+    """Kite's own position for this trade (net minus what was there before the
+    trade) vs the ledger. True: agrees. False: has disagreed for
+    POSITIONS_SETTLE_S (a real discrepancy). None: wait (unread, or settling)."""
+    try:
+        ours = _net_position(client, t["symbol"]) - int(t.get("baseline_qty") or 0)
+    except rest.KiteError as exc:
+        _ev(t, now, f"couldn't read positions from Kite ({exc}); waiting")
+        return None
+    ok = ours >= expected if at_least else ours == expected
+    if ok:
+        t.pop("pos_mismatch_since", None)
+        return True
+    t["broker_qty"] = ours
+    since = t.setdefault("pos_mismatch_since", now.isoformat())
+    if (now - datetime.fromisoformat(since)).total_seconds() < POSITIONS_SETTLE_S:
+        _ev(t, now, f"Kite's position ({ours}) doesn't match the trade ({expected}) yet; "
+                    "re-checking")
+        return None
+    return False
 
 
 def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
           now: datetime, profile: DeskProfile, save: Callable[[], None]) -> bool:
     """One decision from a fresh order book. Returns True when it sent
     anything (place / cancel / modify), so the caller re-reads Kite and
-    steps again. Never acts while any leg's broker state is unknown."""
+    steps again. Never acts while any leg's broker state is ambiguous."""
     if t["status"] not in OPEN_STATES:
         return False
     _sync(t, orders, now)
-    if t["status"] == "needs_attention":
-        return False               # a human decides; we only keep the legs current
     legs = t["legs"]
-    pending = [k for k, r in legs.items() if _unknown(r)]
-    if pending:
-        _ev(t, now, f"waiting for Kite to show the {', '.join(pending)} order before acting")
-        return False
     e = legs.get("entry")
     entry_filled = _filled(e)
     held = entry_filled - sum(_filled(legs.get(x)) for x in SELL_LEGS)
     t["filled_qty"], t["held_qty"] = entry_filled, held
     if e and e.get("avg"):
         t["entry_avg"] = e["avg"]
+    amb = [k for k, r in legs.items() if _unknown(r)]
+    if amb:
+        # Possibly unprotected or possibly double-selling: say so now, keep
+        # looking the tags up every pass, act on nothing until Kite shows them.
+        _attention(t, now, _ambiguity(t, amb, held), "ambiguous")
+        return False
+    if t["status"] == "needs_attention":
+        if t.get("attention_kind") != "ambiguous":
+            return False           # a human decides; the legs are still kept current
+        t["attention"] = t["attention_kind"] = None
+        t["status"] = "exit_sent" if t.get("exit_reason") else "entry_sent"
+        _ev(t, now, "Kite now shows every order; resuming")
     if held < 0:
         _attention(t, now, f"more was sold than bought (stop/target OCO race): you may be "
                            f"short {-held} {t['symbol']}; check positions in Kite")
@@ -546,6 +730,9 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
     except Ambiguous as exc:
         _ev(t, now, f"{exc}: checking Kite's order book before doing anything else")
         return True
+    except ModifyCap as exc:
+        _attention(t, now, str(exc))
+        return acted
     except rest.KiteError as exc:
         _ev(t, now, f"protection failed: {exc}")
         t["protection_failed"] = True
@@ -573,7 +760,8 @@ def _too_late(t: Dict[str, Any], held: int) -> str:
 
 def _step_exit(t, client, orders, now, profile, save, held, can_place=True) -> bool:
     """Two-phase exit: cancel every other working order and wait for Kite to
-    confirm each cancel, then sell only what is still held."""
+    confirm each cancel, then — only if Kite's own position agrees — sell
+    what the trade still holds. Never sells the user's other positions."""
     legs = t["legs"]
     t["status"] = "exit_sent"
     acted = False
@@ -600,6 +788,14 @@ def _step_exit(t, client, orders, now, profile, save, held, can_place=True) -> b
             _attention(t, now, f"three exit orders did not flatten {t['symbol']}; close {held} "
                                "in the Kite app")
             return acted
+        agree = _positions_agree(t, client, now, held, at_least=True)
+        if agree is None:
+            return acted
+        if agree is False:
+            _attention(t, now, f"Kite shows {t.get('broker_qty')} {t['symbol']} for this trade "
+                               f"but the trade holds {held}: not selling (it could sell your "
+                               "other positions or go short); check the Kite app")
+            return acted
         try:
             _place(client, t, nxt, orders, now=now, save=save, transaction_type="SELL",
                    order_type="MARKET", quantity=held, market_protection=-1)
@@ -610,7 +806,15 @@ def _step_exit(t, client, orders, now, profile, save, held, can_place=True) -> b
             _attention(t, now, f"exit order failed ({exc}); close {held} {t['symbol']} in the "
                                "Kite app")
         return True
-    # flat, and nothing is working any more
+    # flat by the ledger, nothing working: Kite's position must agree before closing
+    agree = _positions_agree(t, client, now, 0, at_least=False)
+    if agree is None:
+        return acted
+    if agree is False:
+        _attention(t, now, f"the trade's orders are all done but Kite shows "
+                           f"{t.get('broker_qty')} {t['symbol']} still open for it; check the "
+                           "Kite app")
+        return acted
     if t["filled_qty"] == 0:
         t["status"] = "closed"
         _ev(t, now, f"closed ({t['exit_reason']}); nothing was filled")
@@ -626,8 +830,13 @@ def _drive(user_id: str, trades: List[Dict[str, Any]], client: rest.KiteClient,
     store = get_kite_store()
     for _ in range(passes):
         orders = _by_tag(client)
+        killed = control(user_id, now)["killed"]
         acted = False
         for t in trades:
+            if killed and _killable(t):
+                # the kill flag is authoritative, whoever wrote it and whenever
+                t["exit_reason"] = "kill"
+                _ev(t, now, "kill switch")
             try:
                 acted = _step(t, client, orders, now, profile,
                               lambda t=t: store.update_trade(user_id, t)) or acted
@@ -640,8 +849,15 @@ def _drive(user_id: str, trades: List[Dict[str, Any]], client: rest.KiteClient,
             return
 
 
+def _killable(t: Dict[str, Any]) -> bool:
+    return t["status"] in OPEN_STATES and not t.get("exit_reason") and (
+        t["status"] != "needs_attention" or t.get("attention_kind") == "ambiguous")
+
+
 def reconcile_user(user_id: str, now: datetime, profile: DeskProfile,
                    transport: Optional[rest.Transport] = None) -> List[Dict[str, Any]]:
+    if not engine_lease():
+        return []                  # another process owns execution
     with user_lock(user_id):
         store = get_kite_store()
         open_trades = store.list_trades(user_id, open_only=True)
@@ -674,7 +890,7 @@ def exit_trade(user_id: str, tid: str, now: datetime, profile: DeskProfile,
             held = _filled(legs.get("entry")) - sum(_filled(legs.get(x)) for x in SELL_LEGS)
             if any(_unknown(r) for r in legs.values()) or held <= 0:
                 raise ExecRefused([f"broker state needs a human: {t.get('attention')}"])
-            t["status"], t["attention"] = "exit_sent", None
+            t["status"], t["attention"], t["attention_kind"] = "exit_sent", None, None
         if not t.get("exit_reason"):
             t["exit_reason"] = "manual"
         store.update_trade(user_id, t)
@@ -686,24 +902,28 @@ def kill(user_id: str, now: datetime, transport: Optional[rest.Transport] = None
          ) -> Dict[str, Any]:
     """Disarm, stop strategies, then exit every engine position through the
     same two-phase exit. If Kite can't be reached the trades stay in exit
-    and the loop finishes them as soon as it can; nothing is assumed."""
+    and the loop finishes them as soon as it can; nothing is assumed.
+
+    The kill is recorded FIRST, without waiting for the user's broker lock
+    (which a slow order send or strategy scan may hold): from that moment
+    every send re-checks the gates under the lock and refuses, strategy scans
+    stop acting, and any reconcile pass — in whichever request — exits."""
+    _update_control(user_id, lambda d: d.update(
+        armed_on=None, armed_at=None, killed_on=_today(now), killed_at=now.isoformat()))
     with user_lock(user_id):
         store = get_kite_store()
-        doc = store.get_control(user_id)
-        doc.update(armed_on=None, armed_at=None, killed_on=_today(now), killed_at=now.isoformat())
-        store.put_control(user_id, doc)
         for s in store.list_strategies(user_id):
             if s.get("mode") != "off":
                 store.put_strategy(user_id, dict(s, mode="off", paused_reason="kill switch"))
         trades = store.list_trades(user_id, open_only=True)
         for t in trades:
-            if t["status"] != "needs_attention" and not t.get("exit_reason"):
+            if _killable(t):
                 t["exit_reason"] = "kill"
             _ev(t, now, "kill switch")
             store.update_trade(user_id, t)
         summary = {"trades": len(trades), "exits_sent": 0, "pending": 0, "needs_attention": 0,
                    "error": None}
-        if trades:
+        if trades and engine_lease():
             try:
                 _drive(user_id, trades, auth.client_for(user_id, now, transport), now,
                        load_profile_safe(user_id))
@@ -716,8 +936,7 @@ def kill(user_id: str, now: datetime, transport: Optional[rest.Transport] = None
             summary["exits_sent"] += any(x in legs for x in EXIT_LEGS)
             summary["pending"] += t["status"] == "exit_sent" and not any(x in legs for x in EXIT_LEGS)
             summary["needs_attention"] += t["status"] == "needs_attention"
-        doc["kill_summary"] = summary
-        store.put_control(user_id, doc)
+        _update_control(user_id, lambda d: d.update(kill_summary=summary))
         return dict(control(user_id, now), summary=summary)
 
 
@@ -732,29 +951,14 @@ def performance(user_id: str) -> Dict[str, Any]:
     return paper.stats(closed)
 
 
-_pending_tasks: set = set()
-
-
 def on_postback(user_id: str, data: Dict[str, Any]) -> None:
-    """Order-update text message from the user's ticker: reconcile soon.
+    """Order-update text message from the user's ticker: reconcile now.
 
-    Only our tagged orders matter; the polling loop is the fallback. The
-    reconcile runs off the event loop and takes the user's lock, so it can
-    never interleave with the loop, a refresh, an exit or the kill switch."""
+    Blocking (Kite REST + the user's lock): live.py runs it on a per-hub
+    worker thread, coalesced, never on the event loop. Only our tagged orders
+    matter; the polling loop is the fallback."""
     if not str(data.get("tag") or "").startswith("D"):
         return
-    import asyncio
-
     from apps.api.desk.profile import load_profile
 
-    def run():
-        reconcile_user(user_id, datetime.now(NSE.tz), load_profile(user_id))
-
-    try:
-        task = asyncio.get_running_loop().create_task(asyncio.to_thread(run))
-    except RuntimeError:
-        run()
-        return
-    _pending_tasks.add(task)
-    task.add_done_callback(_pending_tasks.discard)
-
+    reconcile_user(user_id, datetime.now(NSE.tz), load_profile(user_id))
