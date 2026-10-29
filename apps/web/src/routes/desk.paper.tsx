@@ -89,7 +89,7 @@ function PaperPage() {
                 <Fragment key={t.id}>
                   <TableRow className="cursor-pointer" onClick={() => setOpen(open === t.id ? null : t.id)}>
                     <TableCell className="es-mono">{t.trade_date}</TableCell>
-                    <TableCell className="font-medium">{t.symbol}<div className="text-xs text-[var(--text-4)]">{t.interval ?? '5m'} bars</div></TableCell>
+                    <TableCell className="font-medium">{t.symbol}{t.data_warning && <div role="status" className="text-xs text-[var(--warn)]">{t.data_warning}</div>}<div className="text-xs text-[var(--text-4)]">{t.interval ?? '5m'} bars</div></TableCell>
                     <TableCell className="es-mono">{t.qty}</TableCell>
                     <TableCell><span className={`es-pill ${t.status === 'open' ? 'run' : t.status === 'closed' ? '' : 'info'}`}>{t.status}</span></TableCell>
                     <TableCell className="es-mono">{t.entry_fill ? `${inr(t.entry_fill.price)} ${t.entry_fill.time}` : '—'}</TableCell>

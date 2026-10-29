@@ -276,6 +276,7 @@ export interface Ticket {
 
 export interface PaperTrade {
   interval?: '1m' | '5m'
+  data_warning?: string
   id: string
   ticket_id: string
   symbol: string

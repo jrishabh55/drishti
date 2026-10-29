@@ -207,3 +207,88 @@ def test_advance_refuses_bars_of_another_interval():
         paper.advance(trade, [], ist(10, 0), None, spec=NSE)
     bars, _ = session_bars(_minute_rows(), SPEC1, ist(9, 45))
     assert bars and bars[16]["start"] == "09:31"
+
+
+def test_manual_close_cannot_be_overwritten_by_background_refresh(env, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+    _, desk, _, _, clock = env
+    clock['now'] = ist(10, 0)
+    tk = _ticket(desk)
+    store = get_desk_store()
+    profile = desk_routes.load_profile('user_a')
+    trade = paper.new_trade(tk['order'], ticket_id=tk['id'], placed_at=clock['now'], profile=profile)
+    trade.update(status='open', entry_fill={'time':'09:45', 'price':800.0})
+    trade = store.create_paper('user_a', trade)
+    entered, release, closing = threading.Event(), threading.Event(), threading.Event()
+    def advance(t, *args, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return dict(t, refreshed=True)
+    monkeypatch.setattr(paper, 'advance', advance)
+    monkeypatch.setattr(bars_source, 'get_session_rows', lambda *a, **k:
+                        bars_source.BarSeries('SBIN', '5m', [], 'delayed:yahoo', None))
+    def close():
+        closing.set()
+        return desk_routes.close_paper(trade['id'], desk_routes.CloseBody(price=802), 'user_a')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        refresh = pool.submit(desk_routes.refresh_paper, 'user_a')
+        assert entered.wait(1)
+        manual = pool.submit(close)
+        assert closing.wait(1)
+        try:
+            manual.result(timeout=.15)
+        except FutureTimeout:
+            pass  # correctly waits for refresh's write lock
+        finally:
+            release.set()
+        refresh.result(timeout=2)
+        assert manual.result(timeout=2)['status'] == 'closed'
+    final = store.get_paper(trade['id'], 'user_a')
+    assert final['status'] == 'closed' and final['exit_fill']['price'] == 802
+
+
+def test_missed_one_minute_eod_recovers_the_trade_day_from_deep_history(env, monkeypatch):
+    from datetime import timedelta
+    from tests.desk_utils import session_rows
+    _, desk, _, _, clock = env
+    clock['now'] = ist(9, 30, 30)
+    tk = _ticket(desk, interval='1m', entry_time='09:31')
+    desk.post(f"/api/desk/tickets/{tk['id']}/confirm", json={'mode':'paper'})
+    rows = _minute_rows() + session_rows(DAY, [798.0] * 375, spec=SPEC1)[30:]
+    calls = []
+    def history(uid, sym, interval, **kw):
+        calls.append((sym, interval))
+        return bars_source.BarSeries(sym, interval, rows, 'delayed:yahoo', rows[-1][0].isoformat())
+    monkeypatch.setattr(bars_source, 'get_history_rows', history)
+    monkeypatch.setattr(bars_source, 'get_session_rows', lambda uid,sym,interval:
+                        bars_source.BarSeries(sym,interval,[], 'delayed:yahoo',None))
+    clock['now'] = ist(10, 0) + timedelta(days=1)
+    out = desk_routes.refresh_paper('user_a')[0]
+    assert calls == [('SBIN','1m')]
+    assert out['status'] == 'closed' and out['exit_fill']['time'] == '09:33'
+    assert out['exit_fill']['price'] == 796
+
+
+def test_background_sweep_includes_pending_confirmed_paper_trades(env):
+    _, desk, _, _, clock = env
+    clock['now'] = ist(10, 0)
+    tk = _ticket(desk)
+    desk.post(f"/api/desk/tickets/{tk['id']}/confirm", json={'mode':'paper'})
+    active = get_desk_store().open_paper_all_users()
+    assert len(active) == 1 and active[0]['status'] == 'pending'
+
+
+def test_missed_eod_without_history_stays_unresolved_and_explains_why(env, monkeypatch):
+    from datetime import timedelta
+    from apps.api.desk.bars import BarsError
+    _, desk, _, _, clock = env
+    clock['now'] = ist(10, 0)
+    tk = _ticket(desk)
+    desk.post(f"/api/desk/tickets/{tk['id']}/confirm", json={'mode':'paper'})
+    clock['now'] += timedelta(days=1)
+    def unavailable(*a, **kw):
+        raise BarsError('source unavailable')
+    monkeypatch.setattr(bars_source, 'get_history_rows', unavailable)
+    out = desk_routes.refresh_paper('user_a')[0]
+    assert out['status'] == 'pending' and out['entry_fill'] is None and out['exit_fill'] is None
+    assert 'unavailable' in out['data_warning'] and 'manual close' in out['data_warning']

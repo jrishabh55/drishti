@@ -631,15 +631,38 @@ def refresh_paper(user_id: str) -> List[Dict[str, Any]]:
     for t in store.list_paper(user_id, limit=1000):
         if t["status"] in ("pending", "open"):
             interval = paper.interval_of(t)
+            recovery_error = None
+            past_day = t["trade_date"] < now.astimezone(NSE_SPEC.tz).date().isoformat()
             try:
-                series = bars_source.get_session_rows(user_id, t["symbol"], interval)
+                # The compact current-session cache can prune a missed trade
+                # day, especially at 1m. Recover it from real deep history.
+                series = (bars_source.get_history_rows(user_id, t["symbol"], interval, now=now)
+                          if past_day else bars_source.get_session_rows(user_id, t["symbol"], interval))
                 bars, _ = bars_source.session_bars_for(series, now)
+                if past_day:
+                    from apps.api.desk.market.session import parse_clock
+                    spec = paper.spec_of(t)
+                    if t.get("entry_fill"):
+                        first_min = parse_clock(t["entry_fill"]["time"]) + spec.bar_min
+                    else:
+                        placed = datetime.fromisoformat(t["placed_at"]).astimezone(spec.tz)
+                        minute = placed.hour * 60 + placed.minute + bool(placed.second or placed.microsecond)
+                        first_min = spec.open_min + ((minute-spec.open_min+spec.bar_min-1)//spec.bar_min)*spec.bar_min
+                    last_min = parse_clock(t["flat_by"]) - spec.bar_min
+                    present = {spec.bar_start_min(b["slot"]) for b in bars if b["date"] == t["trade_date"]}
+                    if any(m not in present for m in range(first_min, last_min+1, spec.bar_min)):
+                        recovery_error = f"Historical {interval} bars for {t['trade_date']} are incomplete through {t['flat_by']}; settlement needs complete history or a manual close."
             except bars_mod.BarsError:
                 bars = []
+                if past_day:
+                    recovery_error = f"Historical {interval} bars for {t['trade_date']} are unavailable; settlement needs history or a manual close."
             with _user_lock(user_id):
                 cur = store.get_paper(t["id"], user_id) or t
                 if cur["status"] in ("pending", "open"):
-                    nt = paper.advance(cur, bars, now, prof)
+                    nt = (dict(cur, data_warning=recovery_error) if recovery_error
+                          else paper.advance(cur, bars, now, prof))
+                    if not recovery_error:
+                        nt.pop("data_warning", None)
                     if nt != cur:
                         store.update_paper(t["id"], user_id, nt)
                 t = store.get_paper(t["id"], user_id) or cur
@@ -673,11 +696,19 @@ def close_paper(pid: str, body: CloseBody, user_id: str = Depends(current_user_i
     if t is None:
         raise HTTPException(status_code=404, detail="paper trade not found")
     price = body.price or _fresh_price(user_id, t["symbol"])
-    if price is None and t["status"] == "open":
-        raise _unprocessable(ValueError("no recent price for this symbol: give a price"))
-    nt = paper.close_now(t, price or 0, _now(), load_profile(user_id))
-    store.update_paper(pid, user_id, nt)
-    return store.get_paper(pid, user_id) or nt
+    with _user_lock(user_id):
+        # A refresh may have advanced or closed this trade while the quote was
+        # fetched. Share its write lock and use the current row, never a stale copy.
+        t = store.get_paper(pid, user_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail="paper trade not found")
+        if t["status"] in ("closed", "cancelled"):
+            return t
+        if price is None and t["status"] == "open":
+            raise _unprocessable(ValueError("no recent price for this symbol: give a price"))
+        nt = paper.close_now(t, price or 0, _now(), load_profile(user_id))
+        store.update_paper(pid, user_id, nt)
+        return store.get_paper(pid, user_id) or nt
 
 
 @router.get("/desk/config")

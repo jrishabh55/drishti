@@ -95,6 +95,11 @@ def advance(trade: Dict[str, Any], bars: Sequence[Bar], now: datetime, profile,
     for b in day_bars:
         start_min = spec.bar_start_min(b["slot"])
         close_min = _close_min(b, spec)
+        if t["status"] == "open" and t.get("entry_fill") and \
+                start_min <= parse_clock(t["entry_fill"]["time"]):
+            # A later refresh starts with an open row: never replay prices
+            # before its fill, or award a target on the already-processed fill bar.
+            continue
         if t["status"] == "pending":
             if start_min < placed_min:
                 continue

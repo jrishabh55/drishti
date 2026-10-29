@@ -281,3 +281,12 @@ def test_ticket_reblocks_on_confirm_when_window_closes(api):
     r = client.post(f"/api/desk/tickets/{tk['id']}/confirm", json={"mode": "broker"})
     assert r.status_code == 409 and "window" in str(r.json()["detail"])
     assert client.get("/api/desk/tickets").json()[0]["status"] == "blocked"
+
+
+def test_open_paper_refresh_ignores_prices_before_its_entry_bar():
+    t = trade()
+    t.update(status='open', entry_fill={'time':'09:45', 'price':800.0})
+    lows = [799.5] * 12
+    lows[1] = 790.0  # a stop before the order existed
+    out = paper.advance(t, bars_of([800.0]*12, lows=lows), ist(10, 15), DeskProfile())
+    assert out['status'] == 'open' and out['exit_fill'] is None

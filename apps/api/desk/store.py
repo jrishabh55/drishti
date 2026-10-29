@@ -340,7 +340,7 @@ class DeskStore:
     def open_paper_all_users(self) -> List[Dict[str, Any]]:
         """Every open paper trade across users — for the background updater."""
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM paper_trades WHERE status='open'").fetchall()
+            rows = c.execute("SELECT * FROM paper_trades WHERE status IN ('pending','open')").fetchall()
         return [_row_doc(r) for r in rows]
 
     # -- alerts -----------------------------------------------------------
