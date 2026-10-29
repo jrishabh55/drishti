@@ -193,6 +193,11 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
     scan_store = get_scanner_store()
     inst = scan_store.instruments_df()
     symbols, notes = orb.pick_universe(inst, prof.universe)
+    if prof.universe == "fno":
+        from apps.api.scanner.universe import fo_membership_source
+        membership = fo_membership_source(scan_store)
+        if membership and membership.get("stale"):
+            notes.append(f"F&O universe uses the last available list from {membership.get('as_of', 'unknown date')}; the live list is unavailable.")
     try:
         day = _date.fromisoformat(date) if date else None
     except ValueError as exc:

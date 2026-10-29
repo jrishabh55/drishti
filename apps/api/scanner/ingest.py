@@ -146,6 +146,7 @@ async def ingest_loop() -> None:
     needs_daily = store.latest_ts("1d") is None
     pending = {tf for tf in TF_FETCH if store.latest_ts(tf) is None}
     now0 = datetime.now(IST)
+    fo_done_for = now0.date().isoformat()
     closed_day = now0.date()
     if now0.hour < EOD_HOUR_IST:
         closed_day -= timedelta(days=1)
@@ -184,6 +185,10 @@ async def ingest_loop() -> None:
             now = datetime.now(IST)
             loop_t = asyncio.get_running_loop().time()
             today = now.date().isoformat()
+            if fo_done_for != today:
+                await asyncio.to_thread(apply_fo_membership, store)
+                fo_done_for = today
+                await asyncio.to_thread(_publish_and_warm)
             final_due = is_trading_day(now.date()) and now.hour >= 16 and final_done_for != today
             if (is_market_open(now) or intraday_stale(store.latest_ts("5m"), now) or final_due) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
                 last_intraday = loop_t

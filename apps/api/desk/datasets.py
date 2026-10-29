@@ -534,25 +534,31 @@ def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     """Circuit band (+ upper/lower from the last daily close), series and the
     F&O ban flag for each symbol. Missing data -> the symbol is absent, and
     the risk check reports "skipped" for it."""
+    def current(name: str) -> Dict[str, Any]:
+        got = fetch(name)
+        if got.get("stale"):
+            raise FeedUnavailable("source_error", f"{name}: stale data cannot clear a current risk check")
+        return got
+
     out: Dict[str, Dict[str, Any]] = {}
     try:
-        bands = parse_price_bands(fetch("nse.price_bands")["text"])
+        bands = parse_price_bands(current("nse.price_bands")["text"])
     except (FeedUnavailable, ValueError) as exc:
         logger.info("price bands unavailable: %s", exc)
         bands = {}
     try:
-        ban = set(parse_fo_ban(fetch("nse.fo_ban")["text"]))
+        ban = set(parse_fo_ban(current("nse.fo_ban")["text"]))
     except (FeedUnavailable, ValueError) as exc:
         logger.info("F&O ban list unavailable: %s", exc)
         ban = None
     surv: Dict[str, Dict[str, str]] = {}
     try:
-        surv = parse_surveillance(fetch("nse.asm")["text"], fetch("nse.gsm")["text"])
+        surv = parse_surveillance(current("nse.asm")["text"], current("nse.gsm")["text"])
     except (FeedUnavailable, ValueError) as exc:
         logger.info("ASM/GSM lists unavailable: %s", exc)
     results: Dict[str, List[str]] = {}
     try:
-        results = parse_results_calendar(fetch("nse.event_calendar")["text"])
+        results = parse_results_calendar(current("nse.event_calendar")["text"])
     except (FeedUnavailable, ValueError) as exc:
         logger.info("results calendar unavailable: %s", exc)
     if not bands and ban is None and not surv and not results:

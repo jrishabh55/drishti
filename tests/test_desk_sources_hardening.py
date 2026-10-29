@@ -192,3 +192,13 @@ def test_fo_membership_falls_back_to_bundled_snapshot_and_says_so(store, tmp_pat
     src = fo_membership_source(scan)
     assert src["source"] == "bundled" and src["as_of"] == FO_SNAPSHOT_DATE and src["stale"]
     assert "HTML" in src["reason"]
+
+
+def test_risk_facts_never_use_stale_copies_as_current_clearance(store, monkeypatch):
+    def stale(name, *args, **kwargs):
+        if name == "nse.fo_ban":
+            return {"text": (SRC / "nse_fo_ban.csv").read_text(), "stale": True}
+        raise datasets.FeedUnavailable("source_error", "source unavailable")
+    monkeypatch.setattr(datasets, "fetch", stale)
+    # Yesterday's ban list remains useful research, but cannot clear today's risk check.
+    assert datasets.nse_facts(["RELIANCE"]) == {}
