@@ -128,7 +128,7 @@ export interface ModelOption {
 }
 
 export interface ConfigResponse {
-  analysts: { key: string; label: string }[]
+  analysts: { value: string; label: string }[]
   research_depths: { value: number; label: string }[]
   providers: ProviderOption[]
   models_by_provider: Record<string, ModelOption[]>

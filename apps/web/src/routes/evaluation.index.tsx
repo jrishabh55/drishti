@@ -17,7 +17,7 @@ export const Route = createFileRoute('/evaluation/')({
 
 const iso = (d: Date) => d.toISOString().slice(0, 10)
 
-function BatchesPage() {
+export function BatchesPage() {
   const navigate = useNavigate()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [rows, setRows] = useState<BatchRow[]>([])
@@ -129,9 +129,9 @@ function BatchesPage() {
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
             {config?.analysts.map((a) => (
-              <label key={a.key} className="flex items-center gap-1.5">
-                <input type="checkbox" checked={analysts.includes(a.key)} onChange={(e) =>
-                  setAnalysts(e.target.checked ? [...analysts, a.key] : analysts.filter((x) => x !== a.key))} />
+              <label key={a.value} className="flex items-center gap-1.5">
+                <input type="checkbox" checked={analysts.includes(a.value)} onChange={(e) =>
+                  setAnalysts(e.target.checked ? [...analysts, a.value] : analysts.filter((x) => x !== a.value))} />
                 {a.label}
               </label>
             ))}
