@@ -52,7 +52,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(kite_routes, "_transport", fake)
     client, user = desk_client(kite_routes.router)
     desk_client_, _ = desk_client(desk_routes.router, user)
-    desk_client_.put("/api/desk/profile", json={"max_loss_per_trade_inr": 200})
+    desk_client_.put("/api/desk/profile", json={"max_loss_per_trade_inr": 200, "flat_by": "15:05"})
     yield client, desk_client_, user, fake, clock
     bars_source.clear_live_providers_for_tests()
     live.clear_for_tests()
@@ -211,7 +211,7 @@ def test_flat_by_exits_protected_position(env):
     t = _send(client, _ticket(desk)).json()
     fake.fill("E", 800.0)
     client.post(f"/api/kite/trades/{t['id']}/refresh")
-    clock["now"] = ist(15, 15)
+    clock["now"] = ist(15, 5)
     t = client.post(f"/api/kite/trades/{t['id']}/refresh").json()
     assert t["status"] == "exit_sent" and t["exit_reason"] == "flat_by"
     assert fake.by_tag_suffix("S")["status"] == "CANCELLED"
@@ -246,7 +246,8 @@ def test_kill_exits_disarms_stops_strategies_and_blocks_rest_of_day(env):
 
 def test_live_losses_count_toward_max_daily_loss(env):
     client, desk, _, fake, clock = env
-    desk.put("/api/desk/profile", json={"max_loss_per_trade_inr": 200, "max_daily_loss_inr": 300})
+    desk.put("/api/desk/profile", json={"max_loss_per_trade_inr": 200, "max_daily_loss_inr": 300,
+                                              "flat_by": "15:05"})
     _armed(client, fake, clock)
     get_kite_store().create_trade("user_a", {"status": "closed", "trade_date": "2026-10-28",
                                              "symbol": "RELIANCE", "pnl_net": -150.0})

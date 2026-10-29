@@ -197,6 +197,10 @@ function ConnectionPage() {
                 <Check ok={st.session === 'active'} text="Logged in to Zerodha today" />
                 <Check ok={st.control.armed} text="Armed for today" />
                 <Check ok={!st.control.killed} text="Kill switch not used today" />
+                {st.cas?.active && (
+                  <Check ok={st.cas.profile_ok}
+                    text={`Flat-by at or before ${st.cas.latest_flat_by} for ${st.cas.applies_to}: NSE's closing auction runs until ${st.cas.until} (continuous trading ends ${st.cas.continuous_end}, Zerodha squares off MIS at ${st.cas.broker_square_off})${st.cas.profile_ok ? '' : ' — action required: change flat-by in Desk settings'}`} />
+                )}
               </ul>
               <p className="text-xs text-[var(--text-4)]">
                 Kite only accepts API orders from a static IP registered in your Kite developer

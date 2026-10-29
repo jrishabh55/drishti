@@ -51,7 +51,7 @@ from apps.api.desk import paper
 from apps.api.desk.market import ticks
 from apps.api.desk.market.session import NSE, parse_clock
 from apps.api.desk.profile import DeskProfile
-from apps.api.kite import auth, rest
+from apps.api.kite import auth, rest, sessions
 from apps.api.kite.store import OPEN_STATES, get_kite_store
 
 logger = logging.getLogger(__name__)
@@ -384,16 +384,19 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
     ``client_factory()`` is only called after every gate passed, so a
     refused user never touches the network."""
     with user_lock(user_id):
+        doc = new_trade(user_id, ticket, now, profile, source=source)
         reasons = gate_reasons(user_id, now, profile) or daily_loss_reasons(
             user_id, now, profile, (ticket["order"].get("plan") or {}).get("max_loss") or 0)
+        reasons += sessions.timing_reasons(doc["symbol"], now, doc["flat_by"],
+                                           profile.broker_square_off)
         if reasons:
             raise ExecRefused(reasons)
         store = get_kite_store()
-        if any(t["symbol"] == ticket["order"]["symbol"] for t in
-               store.list_trades(user_id, open_only=True)):
-            raise ExecRefused([f"{ticket['order']['symbol']} already has a live trade in flight"])
-        t = store.create_trade(user_id, new_trade(user_id, ticket, now, profile, source=source))
+        if any(t["symbol"] == doc["symbol"] for t in store.list_trades(user_id, open_only=True)):
+            raise ExecRefused([f"{doc['symbol']} already has a live trade in flight"])
         client = client_factory()
+        verify_ticks(client, doc, now, user_id)     # Kite's own tick, before anything is sent
+        t = store.create_trade(user_id, doc)
         params = {"transaction_type": "BUY", "quantity": t["qty"]}
         if t["order_type"] == "LIMIT":
             params.update(order_type="LIMIT", price=t["limit"])
@@ -416,6 +419,40 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
                 auth.mark_revoked(user_id)
         store.update_trade(user_id, t)
         return t
+
+
+def _on_tick(price: float, tick: float) -> bool:
+    from decimal import Decimal
+
+    p, k = Decimal(str(price)), Decimal(str(tick))
+    return k > 0 and p % k == 0
+
+
+def verify_ticks(client: rest.KiteClient, doc: Dict[str, Any], now: datetime,
+                 user_id: str) -> None:
+    """Every price we would send must sit on the tick Kite's instrument master
+    assigns this symbol — not our price-band estimate. Refuses (nothing sent)
+    rather than nudging a price the user approved."""
+    try:
+        table = rest.nse_instruments(client, _local(now).date())
+    except rest.KiteError as exc:
+        if exc.token_error:
+            auth.mark_revoked(user_id)
+        raise ExecRefused([f"couldn't read Kite's instrument list to check the tick size "
+                           f"({exc}); nothing was sent"]) from exc
+    inst = table.get(doc["symbol"])
+    if inst is None:
+        raise ExecRefused([f"{doc['symbol']} isn't an NSE equity on Kite; nothing was sent"])
+    tick = float(inst["tick_size"])
+    prices = [("stop", doc["stop"]), ("target", doc["target"])]
+    if doc["order_type"] == "LIMIT":
+        prices.insert(0, ("limit price", doc["limit"]))
+    bad = [f"{label} ₹{px} isn't a multiple of {doc['symbol']}'s tick ₹{tick:g} on Kite"
+           for label, px in prices if px is None or not _on_tick(float(px), tick)]
+    if bad:
+        raise ExecRefused(bad + ["re-plan the trade so its prices sit on the broker's tick; "
+                                 "nothing was sent"])
+    doc["tick_size"] = tick
 
 
 def _attention(t: Dict[str, Any], now: datetime, why: str) -> None:
@@ -449,13 +486,20 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
                            f"short {-held} {t['symbol']}; check positions in Kite")
         return False
     local = _local(now)
-    past_flat = local.hour * 60 + local.minute >= parse_clock(t["flat_by"])
+    now_min = local.hour * 60 + local.minute
+    cut = sessions.cutoffs(t["symbol"], local.date(), t["flat_by"], profile.broker_square_off)
+    past_flat = now_min >= cut.flatten_by
+    can_place = now_min < cut.no_orders_after
     acted = False
 
     if not t.get("exit_reason"):
         stop, target = legs.get("stop"), legs.get("target")
         if past_flat and (held > 0 or _working(e)):
             t["exit_reason"] = "flat_by"
+            if cut.flatten_by < parse_clock(t["flat_by"]):
+                _ev(t, now, f"flattening at {_hhmm(cut.flatten_by)}, before Zerodha's "
+                            f"{cut.cas.broker_square_off if cut.cas else profile.broker_square_off}"
+                            f" square-off" + (" (closing auction session)" if cut.cas else ""))
         elif _filled(stop):
             t["exit_reason"] = "stop"
         elif target and target.get("status") == "COMPLETE":
@@ -466,7 +510,7 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
             _ev(t, now, "a protective order was cancelled or rejected at the broker")
 
     if t.get("exit_reason"):
-        return _step_exit(t, client, orders, now, profile, save, held)
+        return _step_exit(t, client, orders, now, profile, save, held, can_place)
 
     # ------------------------------------------------ entry timeout
     if _working(e) and (now - datetime.fromisoformat(t["sent_at"])).total_seconds() > ENTRY_TIMEOUT_S:
@@ -483,6 +527,9 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
         return acted
 
     # ------------------------------------------------ protection sized to what is held
+    if not can_place and any(legs.get(x) is None for x in ("stop", "target")):
+        _attention(t, now, _too_late(t, held))
+        return acted
     try:
         for leg, params in (("stop", dict(order_type="SL-M", trigger_price=t["stop"],
                                           market_protection=-1)),
@@ -514,7 +561,17 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
     return acted
 
 
-def _step_exit(t, client, orders, now, profile, save, held) -> bool:
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _too_late(t: Dict[str, Any], held: int) -> str:
+    return (f"past the broker's MIS square-off for {t['symbol']}: no order is sent now (the "
+            f"closing auction accepts no stop-loss orders). {held} may still be held — check "
+            f"positions in the Kite app")
+
+
+def _step_exit(t, client, orders, now, profile, save, held, can_place=True) -> bool:
     """Two-phase exit: cancel every other working order and wait for Kite to
     confirm each cancel, then sell only what is still held."""
     legs = t["legs"]
@@ -534,6 +591,9 @@ def _step_exit(t, client, orders, now, profile, save, held) -> bool:
         if exits and legs[exits[-1]].get("status") == "REJECTED":
             _attention(t, now, f"exit rejected ({legs[exits[-1]].get('message')}); close {held} "
                                f"{t['symbol']} in the Kite app")
+            return acted
+        if not can_place:
+            _attention(t, now, _too_late(t, held))
             return acted
         nxt = next((x for x in EXIT_LEGS if x not in legs), None)
         if nxt is None:

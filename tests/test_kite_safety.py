@@ -188,7 +188,7 @@ def test_flat_by_after_the_stop_already_filled_sends_no_exit(env):
 
     kite_routes._transport = racing
     try:
-        clock["now"] = ist(15, 16)
+        clock["now"] = ist(15, 6)
         t = refresh(client, t)
     finally:
         kite_routes._transport = fake
@@ -203,12 +203,12 @@ def test_exit_waits_for_cancel_acknowledgements(env):
     client, _, _, fake, clock = env
     t = protected(env)
     fake.fail_cancel = True
-    clock["now"] = ist(15, 16)
+    clock["now"] = ist(15, 6)
     t = refresh(client, t)
     assert t["status"] == "exit_sent" and "waiting for Kite to confirm" in t["events"][-1]["what"]
     assert not [o for o in fake.orders.values() if o["order_type"] == "MARKET"]
     fake.fail_cancel = False
-    clock["now"] = ist(15, 16, 30)
+    clock["now"] = ist(15, 6, 30)
     t = refresh(client, t)
     assert fake.by_tag_suffix("X")["quantity"] == 50 and fake.sell_exposure() == 50
     fake.fill("X", 801.0)

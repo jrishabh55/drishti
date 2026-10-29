@@ -88,6 +88,11 @@ export interface KiteStatus {
   redirect_path: string
   live: LiveStatus
   control: KiteControl
+  /** NSE closing auction session timing for F&O stocks, when one is in force */
+  cas?: { active: false } | {
+    active: true; until: string; continuous_end: string; broker_square_off: string
+    latest_flat_by: string; profile_ok: boolean; applies_to: string
+  }
   orders: { server_enabled: boolean; owner: boolean; owner_client_id?: string | null; blocked_by: string[] }
   note?: string | null
 }

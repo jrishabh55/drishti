@@ -33,7 +33,7 @@ from apps.api.auth import current_user_id
 from apps.api.desk import bars as bars_mod
 from apps.api.desk.profile import load_profile
 from apps.api.desk.store import get_desk_store
-from apps.api.kite import auth, execution, live, rest, strategies
+from apps.api.kite import auth, execution, live, rest, sessions, strategies
 from apps.api.kite.store import get_kite_store
 
 router = APIRouter()
@@ -78,6 +78,7 @@ def status(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
         "redirect_path": REDIRECT_PATH,
         "live": live.freshness(user_id, now),
         "control": execution.control(user_id, now),
+        "cas": sessions.status(now, prof.flat_by),
         "orders": {"server_enabled": execution.orders_enabled(),
                    "owner": execution.is_owner(user_id),
                    "owner_client_id": execution.owner_binding(user_id) or None,
