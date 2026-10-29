@@ -113,8 +113,9 @@ def test_nse_facts_feed_the_risk_check(store, tmp_path, monkeypatch):
     avail = {"bands": True, "asm": False, "gsm": False, "fo_ban": True, "results": False}
     assert facts["YESBANK"] == {"series": "EQ", "band_pct": 5.0, "band_upper": 21.0,
                                 "band_lower": 19.0, "fo_ban": False, "_available": avail}
-    assert facts["RBLBANK"] == {"fo_ban": True, "_available": avail}
-    assert facts["ZZZ"] == {"fo_ban": False, "_available": avail}   # every symbol says what was read
+    missing_band = {**avail, "bands": False}
+    assert facts["RBLBANK"] == {"fo_ban": True, "_available": missing_band}
+    assert facts["ZZZ"] == {"fo_ban": False, "_available": missing_band}  # no row cannot clear its band check
     feeds.register_facts_provider(datasets.nse_facts)
     assert feeds.market_facts(["YESBANK"])["YESBANK"]["band_pct"] == 5.0
 
