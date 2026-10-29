@@ -19,6 +19,8 @@ from tradingagents.graph.setup import GraphSetup
 from tradingagents.graph.conditional_logic import ConditionalLogic
 from tradingagents.graph.propagation import Propagator
 from tradingagents.llm_clients import create_tier_client, tier_provider
+from tradingagents.llm_clients.openai_client import (
+    OPENAI_COMPATIBLE_PROVIDERS, OpenAIClient, _PASSTHROUGH_KWARGS, _supports_reasoning_effort)
 from tradingagents.memory import TradingMemoryLog
 from tradingagents.memory.reflection import Reflector
 from tradingagents.dataflows.config import set_config
@@ -115,6 +117,36 @@ def uses_server_credit(request) -> bool:
     return bool(providers_for(request) & {'openai', *ADMIN_PROVIDERS})
 
 
+class PersonalKeyOpenAIClient(OpenAIClient):
+    """A registry provider on the user's own key.
+
+    The core client only accepts a key once the provider's server env var is
+    set, so a personal key alone would fail. Same registry spec (endpoint,
+    chat class quirks), same passthrough rules and model checks; the key comes
+    only from this client's kwargs and the endpoint only from the registry.
+    """
+    def get_llm(self):
+        self.warn_if_unknown_model()
+        spec = OPENAI_COMPATIBLE_PROVIDERS[self.provider]
+        if not self.kwargs.get('api_key'):
+            raise ValueError(f'No personal API key for provider {self.provider!r}')
+        llm_kwargs = {'model': self.model, 'base_url': spec.base_url}
+        for key in _PASSTHROUGH_KWARGS:
+            if key not in self.kwargs:
+                continue
+            if key == 'reasoning_effort' and not _supports_reasoning_effort(self.model):
+                continue
+            llm_kwargs[key] = self.kwargs[key]
+        return spec.chat_class(**llm_kwargs)
+
+
+def _tier_client(config: dict, tier: str, **kwargs):
+    client = create_tier_client(config, tier, **kwargs)
+    if isinstance(client, OpenAIClient) and client.provider in EXTRA_PROVIDERS:
+        return PersonalKeyOpenAIClient(client.model, client.base_url, provider=client.provider, **client.kwargs)
+    return client
+
+
 class PerTierGraph(TradingAgentsGraph):
     """Core workflow, using one credential resolver for each selected tier."""
     def __init__(self, selected_analysts=('market', 'social', 'news', 'fundamentals'),
@@ -131,7 +163,7 @@ class PerTierGraph(TradingAgentsGraph):
             provider = tier_provider(self.config, tier)
             private = overrides[provider] if provider in overrides else provider_kwargs(user_id, provider)
             kwargs = {**self._get_provider_kwargs(), **private}
-            setattr(self, f'{tier}_thinking_llm', create_tier_client(self.config, tier, **kwargs).get_llm())
+            setattr(self, f'{tier}_thinking_llm', _tier_client(self.config, tier, **kwargs).get_llm())
         self.memory_log = TradingMemoryLog(self.config)
         self.conditional_logic = ConditionalLogic(
             max_debate_rounds=self.config['max_debate_rounds'],

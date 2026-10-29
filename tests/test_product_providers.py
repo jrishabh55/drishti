@@ -72,3 +72,34 @@ def test_tier_selection_changes_cache_identity_without_secret_fields():
     b = RunRequest(**base, deep_think_provider='anthropic')
     assert request_hash(a) != request_hash(b)
     assert request_hash(a) == request_hash(RunRequest(**base, deep_think_provider='openai'))
+
+
+@pytest.mark.parametrize('provider', sorted(providers.EXTRA_PROVIDERS))
+def test_every_extra_provider_builds_on_a_personal_key_alone(store, monkeypatch, tmp_path, provider):
+    """Unmocked SDK construction (no network): no server env key for any provider."""
+    from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
+    from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS
+    from apps.api.schemas import RunRequest
+    from apps.api.integrations.graph_factory import _build_config
+
+    for env in filter(None, PROVIDER_API_KEY_ENV.values()):
+        monkeypatch.delenv(env, raising=False)
+    providers.save_key('alice', provider, f'alice-{provider}-key')
+    providers.save_key('bob', provider, f'bob-{provider}-key')
+    req = RunRequest(ticker='RELIANCE.NS', analysis_date='2026-10-01', analysts=['market'],
+                     llm_provider=provider, shallow_thinker='model-q', deep_thinker='model-d')
+    cfg = _build_config(req, user_id='alice')
+    cfg.update(data_cache_dir=str(tmp_path / 'c'), results_dir=str(tmp_path / 'r'))
+    extra, token = providers.configure_tiers(req, cfg, 'alice')
+    graph = providers.PerTierGraph(['market'], config=cfg, **extra)
+    for tier, model in (('quick', 'model-q'), ('deep', 'model-d')):
+        llm = getattr(graph, f'{tier}_thinking_llm')
+        assert llm.model == model
+        if provider == 'anthropic':
+            assert llm.anthropic_api_key.get_secret_value() == 'alice-anthropic-key'
+        else:
+            spec = OPENAI_COMPATIBLE_PROVIDERS[provider]
+            assert type(llm) is spec.chat_class
+            assert llm.openai_api_base == spec.base_url
+            assert llm.openai_api_key.get_secret_value() == f'alice-{provider}-key'
+    assert token is None and f'alice-{provider}-key' not in json.dumps(graph.config, default=str)
