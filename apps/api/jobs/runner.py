@@ -82,6 +82,34 @@ def _prior_state(detail) -> Optional[Dict[str, Any]]:
     return {k: v for k in keys if (v := getattr(detail, k, None)) is not None}
 
 
+# What the core's record_decision reads from a final state. A resumed run's
+# translator starts from the stored report sections only, so the identity and
+# any debate field the replay lacks are filled here rather than KeyError-ing.
+_RECORD_TEXT_KEYS = (
+    "market_report", "sentiment_report", "news_report", "fundamentals_report",
+    "investment_plan", "trader_investment_plan", "final_trade_decision",
+)
+_RECORD_DEBATE_KEYS = {
+    "investment_debate_state": ("bull_history", "bear_history", "history", "current_response"),
+    "risk_debate_state": ("aggressive_history", "conservative_history", "neutral_history", "history"),
+}
+
+
+def recordable_state(final_state: Dict[str, Any], request: RunRequest) -> Dict[str, Any]:
+    """The structured final state ``TradingAgentsGraph.record_decision`` needs."""
+    state = {k: v for k, v in final_state.items() if k != "messages"}
+    state["company_of_interest"] = state.get("company_of_interest") or request.ticker
+    state["trade_date"] = state.get("trade_date") or request.analysis_date
+    for key in _RECORD_TEXT_KEYS:
+        state[key] = state.get(key) or ""
+    for key, fields in _RECORD_DEBATE_KEYS.items():
+        debate = dict(state.get(key) or {})
+        for field in fields:
+            debate[field] = debate.get(field) or ""
+        state[key] = debate
+    return state
+
+
 class _CancelToken:
     """Cooperative cancellation flag, polled between graph chunks."""
 
@@ -193,6 +221,14 @@ class JobRunner:
             # graph. Close it on EVERY exit path — error, cancel, early return —
             # or the handle leaks for the process lifetime.
             self._close_checkpointer(run_id)
+            # A finished run frees its ticker: submit the user's next queued
+            # backtest-batch cell, if any.
+            try:
+                from apps.api.evaluation.batches import pump
+
+                pump(user_id, self.store)
+            except Exception:  # noqa: BLE001 — batch upkeep never affects this run
+                logger.exception("Batch pump failed after run %s", run_id)
 
     def _run(
         self,
@@ -326,6 +362,13 @@ class JobRunner:
         # One last stats snapshot, then the terminal event.
         self._maybe_publish_stats(run_id, translator, stats_handler, force=True)
 
+        # Into the user's memory log BEFORE marking completed: a crash between
+        # the two leaves the run interrupted, and its resume records again,
+        # which the core's log ignores (one entry per ticker and date). Recorded
+        # the other way round, that crash would lose the decision for good.
+        if decision_text:
+            self._record_decision(run_id, graph, request, final_state)
+
         # Persist the final-state snapshot + decision before emitting run.final.
         self.store.mark_completed(
             run_id,
@@ -345,6 +388,20 @@ class JobRunner:
         self._publish(run_id, translator.emit_run_final(decision_text=decision_text, rating=rating))
 
     # ---------- helpers ----------
+
+    def _record_decision(self, run_id: str, graph, request: RunRequest,
+                         final_state: Dict[str, Any]) -> None:
+        """The core's end-of-run step (propagate() and the CLI both end here).
+
+        A failure is logged and swallowed: the report the user paid for is
+        already complete and must not be lost to a memory-log write.
+        """
+        try:
+            graph.record_decision(
+                request.ticker, request.analysis_date, recordable_state(final_state, request)
+            )
+        except Exception:
+            logger.exception("Recording the decision failed for run %s", run_id)
 
     def _publish(self, run_id: str, env) -> None:
         self.store.append_event(

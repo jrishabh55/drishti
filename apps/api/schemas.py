@@ -67,6 +67,9 @@ def canonicalize_request(request: "RunRequest") -> Dict[str, Any]:
         if value and value.lower() != request.llm_provider.lower():
             canonical[key] = value.lower()
     canonical["_app_engine"] = engine_identity()
+    # Only an opted-in run carries a book, so every pre-existing hash is unchanged.
+    if raw.get("portfolio_snapshot") is not None:
+        canonical["portfolio_snapshot"] = raw["portfolio_snapshot"]
     return canonical
 
 
@@ -98,6 +101,12 @@ class RunRequest(BaseModel):
     anthropic_effort: Optional[str] = Field(None, description="high | minimal — only for Anthropic thinking-mode.")
     output_language: str = Field("English", description="Free-text language label injected into agent prompts.")
     checkpoint_enabled: bool = Field(True, description="If true, LangGraph SqliteSaver enables resume on crash.")
+    use_paper_portfolio: bool = Field(False, description="Give the decision agents this user's paper book.")
+    # Server-owned: create_run overwrites whatever a client sends, then the
+    # frozen value rides config_json so a resume sees the same book.
+    portfolio_snapshot: Optional[Dict[str, Any]] = Field(
+        None, description="Server-set snapshot of the paper book at submit time; client values are ignored."
+    )
 
 
 class RunSummary(BaseModel):

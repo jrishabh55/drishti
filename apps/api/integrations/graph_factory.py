@@ -175,7 +175,11 @@ def build_graph_for_request(
         graph._relay_token = relay_token
     # Use the core's date-aware state construction, including historical identity.
     asset_type = detect_asset_type(request.ticker).value
-    init_state = graph.create_run_state(request.ticker, request.analysis_date, asset_type)
+    from apps.api.evaluation.portfolio import context_for
+
+    init_state = graph.create_run_state(
+        request.ticker, request.analysis_date, asset_type, portfolio=context_for(request)
+    )
     stream_args = graph.propagator.get_graph_args(callbacks=[stats_handler])
 
     # Checkpointing: upstream wires this inside propagate(), which the runner
@@ -237,4 +241,7 @@ def _build_config(request: RunRequest, *, user_id: Optional[str] = None) -> Dict
         config["memory_log_path"] = str(
             Path(base_dir) / _safe_user_dir(user_id) / "trading_memory.md"
         )
+        # record_decision also writes a full state log under results_dir; keep
+        # it beside the user's memory log rather than in a shared directory.
+        config["results_dir"] = str(Path(base_dir) / _safe_user_dir(user_id) / "results")
     return config
