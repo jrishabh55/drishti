@@ -64,7 +64,7 @@ _BYPASS_PATHS = ("/", "/health", "/api/helper/download", "/api/helper/version")
 # per-run internal token — it has no Clerk JWT. The shim authenticates that
 # token itself (routes/relay.py), which is stronger than the shared bearer:
 # the token is minted per run and revoked when the run ends.
-_BYPASS_PREFIXES = ("/static", "/internal/relay/")
+_BYPASS_PREFIXES = ("/static", "/internal/relay/", "/api/messaging/hooks/")
 
 
 def _bypass(path: str) -> bool:

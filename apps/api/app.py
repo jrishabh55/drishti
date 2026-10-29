@@ -81,6 +81,10 @@ def create_app() -> FastAPI:
             source_probe_task = asyncio.create_task(asyncio.to_thread(
                 probe_sources, ["--rounds", "1", "--label", "dokploy"]), name="desk-source-probe")
         evaluation_task = None
+        messaging_task = None
+        if os.environ.get('MESSAGING_LOOP', '1') != '0':
+            from apps.api.messaging.service import messaging_loop
+            messaging_task = asyncio.create_task(messaging_loop(), name='messaging-loop')
         if os.environ.get("EVALUATION_LOOP", "1") != "0":
             from apps.api.evaluation.loop import evaluation_loop
             evaluation_task = asyncio.create_task(evaluation_loop(), name="evaluation-loop")
@@ -112,7 +116,9 @@ def create_app() -> FastAPI:
                 evaluation_task.cancel()
             if source_probe_task is not None:
                 source_probe_task.cancel()
-            await asyncio.gather(*(task for task in (scanner_task, desk_task, kite_task, evaluation_task, source_probe_task)
+            if messaging_task is not None:
+                messaging_task.cancel()
+            await asyncio.gather(*(task for task in (scanner_task, desk_task, kite_task, evaluation_task, source_probe_task, messaging_task)
                                    if task is not None), return_exceptions=True)
             from apps.api.kite import live
             await live.shutdown()
@@ -164,6 +170,8 @@ def create_app() -> FastAPI:
     app.include_router(provider_keys_router, prefix="/api")
     from apps.api.routes.notifications import router as notifications_router
     app.include_router(notifications_router, prefix="/api")
+    from apps.api.routes.messaging import router as messaging_router
+    app.include_router(messaging_router, prefix='/api')
     from apps.api.routes.watch_rules import router as watch_rules_router
     app.include_router(watch_rules_router, prefix="/api")
     from apps.api.routes.evaluation import router as evaluation_router
