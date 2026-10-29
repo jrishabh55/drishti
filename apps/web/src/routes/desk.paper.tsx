@@ -71,7 +71,7 @@ function PaperPage() {
           </div>
         )}
         <p className="text-xs text-[var(--text-4)]">
-          Fills are bar-based on delayed 5-minute bars: entries only on bars that start after you
+          Fills use each plan's 1-minute or 5-minute bars from the available feed: entries only on bars that start after you
           confirm, the stop is checked before the target in every bar, a gap through the stop
           fills at the open (worse than planned), and anything open is closed at your flat-by.
         </p>
@@ -89,7 +89,7 @@ function PaperPage() {
                 <Fragment key={t.id}>
                   <TableRow className="cursor-pointer" onClick={() => setOpen(open === t.id ? null : t.id)}>
                     <TableCell className="es-mono">{t.trade_date}</TableCell>
-                    <TableCell className="font-medium">{t.symbol}</TableCell>
+                    <TableCell className="font-medium">{t.symbol}<div className="text-xs text-[var(--text-4)]">{t.interval ?? '5m'} bars</div></TableCell>
                     <TableCell className="es-mono">{t.qty}</TableCell>
                     <TableCell><span className={`es-pill ${t.status === 'open' ? 'run' : t.status === 'closed' ? '' : 'info'}`}>{t.status}</span></TableCell>
                     <TableCell className="es-mono">{t.entry_fill ? `${inr(t.entry_fill.price)} ${t.entry_fill.time}` : '—'}</TableCell>

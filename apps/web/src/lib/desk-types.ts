@@ -275,6 +275,7 @@ export interface Ticket {
 }
 
 export interface PaperTrade {
+  interval?: '1m' | '5m'
   id: string
   ticket_id: string
   symbol: string
