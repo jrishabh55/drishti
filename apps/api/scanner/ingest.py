@@ -151,34 +151,48 @@ async def ingest_loop() -> None:
         closed_day -= timedelta(days=1)
     if (store.latest_ts("1d") or "")[:10] < closed_day.isoformat():
         pending.add("1d")
-    if intraday_stale(store.latest_ts("5m"), now0):
-        pending.update(CATCHUP_DAYS)
+    # A global MAX can be advanced by one watched symbol. Always attempt
+    # a bounded universe sweep on startup, independently of that timestamp.
+    pending.update(CATCHUP_DAYS)
+    startup_5m_written = 0
     # Daily data in an existing volume must not prevent intraday catch-up.
     for tf in ("5m", "1d", "15m", "1h"):
         if tf in pending:
             logger.info("scanner startup backfill: %s", tf)
-            await asyncio.to_thread(refresh_timeframe, store, tf,
-                                    recent_days=45 if tf == "1d" and not needs_daily else CATCHUP_DAYS.get(tf))
+            written = await asyncio.to_thread(
+                refresh_timeframe, store, tf,
+                recent_days=45 if tf == "1d" and not needs_daily else CATCHUP_DAYS.get(tf))
+            if tf == "5m":
+                startup_5m_written = written
     if pending:
         await asyncio.to_thread(_publish_and_warm)
     if needs_daily:
         await asyncio.to_thread(enrich_universe, store)
         await asyncio.to_thread(_publish_and_warm)
-        now0 = datetime.now(IST)
-        enrich_done_for = f"{now0.isocalendar().year}-{now0.isocalendar().week}"
+        enriched_at = datetime.now(IST)
+        enrich_done_for = f"{enriched_at.isocalendar().year}-{enriched_at.isocalendar().week}"
 
     last_intraday = asyncio.get_running_loop().time() if pending else 0.0
+    # Track the final *universe sweep*, not an individual symbol's newest
+    # bar. A sweep started before 16:00 can miss Yahoo's final delayed bars.
+    final_done_for = now0.date().isoformat() if now0.hour >= 16 and startup_5m_written else ""
     eod_done_for = ""
     while True:
         try:
             now = datetime.now(IST)
             loop_t = asyncio.get_running_loop().time()
-            if (is_market_open(now) or intraday_stale(store.latest_ts("5m"), now)) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
-                last_intraday = loop_t
-                for tf in ("5m", "15m", "1h"):
-                    await asyncio.to_thread(refresh_timeframe, store, tf, recent_days=CATCHUP_DAYS.get(tf))
-                await asyncio.to_thread(_publish_and_warm)
             today = now.date().isoformat()
+            final_due = is_trading_day(now.date()) and now.hour >= 16 and final_done_for != today
+            if (is_market_open(now) or intraday_stale(store.latest_ts("5m"), now) or final_due) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
+                last_intraday = loop_t
+                written_5m = 0
+                for tf in ("5m", "15m", "1h"):
+                    written = await asyncio.to_thread(refresh_timeframe, store, tf, recent_days=CATCHUP_DAYS.get(tf))
+                    if tf == "5m":
+                        written_5m = written
+                if final_due and written_5m:
+                    final_done_for = today
+                await asyncio.to_thread(_publish_and_warm)
             if (is_trading_day(now.date()) and now.hour >= EOD_HOUR_IST
                     and eod_done_for != today):
                 eod_done_for = today

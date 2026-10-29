@@ -110,3 +110,56 @@ def test_history_cache_does_not_freeze_partial_after_close_snapshot():
     assert not bars_mod._fresh(fetched.isoformat(), '5m', NOW)
     fetched = NSE.local(date(2026,10,29), 16*60)
     assert bars_mod._fresh(fetched.isoformat(), '5m', NSE.local(date(2026,10,29), 17*60))
+
+
+def test_one_fresh_watched_symbol_cannot_suppress_universe_catchup(tmp_path, monkeypatch):
+    store = make_store(tmp_path, {'RELIANCE': [100.0], 'TCS': [100.0]})
+    store.upsert_bars('5m', long(session_rows(NOW.date(), [100.0]*75)))
+    for tf in ('15m', '1h'):
+        store.upsert_bars(tf, long(session_rows(date(2026,10,9), [100.0])))
+    monkeypatch.setattr(ingest, 'get_scanner_store', lambda: store)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW.astimezone(tz or timezone.utc)
+    monkeypatch.setattr(ingest, 'datetime', Clock)
+    calls = []
+    def refresh(s, tf, **kw):
+        calls.append(tf)
+        return 1
+    monkeypatch.setattr(ingest, 'refresh_timeframe', refresh)
+    monkeypatch.setattr(ingest, '_publish_and_warm', lambda: None)
+    async def stop(_):
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(ingest.asyncio, 'sleep', stop)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(ingest.ingest_loop())
+    assert {'5m', '15m', '1h'} <= set(calls)
+
+
+def test_final_after_close_sweep_runs_even_when_one_bar_is_current(tmp_path, monkeypatch):
+    store = make_store(tmp_path, {'RELIANCE': [100.0]})
+    store.upsert_bars('5m', long(session_rows(NOW.date(), [100.0]*75)))
+    clock = {'now': NSE.local(NOW.date(), 15*60+50), 'sleeps': 0}
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock['now'].astimezone(tz or timezone.utc)
+    monkeypatch.setattr(ingest, 'datetime', Clock)
+    monkeypatch.setattr(ingest, 'get_scanner_store', lambda: store)
+    monkeypatch.setattr(ingest, 'INTRADAY_REFRESH_SECONDS', 0)
+    monkeypatch.setattr(ingest, '_publish_and_warm', lambda: None)
+    calls = []
+    def refresh(s, tf, **kw):
+        calls.append(tf)
+        return 1
+    monkeypatch.setattr(ingest, 'refresh_timeframe', refresh)
+    async def tick(_):
+        clock['sleeps'] += 1
+        clock['now'] = NSE.local(NOW.date(), 16*60+1)
+        if clock['sleeps'] > 1:
+            raise asyncio.CancelledError()
+    monkeypatch.setattr(ingest.asyncio, 'sleep', tick)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(ingest.ingest_loop())
+    assert calls.count('5m') == 2  # startup + final delayed-data sweep
