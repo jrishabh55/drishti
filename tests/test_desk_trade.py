@@ -290,3 +290,9 @@ def test_open_paper_refresh_ignores_prices_before_its_entry_bar():
     lows[1] = 790.0  # a stop before the order existed
     out = paper.advance(t, bars_of([800.0]*12, lows=lows), ist(10, 15), DeskProfile())
     assert out['status'] == 'open' and out['exit_fill'] is None
+
+
+def test_risk_warns_when_known_band_has_no_upper_price_for_headroom():
+    out = risk.check([order()], DeskProfile(max_loss_per_trade_inr=200), now=ist(10,0),
+                     market={'SBIN':{'band_pct':5.0,'series':'EQ'}})
+    assert any('circuit headroom skipped' in w for w in out['results'][0]['warnings'])

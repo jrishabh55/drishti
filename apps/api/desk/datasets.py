@@ -625,6 +625,8 @@ def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     for sym in symbols:
         facts: Dict[str, Any] = {"_available": dict(avail)}
         b = (bands or {}).get(sym)
+        if bands is not None and b is None:
+            facts["_available"]["bands"] = False
         if b:
             facts["series"] = b["series"]
             if b["band_pct"] is not None:

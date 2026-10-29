@@ -253,6 +253,8 @@ def check(orders: List[Dict[str, Any]], profile: DeskProfile, *,
                         later.append(f"circuit: the target ₹{target:.2f} is beyond today's upper "
                                      f"circuit ₹{upper:.2f}; it can't fill there")
                     band_pct = _f(m.get("band_pct"))
+                    if not upper and target and band_pct is not None:
+                        warns.append(f"circuit headroom skipped for {sym}: no previous close or published upper circuit price")
                     if band_pct is not None and band_pct <= 5:
                         warns.append(f"circuit: {sym} has a {band_pct:g}% price band — it can "
                                      "freeze at the limit and trap an exit")
