@@ -76,7 +76,7 @@ Automated verification uses isolated databases and controlled provider responses
 
 ### WhatsApp buttons — 30 October 2026 IST
 
-Native proposal buttons and native-flow reply parsing passed 75 focused messaging tests, including duplicate clicks across channels, forwarding, malformed replies, expiry, sender/instance/generation isolation, risk rejection and delivery fallback. Full verification: 2,405 Python tests and 103 subtests passed, 3 existing deselections, 42 existing warnings; 57 frontend tests, type checking and production build passed. Independent review found no Critical or Important blockers. Phone rendering and real callbacks still await owner pairing and an explicit test.
+Native proposal buttons and native-flow reply parsing passed 75 focused messaging tests, including duplicate clicks across channels, forwarding, malformed replies, expiry, sender/instance/generation isolation, risk rejection and delivery fallback. Full verification: 2,405 Python tests and 103 subtests passed, 3 existing deselections, 42 existing warnings; 57 frontend tests, type checking and production build passed. Independent review found no Critical or Important blockers. Product commit `e8aba99` deployed successfully as Dokploy `9Mbi4rhjpbvUbiLu8b0bc`; API and web are healthy with zero failing health streaks. Public web returned 200, unauthenticated setup 401 and unsigned callback 403; the running API retained `KITE_ORDERS_ENABLED=0` and its Evolution configuration. Phone rendering and real callbacks still await owner pairing and an explicit test. No real messages or broker orders were sent during verification.
 
 ## Evolution 2.4 release candidate and dependency boundaries
 

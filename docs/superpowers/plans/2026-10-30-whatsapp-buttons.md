@@ -37,4 +37,4 @@
 - [x] Implement minimal queue, payload, fallback and callback normalization changes.
 - [x] Run new tests and the complete UTC Python suite; frontend tests, type checking and build for updated copy.
 - [x] Update UI/operator wording honestly; obtain independent review and address important findings.
-- [ ] Commit, merge/push using existing authorization, deploy Drishti and verify health. Do not update Evolution or send real messages.
+- [x] Commit, merge/push using existing authorization, deploy Drishti and verify health. Do not update Evolution or send real messages.
