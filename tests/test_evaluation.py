@@ -594,3 +594,12 @@ def test_batch_view_never_waits_for_vendor_and_deduplicates_score_jobs(job_store
         deadline = time.monotonic() + 2
         while any(k[1] == bid for k in batches._score_jobs) and time.monotonic() < deadline:
             time.sleep(.01)
+
+
+def test_replay_calibration_matches_interval_entry_time_and_direction():
+    from apps.api.evaluation.performance import _same_plan
+    plan = {"symbol":"RELIANCE", "date":"2026-01-05", "entry":1500, "stop":1490,
+            "target":1520, "side":"buy", "entry_time":"09:31", "interval":"1m"}
+    assert _same_plan(plan, plan)
+    for field, value in (("interval","5m"), ("entry_time","09:35"), ("side","sell")):
+        assert not _same_plan(plan, {**plan, field:value})

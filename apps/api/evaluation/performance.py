@@ -16,6 +16,9 @@ _OUTCOME = {"target": "target", "stop": "stop"}
 def _same_plan(tm_plan: Dict[str, Any], plan: Dict[str, Any]) -> bool:
     return (str(tm_plan.get("symbol", "")).upper() == str(plan.get("symbol", "")).upper()
             and tm_plan.get("date") == plan.get("date")
+            and tm_plan.get("interval", "5m") == plan.get("interval", "5m")
+            and tm_plan.get("side", "buy") == plan.get("side", "buy")
+            and tm_plan.get("entry_time") == plan.get("entry_time")
             and all(abs(float(tm_plan.get(k) or 0) - float(plan.get(k) or 0)) < 1e-6
                     for k in ("entry", "stop", "target")))
 
@@ -33,7 +36,8 @@ def _expectation(store, user_id: str, trade: Dict[str, Any], replays) -> Optiona
     plan = store.get_plan(ticket["plan_id"], user_id) if ticket and ticket.get("plan_id") else None
     if not plan:
         return None
-    tm = next((d for d in replays if _same_plan(d["plan"], plan)), None)
+    tm = next((d for d in replays if _same_plan(d["plan"], plan)
+               and (not plan.get("flat_by") or d["mc"].get("until") == plan["flat_by"])), None)
     if tm is None:
         return None
     mc = tm["mc"]

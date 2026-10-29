@@ -34,9 +34,9 @@ export function DeskFooter() {
   return (
     <footer className="mt-8 border-t pt-4 text-xs text-muted-foreground">
       The Trade Desk is tooling, not advice: setups, replays and rules checks are arithmetic over
-      delayed public bars. Most people who day trade lose money. Simulated odds are not
-      predictions; a stop is a plan, not a guarantee. Drishti never places an order from the
-      desk — paper trades stay in the app, live orders are placed by you at your broker.
+      delayed public bars or your connected broker feed. Most people who day trade lose money. Simulated odds are not
+      predictions; a stop is a plan, not a guarantee. Paper trades stay in the app.
+      Connected Zerodha orders require live trading to be enabled, daily arming and your explicit confirmation.
       Logic adapted from{' '}
       <a href="https://github.com/Jakeschincariol/day-trader-skill" target="_blank" rel="noreferrer">
         day-trader-skill
