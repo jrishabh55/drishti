@@ -114,6 +114,11 @@ class KiteClient:
         clean = {k: v for k, v in params.items() if v is not None}
         return self._call("POST", f"/orders/{variety}", data=clean)["order_id"]
 
+    def modify_order(self, order_id: str, variety: str = "regular", **params: Any) -> None:
+        """PUT /orders/{variety}/{id}; ``quantity`` is the order's new TOTAL."""
+        self._call("PUT", f"/orders/{variety}/{order_id}",
+                   data={k: v for k, v in params.items() if v is not None})
+
     def cancel_order(self, order_id: str, variety: str = "regular") -> None:
         self._call("DELETE", f"/orders/{variety}/{order_id}")
 

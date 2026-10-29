@@ -53,6 +53,9 @@ export interface LiveSymbol {
   symbol: string
   last_tick_at: string | null
   source: string
+  /** today's session so far is filled from Kite history; until then: DELAYED */
+  backfilled?: boolean
+  backfill_error?: string | null
   bars_1m: number
 }
 
@@ -69,7 +72,7 @@ export interface KiteControl {
   armed_at: string | null
   killed: boolean
   killed_at: string | null
-  kill_summary: { trades: number; exits_sent: number; needs_attention: number; error: string | null } | null
+  kill_summary: { trades: number; exits_sent: number; pending?: number; needs_attention: number; error: string | null } | null
 }
 
 export interface KiteStatus {
@@ -85,7 +88,7 @@ export interface KiteStatus {
   redirect_path: string
   live: LiveStatus
   control: KiteControl
-  orders: { server_enabled: boolean; owner: boolean; blocked_by: string[] }
+  orders: { server_enabled: boolean; owner: boolean; owner_client_id?: string | null; blocked_by: string[] }
   note?: string | null
 }
 

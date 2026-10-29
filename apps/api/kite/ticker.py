@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 WS_URL = "wss://ws.kite.trade"
 FINAL_GRACE = timedelta(seconds=2)
+#: Kite sends a 1-byte heartbeat every second; this long with nothing at all
+#: means a half-open connection, so drop it and reconnect.
+READ_TIMEOUT_S = 10.0
 
 
 @dataclass
@@ -109,6 +112,28 @@ class BarBuilder:
         self.last_tick[symbol] = at
         return True
 
+    def seed(self, symbol: str, minute_rows: List[Row]) -> int:
+        """Fill this session's minutes from historical 1-minute candles (the
+        user's own Kite history). A minute already built from ticks keeps its
+        live close but takes the candle's open/high/low and the larger
+        volume, so the first, partly-seen minute is whole. Returns minutes added."""
+        bars = self._bars.setdefault(symbol, {})
+        added = 0
+        for ts, o, h, lo, c, v in minute_rows:
+            local = ts.astimezone(self.spec.tz).replace(second=0, microsecond=0)
+            mins = local.hour * 60 + local.minute
+            if not (self.spec.open_min <= mins < self.spec.close_min):
+                continue
+            if bars and min(bars).date() != local.date():
+                continue          # another session's candle
+            b = bars.get(local)
+            if b is None:
+                bars[local] = [o, h, lo, c, float(v)]
+                added += 1
+            else:
+                b[0], b[1], b[2], b[4] = o, max(b[1], h), min(b[2], lo), max(b[4], float(v))
+        return added
+
     def rows(self, symbol: str, interval: str) -> List[Row]:
         one = sorted(self._bars.get(symbol, {}).items())
         if interval == "1m":
@@ -150,7 +175,8 @@ async def run_ticker(*, api_key: str, access_token: str, tokens: Dict[int, str],
                      on_state: Callable[[str, Optional[str]], None],
                      stop_at: datetime, connect: Optional[Connect] = None,
                      clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-                     backoff: Tuple[float, ...] = (1, 2, 5, 10, 30)) -> str:
+                     backoff: Tuple[float, ...] = (1, 2, 5, 10, 30),
+                     read_timeout: float = READ_TIMEOUT_S) -> str:
     """Stream until ``stop_at``, cancellation, or an auth failure. Reconnects
     with backoff on drops. Returns why it stopped: ``stopped`` | ``auth``."""
     from urllib.parse import urlencode
@@ -176,7 +202,12 @@ async def run_ticker(*, api_key: str, access_token: str, tokens: Dict[int, str],
             await ws.send(json.dumps({"a": "mode", "v": ["quote", list(tokens)]}))
             on_state("live", None)
             attempt = 0
-            async for msg in ws:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), read_timeout)
+                except asyncio.TimeoutError:
+                    on_state("reconnecting", f"no data or heartbeat for {read_timeout:g} s")
+                    break
                 now = clock()
                 if isinstance(msg, (bytes, bytearray)):
                     for t in parse_binary(bytes(msg)):
@@ -187,8 +218,6 @@ async def run_ticker(*, api_key: str, access_token: str, tokens: Dict[int, str],
                     on_text(parse_text(msg))
                 if now >= stop_at:
                     break
-            else:
-                on_state("reconnecting", "Kite closed the connection")
         except asyncio.CancelledError:
             await _close(ws)
             raise

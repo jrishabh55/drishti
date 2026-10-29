@@ -9,7 +9,6 @@ import asyncio
 import json
 import struct
 from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qsl
 
 from apps.api.kite import rest
 
@@ -31,10 +30,31 @@ class FakeKite:
         self.reject_next: Dict[str, str] = {}   # order_type -> message
         self.fail_cancel = False
         self.candles: List[list] = []
+        #: scripted transport failures: (method, path-prefix, predicate(data)) -> "timeout"
+        #: (Kite received the request, the answer is lost) | "down" (never received) | "5xx"
+        self.faults: List[tuple] = []
+        #: called after each request is applied, to script fills between requests
+        self.after: List[Any] = []
 
     # ------------------------------------------------------------ transport
     def __call__(self, method, url, params, data, headers):
         path = url[len(rest.ROOT):]
+        for i, (m, prefix, pred, kind) in enumerate(self.faults):
+            if m == method and path.startswith(prefix) and pred(dict(data or {})):
+                self.faults.pop(i)
+                if kind == "down":
+                    raise ConnectionError("connection refused")
+                out = self._apply(method, url, path, params, data, headers)
+                if kind == "timeout":
+                    raise TimeoutError("read timed out")
+                return 502, json.dumps({"status": "error", "message": "OMS unreachable",
+                                        "error_type": "NetworkException"})
+        out = self._apply(method, url, path, params, data, headers)
+        for fn in list(self.after):
+            fn(method, path, data)
+        return out
+
+    def _apply(self, method, url, path, params, data, headers):
         self.calls.append((method, path, dict(params or []), dict(data or {})))
         auth = headers.get("Authorization", "")
         if path != "/session/token" or method != "POST":
@@ -71,13 +91,22 @@ class FakeKite:
             if data["order_type"] in ("SL-M", "SL"):
                 self.orders[oid]["status"] = "TRIGGER PENDING"
             return self._ok({"order_id": oid})
+        if method == "PUT" and path.startswith("/orders/regular/"):
+            o = self.orders[path.rsplit("/", 1)[1]]
+            if o["status"] in ("COMPLETE", "CANCELLED", "REJECTED"):
+                return 400, json.dumps({"status": "error", "message": "Order cannot be modified",
+                                        "error_type": "OrderException"})
+            o["quantity"] = int(data["quantity"])
+            return self._ok({"order_id": o["order_id"]})
         if method == "DELETE" and path.startswith("/orders/regular/"):
             if self.fail_cancel:
                 return 400, json.dumps({"status": "error", "message": "nope",
                                         "error_type": "OrderException"})
             o = self.orders[path.rsplit("/", 1)[1]]
-            if o["status"] not in ("COMPLETE", "CANCELLED", "REJECTED"):
-                o["status"] = "CANCELLED"
+            if o["status"] in ("COMPLETE", "CANCELLED", "REJECTED"):   # as Kite answers
+                return 400, json.dumps({"status": "error", "message": f"Order is {o['status']}",
+                                        "error_type": "OrderException"})
+            o["status"] = "CANCELLED"
             return self._ok({"order_id": o["order_id"]})
         if path == "/orders":
             return self._ok(list(self.orders.values()))
@@ -96,8 +125,28 @@ class FakeKite:
         return hits[-1]
 
     def fill(self, letter: str, price: float, qty: Optional[int] = None) -> None:
+        """Fill ``qty`` more (default: the rest). COMPLETE once fully filled."""
         o = self.by_tag_suffix(letter)
-        o.update(status="COMPLETE", filled_quantity=qty or int(o["quantity"]), average_price=price)
+        done = int(o["filled_quantity"] or 0)
+        add = qty if qty is not None else int(o["quantity"]) - done
+        total = done + add
+        avg = ((o["average_price"] or 0) * done + price * add) / total if total else 0
+        o.update(filled_quantity=total, average_price=round(avg, 4),
+                 status="COMPLETE" if total >= int(o["quantity"]) else "OPEN")
+
+    def sold(self) -> int:
+        return sum(int(o["filled_quantity"]) for o in self.orders.values()
+                   if o["transaction_type"] == "SELL")
+
+    def bought(self) -> int:
+        return sum(int(o["filled_quantity"]) for o in self.orders.values()
+                   if o["transaction_type"] == "BUY")
+
+    def sell_exposure(self) -> int:
+        """Shares a fill of every working SELL could sell, on top of what's sold."""
+        return sum(int(o["quantity"]) - int(o["filled_quantity"]) for o in self.orders.values()
+                   if o["transaction_type"] == "SELL"
+                   and o["status"] not in ("COMPLETE", "CANCELLED", "REJECTED"))
 
     def placed(self) -> List[Dict[str, Any]]:
         return [c[3] for c in self.calls if c[0] == "POST" and c[1] == "/orders/regular"]
@@ -128,6 +177,12 @@ class FakeSocket:
 
     async def send(self, msg):
         self.sent.append(msg)
+
+    async def recv(self):
+        try:
+            return await self.__anext__()
+        except StopAsyncIteration:
+            raise ConnectionError("connection closed") from None
 
     async def close(self):
         self.closed = True

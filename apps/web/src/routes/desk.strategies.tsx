@@ -95,6 +95,7 @@ function StrategiesPage() {
             )}
             {ctl.kill_summary && ctl.killed && (
               <p className="text-xs text-[var(--text-3)]">Kill: {ctl.kill_summary.exits_sent} exits sent,
+                {' '}{ctl.kill_summary.pending ?? 0} waiting on Kite,
                 {' '}{ctl.kill_summary.needs_attention} need attention{ctl.kill_summary.error ? ` · ${ctl.kill_summary.error}` : ''}</p>
             )}
           </Card>

@@ -32,7 +32,7 @@ def ist(h, m, s=0):
 def env(tmp_path, monkeypatch):
     monkeypatch.setenv("WEBAPP_KEY_ENCRYPTION_SECRET", Fernet.generate_key().decode())
     monkeypatch.setenv("KITE_ORDERS_ENABLED", "1")
-    monkeypatch.setenv("AUTOTRADE_USER_IDS", "user_a")
+    monkeypatch.setenv("AUTOTRADE_USER_IDS", "user_a:AB1234")
     reset_kite_store_for_tests(tmp_path / "kite.sqlite")
     reset_desk_store_for_tests(tmp_path / "desk.sqlite")
     scan = make_store(tmp_path, None)

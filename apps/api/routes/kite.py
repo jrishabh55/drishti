@@ -80,6 +80,7 @@ def status(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
         "control": execution.control(user_id, now),
         "orders": {"server_enabled": execution.orders_enabled(),
                    "owner": execution.is_owner(user_id),
+                   "owner_client_id": execution.owner_binding(user_id) or None,
                    "blocked_by": execution.gate_reasons(user_id, now, prof)},
     }
 
@@ -216,38 +217,45 @@ def _confirm_words(order: Dict[str, Any]) -> str:
 
 def _send_ticket(user_id: str, tk: Dict[str, Any], confirm_text: str, source: str
                  ) -> Dict[str, Any]:
-    """Re-check desk risk now, then every live gate, then send. Marks the
-    ticket ``sent`` so the desk's daily counts include it."""
+    """Re-check desk risk now, then every live gate, then send — all under the
+    user's lock, with the ticket claimed (ready → sending) first, so a double
+    click or a retry can't send it twice. Marks the ticket ``sent`` after."""
     from apps.api.routes import desk as desk_routes
 
-    if tk["status"] != "ready":
-        raise HTTPException(status_code=409, detail=f"ticket is {tk['status']}")
-    want = _confirm_words(tk["order"])
-    if confirm_text.strip().upper() != want:
-        raise HTTPException(status_code=422, detail=f'type exactly "{want}" to send this order')
-    now = _now()
-    prof = load_profile(user_id)
-    reasons = execution.gate_reasons(user_id, now, prof)
-    if reasons:
-        raise _refused(execution.ExecRefused(reasons))
-    verdict = desk_routes._risk_for([tk["order"]], user_id)["results"][0]
-    if verdict["fingerprint"] != tk["fingerprint"]:
-        raise HTTPException(status_code=409, detail="the order changed since it was checked: "
-                                                    "make a new ticket")
-    if verdict["verdict"] != "PASS":
-        raise _refused(execution.ExecRefused(verdict["reasons"]))
-    try:
-        trade = execution.send_entry(user_id, tk, now, prof,
-                                     lambda: auth.client_for(user_id, now, _transport),
-                                     source=source)
-    except execution.ExecRefused as exc:
-        raise _refused(exc) from exc
-    except auth.KiteAuthError as exc:
-        raise _auth_http(exc) from exc
-    tk.update(status="sent", broker="kite", kite_trade_id=trade["id"], verdict=verdict,
-              sent_at=now.astimezone(execution.NSE.tz).isoformat(), confirmed_at=now.isoformat())
-    get_desk_store().update_ticket(tk["id"], user_id, tk)
-    return trade
+    with execution.user_lock(user_id):
+        store = get_desk_store()
+        tk = store.get_ticket(tk["id"], user_id) or tk          # fresh, under the lock
+        if tk["status"] != "ready":
+            raise HTTPException(status_code=409, detail=f"ticket is {tk['status']}")
+        want = _confirm_words(tk["order"])
+        if confirm_text.strip().upper() != want:
+            raise HTTPException(status_code=422, detail=f'type exactly "{want}" to send this order')
+        now = _now()
+        prof = load_profile(user_id)
+        reasons = execution.gate_reasons(user_id, now, prof)
+        if reasons:
+            raise _refused(execution.ExecRefused(reasons))
+        verdict = desk_routes._risk_for([tk["order"]], user_id)["results"][0]
+        if verdict["fingerprint"] != tk["fingerprint"]:
+            raise HTTPException(status_code=409, detail="the order changed since it was checked: "
+                                                        "make a new ticket")
+        if verdict["verdict"] != "PASS":
+            raise _refused(execution.ExecRefused(verdict["reasons"]))
+        store.update_ticket(tk["id"], user_id, dict(tk, status="sending"))
+        try:
+            trade = execution.send_entry(user_id, tk, now, prof,
+                                         lambda: auth.client_for(user_id, now, _transport),
+                                         source=source)
+        except (execution.ExecRefused, auth.KiteAuthError) as exc:
+            store.update_ticket(tk["id"], user_id, tk)      # nothing left the server: ready again
+            if isinstance(exc, execution.ExecRefused):
+                raise _refused(exc) from exc
+            raise _auth_http(exc) from exc
+        tk.update(status="sent", broker="kite", kite_trade_id=trade["id"], verdict=verdict,
+                  sent_at=now.astimezone(execution.NSE.tz).isoformat(),
+                  confirmed_at=now.isoformat())
+        store.update_ticket(tk["id"], user_id, tk)
+        return trade
 
 
 @router.get("/kite/trades")
@@ -321,21 +329,33 @@ def list_strategies(user_id: str = Depends(current_user_id)) -> List[Dict[str, A
 @router.post("/kite/strategies", status_code=201)
 def create_strategy(body: Dict[str, Any], user_id: str = Depends(current_user_id)
                     ) -> Dict[str, Any]:
-    return get_kite_store().put_strategy(user_id, dict(_valid(body), signals=[]))
+    doc = dict(_valid(body), signals=[])
+    with execution.user_lock(user_id):
+        if doc["mode"] != "off" and execution.control(user_id, _now())["killed"]:
+            raise HTTPException(status_code=409, detail="the kill switch was used today; "
+                                                        "strategies stay off until tomorrow")
+        return get_kite_store().put_strategy(user_id, doc)
 
 
 @router.put("/kite/strategies/{sid}")
 def update_strategy(sid: str, body: Dict[str, Any], user_id: str = Depends(current_user_id)
                     ) -> Dict[str, Any]:
-    old = _own_strategy(sid, user_id)
-    doc = dict(_valid(body), id=sid, signals=old.get("signals") or [],
-               version=int(old.get("version") or 1) + 1)
-    return get_kite_store().put_strategy(user_id, doc)
+    valid = _valid(body)
+    with execution.user_lock(user_id):
+        old = _own_strategy(sid, user_id)
+        if valid["mode"] != "off" and execution.control(user_id, _now())["killed"]:
+            raise HTTPException(status_code=409, detail="the kill switch was used today; "
+                                                        "strategies stay off until tomorrow")
+        doc = dict(valid, id=sid, signals=old.get("signals") or [],
+                   version=int(old.get("version") or 1) + 1)
+        return get_kite_store().put_strategy(user_id, doc)
 
 
 @router.delete("/kite/strategies/{sid}", status_code=204)
 def delete_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Response:
-    if not get_kite_store().delete_strategy(sid, user_id):
+    with execution.user_lock(user_id):
+        gone = get_kite_store().delete_strategy(sid, user_id)
+    if not gone:
         raise HTTPException(status_code=404, detail="strategy not found")
     return Response(status_code=204)
 
@@ -361,20 +381,21 @@ class SignalConfirmBody(BaseModel):
 @router.post("/kite/strategies/{sid}/signals/{sig_id}/confirm")
 def confirm_signal(sid: str, sig_id: str, body: SignalConfirmBody,
                    user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
-    s = _own_strategy(sid, user_id)
     store = get_kite_store()
-    if strategies.expire_signals(user_id, s, _now()):
+    with execution.user_lock(user_id):
+        s = _own_strategy(sid, user_id)
+        if strategies.expire_signals(user_id, s, _now()):
+            store.put_strategy(user_id, s)
+        sig = _own_signal(s, sig_id)
+        if sig.get("status") != "await_confirm":
+            raise HTTPException(status_code=409, detail=f"signal is {sig.get('status')}")
+        tk = get_desk_store().get_ticket(sig["ticket_id"], user_id)
+        if tk is None:
+            raise HTTPException(status_code=404, detail="ticket not found")
+        trade = _send_ticket(user_id, tk, body.confirm_text, f"strategy:{sid}")
+        sig.update(status="sent", kite_trade_id=trade["id"])
         store.put_strategy(user_id, s)
-    sig = _own_signal(s, sig_id)
-    if sig.get("status") != "await_confirm":
-        raise HTTPException(status_code=409, detail=f"signal is {sig.get('status')}")
-    tk = get_desk_store().get_ticket(sig["ticket_id"], user_id)
-    if tk is None:
-        raise HTTPException(status_code=404, detail="ticket not found")
-    trade = _send_ticket(user_id, tk, body.confirm_text, f"strategy:{sid}")
-    sig.update(status="sent", kite_trade_id=trade["id"])
-    store.put_strategy(user_id, s)
-    return trade
+        return trade
 
 
 @router.post("/kite/strategies/{sid}/signals/{sig_id}/skip")
@@ -382,14 +403,15 @@ def skip_signal(sid: str, sig_id: str, user_id: str = Depends(current_user_id)
                 ) -> Dict[str, Any]:
     from apps.api.routes import desk as desk_routes
 
-    s = _own_strategy(sid, user_id)
-    sig = _own_signal(s, sig_id)
-    if sig.get("status") != "await_confirm":
-        raise HTTPException(status_code=409, detail=f"signal is {sig.get('status')}")
-    sig["status"] = "skipped"
-    try:
-        desk_routes.cancel_ticket(sig["ticket_id"], user_id)
-    except HTTPException:
-        pass
-    get_kite_store().put_strategy(user_id, s)
-    return sig
+    with execution.user_lock(user_id):
+        s = _own_strategy(sid, user_id)
+        sig = _own_signal(s, sig_id)
+        if sig.get("status") != "await_confirm":
+            raise HTTPException(status_code=409, detail=f"signal is {sig.get('status')}")
+        sig["status"] = "skipped"
+        try:
+            desk_routes.cancel_ticket(sig["ticket_id"], user_id)
+        except HTTPException:
+            pass
+        get_kite_store().put_strategy(user_id, s)
+        return sig

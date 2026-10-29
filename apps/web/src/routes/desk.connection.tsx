@@ -174,7 +174,10 @@ function ConnectionPage() {
                         <td className="es-mono">{s.last_tick_at ? `${istTime(s.last_tick_at)} IST` : '—'}</td>
                         <td className="es-mono">{s.bars_1m}</td>
                         <td><Pill tone={s.source.startsWith('live') ? 'ok' : 'warn'}>
-                          {s.source.startsWith('live') ? 'LIVE' : 'DELAYED (stale)'}</Pill></td>
+                          {s.source.startsWith('live') ? 'LIVE'
+                            : s.backfill_error ? 'DELAYED (session history unavailable)'
+                              : s.backfilled === false ? 'DELAYED (filling today’s session)' : 'DELAYED (stale)'}</Pill>
+                          {s.backfill_error && <span className="block text-xs text-[var(--text-4)]">{s.backfill_error}</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -187,6 +190,10 @@ function ConnectionPage() {
               <ul className="space-y-1 text-sm">
                 <Check ok={st.orders.server_enabled} text="Server allows live orders (KITE_ORDERS_ENABLED=1)" />
                 <Check ok={st.orders.owner} text="Your account is an authorised owner (AUTOTRADE_USER_IDS)" />
+                <Check ok={!!st.orders.owner_client_id && st.kite_user_id?.toUpperCase() === st.orders.owner_client_id}
+                  text={st.orders.owner_client_id
+                    ? `Orders bound to Zerodha client ${st.orders.owner_client_id}${st.kite_user_id ? ` (logged in as ${st.kite_user_id})` : ''}`
+                    : 'A Zerodha client id is bound to your account (AUTOTRADE_USER_IDS=user:CLIENTID)'} />
                 <Check ok={st.session === 'active'} text="Logged in to Zerodha today" />
                 <Check ok={st.control.armed} text="Armed for today" />
                 <Check ok={!st.control.killed} text="Kill switch not used today" />

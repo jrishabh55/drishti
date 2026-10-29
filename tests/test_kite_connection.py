@@ -218,6 +218,8 @@ def test_live_hub_serves_private_bars_reconnects_and_falls_back_on_disconnect(en
     async def scenario():
         hub = await live.start("user_a", ["SBIN"], transport=fake, connect=connect,
                                now=clock["now"])
+        await hub.backfill_task   # started at 09:20: today's session so far comes first
+        assert hub.backfilled == {"SBIN"}
         hub.task.cancel()  # restart with a deterministic clock and fast backoff
         hub.task = asyncio.create_task(ticker.run_ticker(
             api_key=fake.api_key, access_token=fake.tokens_issued[-1], tokens={779521: "SBIN"},
@@ -254,7 +256,7 @@ def test_bars_source_uses_live_then_delayed_and_never_writes_shared_cache(env, m
     client, _, fake, clock = env
     _connect(client, fake)
     live.install()
-    hub = live.Hub("user_a", ["SBIN"], state="live")
+    hub = live.Hub("user_a", ["SBIN"], state="live", backfilled={"SBIN"})
     hub.builder.on_tick("SBIN", 800.0, 10, ist(9, 15, 5))
     live._hubs["user_a"] = hub
     monkeypatch.setattr(live, "_now", lambda: ist(9, 15, 30))
