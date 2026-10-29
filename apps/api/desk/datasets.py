@@ -55,6 +55,43 @@ class FeedUnavailable(RuntimeError):
         self.reason = reason
 
 
+class BlockPage(ValueError):
+    """The host answered 200 with a page that isn't data at all (HTML, or
+    nothing): a block or an outage of the site, so the host breaker trips."""
+
+
+class BadResource(ValueError):
+    """Data-like but not this resource's schema (an invalid XBRL filing, a
+    JSON shape we don't recognise): only this resource is unavailable; the
+    other datasets on the host stay usable."""
+
+
+def asm_shape(doc: Any) -> None:
+    """reportASM: {"longterm": {"data": [...]}, "shortterm": {"data": [...]}},
+    with at least one row: an empty ``{}`` is not a clean ASM list."""
+    if not isinstance(doc, dict):
+        raise BadResource("ASM: expected an object with longterm/shortterm")
+    rows = 0
+    for term in ("longterm", "shortterm"):
+        part = doc.get(term)
+        if not isinstance(part, dict) or not isinstance(part.get("data"), list):
+            raise BadResource(f"ASM: no {term}.data list")
+        rows += len(part["data"])
+    if rows == 0:
+        raise BadResource("ASM: both lists empty (NSE always lists some stocks)")
+
+
+def gsm_shape(doc: Any) -> None:
+    """reportGSM: a list of rows (a genuinely empty list is a clean list)."""
+    if not isinstance(doc, list) or any(not isinstance(r, dict) for r in doc):
+        raise BadResource("GSM: expected a list of rows")
+
+
+def calendar_shape(doc: Any) -> None:
+    if not isinstance(doc, list) or any(not isinstance(r, dict) for r in doc):
+        raise BadResource("event calendar: expected a list of rows")
+
+
 class HostDown(FeedUnavailable):
     """The host itself failed (blocked, throttled, erroring, unreachable), not
     just this one resource: trips the per-host breaker."""
@@ -91,6 +128,8 @@ class Dataset:
     warmup: Optional[str] = None              # homepage to visit first for cookies
     headers: Dict[str, str] = field(default_factory=dict)
     used_by: str = ""
+    #: JSON: validates the parsed document's shape (raises BadResource).
+    shape: Optional[Callable[[Any], None]] = None
     #: CSV/JSON: text a genuine response always contains (case-insensitive).
     #: XML: the root element's local name. A 200 without it is a block or
     #: error page and is never cached.
@@ -177,14 +216,14 @@ CATALOG: Dict[str, Dataset] = {d.name: d for d in (
             30 * 24 * 3600, {"file": _xbrl_file}, used_by="results analyst (filed figures)",
             expect="xbrl"),
     Dataset("nse.event_calendar", NSE_API + "event-calendar?index=equities", "json",
-            3 * 3600, warmup=NSE_HOME, used_by="results-week warning"),
+            3 * 3600, warmup=NSE_HOME, used_by="results-week warning", shape=calendar_shape),
     Dataset("nse.event_calendar_symbol",
             NSE_API + "event-calendar?index=equities&symbol={symbol}", "json", 3 * 3600,
-            {"symbol": _query}, warmup=NSE_HOME, used_by="results date"),
+            {"symbol": _query}, warmup=NSE_HOME, used_by="results date", shape=calendar_shape),
     Dataset("nse.asm", NSE_API + "reportASM", "json", 6 * 3600,
-            warmup=NSE_HOME, used_by="risk (block), research facts"),
+            warmup=NSE_HOME, used_by="risk (block), research facts", shape=asm_shape),
     Dataset("nse.gsm", NSE_API + "reportGSM", "json", 6 * 3600,
-            warmup=NSE_HOME, used_by="risk (block), research facts"),
+            warmup=NSE_HOME, used_by="risk (block), research facts", shape=gsm_shape),
     Dataset("nse.holidays", NSE_API + "holiday-master?type=trading",
             "json", 24 * 3600, warmup=NSE_HOME, used_by="session calendar"),
     Dataset("bse.scrip_search", BSE_API + "PeerSmartSearch/w?Type=SS&text={symbol}", "json",
@@ -296,33 +335,35 @@ def check_body(ds: Dataset, text: str) -> None:
     """
     head = text.lstrip()[:512].lower()
     if not head:
-        raise ValueError("empty response")
+        raise BlockPage("empty response")
     if ds.kind != "xml" and head.startswith("<"):
-        raise ValueError("an HTML page instead of data (blocked or an error page)")
+        raise BlockPage("an HTML page instead of data (blocked or an error page)")
     if ds.kind == "xml":
         if head.startswith("<!doctype html") or head.startswith("<html"):
-            raise ValueError("an HTML page instead of data (blocked or an error page)")
+            raise BlockPage("an HTML page instead of data (blocked or an error page)")
         if "<!DOCTYPE" in text or "<!ENTITY" in text:
-            raise ValueError("an XML document with a DTD")
+            raise BadResource("an XML document with a DTD")
         import xml.etree.ElementTree as ET
 
         try:
             root = ET.fromstring(text)
         except ET.ParseError as exc:
-            raise ValueError(f"malformed XML: {exc}") from None
+            raise BadResource(f"malformed XML: {exc}") from None
         tag = root.tag.rsplit("}", 1)[-1].lower()
         if ds.expect and tag != ds.expect:
-            raise ValueError(f"XML root <{tag}>, expected <{ds.expect}>")
+            raise BadResource(f"XML root <{tag}>, expected <{ds.expect}>")
         return
     elif ds.kind == "json":
         try:
             doc = json.loads(text)
         except ValueError as exc:
-            raise ValueError(f"malformed JSON: {exc}") from None
+            raise BadResource(f"malformed JSON: {exc}") from None
         if not isinstance(doc, (dict, list, str)):
-            raise ValueError("unexpected JSON value")
+            raise BadResource("unexpected JSON value")
+        if ds.shape:
+            ds.shape(doc)
     if ds.expect and ds.expect not in text[:65536].lower():
-        raise ValueError(f"missing {ds.expect!r}: not this dataset's format")
+        raise BadResource(f"missing {ds.expect!r}: not this dataset's format")
 
 
 def fetch(name: str, params: Optional[Dict[str, Any]] = None, *, user_id: str = "",
@@ -368,8 +409,10 @@ def fetch(name: str, params: Optional[Dict[str, Any]] = None, *, user_id: str = 
         text = body.decode("utf-8-sig", "replace")
         try:
             check_body(ds, text)
+        except BlockPage as exc:
+            raise HostDown(f"{name}: {exc}") from None        # the site: every dataset on it
         except ValueError as exc:
-            raise HostDown(f"{name}: {exc}") from None
+            raise FeedUnavailable("source_error", f"{name}: {exc}") from None  # this resource
     except FeedUnavailable as exc:
         _neg[neg_key] = time.monotonic() + NEGATIVE_TTL_S
         if isinstance(exc, HostDown):
@@ -497,6 +540,7 @@ def parse_surveillance(asm_text: Optional[str], gsm_text: Optional[str]
     out: Dict[str, Dict[str, str]] = {}
     if asm_text:
         doc = json.loads(asm_text)
+        asm_shape(doc)
         for term in ("longterm", "shortterm"):
             for r in (doc.get(term) or {}).get("data") or []:
                 sym = str(r.get("symbol") or "").upper()
@@ -504,7 +548,9 @@ def parse_surveillance(asm_text: Optional[str], gsm_text: Optional[str]
                     out.setdefault(sym, {})["asm"] = str(
                         r.get("survCode") or r.get("asmSurvIndicator") or "ASM")[:60]
     if gsm_text:
-        for r in json.loads(gsm_text) or []:
+        rows = json.loads(gsm_text)
+        gsm_shape(rows)
+        for r in rows:
             sym = str(r.get("symbol") or "").upper()
             if _SYMBOL.match(sym):
                 out.setdefault(sym, {})["gsm"] = str(
@@ -516,7 +562,9 @@ def parse_results_calendar(text: str) -> Dict[str, List[str]]:
     """event-calendar [{symbol, purpose, date "30-Oct-2026"}] -> {SYMBOL:
     [ISO dates of meetings whose purpose names financial results]}, sorted."""
     out: Dict[str, List[str]] = {}
-    for r in json.loads(text) or []:
+    rows = json.loads(text)
+    calendar_shape(rows)
+    for r in rows:
         sym = str(r.get("symbol") or "").upper()
         if not _SYMBOL.match(sym) or "result" not in str(r.get("purpose") or "").lower():
             continue
@@ -530,38 +578,44 @@ def parse_results_calendar(text: str) -> Dict[str, List[str]]:
 
 # ---------------------------------------------------------------- facts for the risk check
 
+#: The NSE checks the risk check runs, and the feed each one needs.
+FACT_CHECKS = ("bands", "asm", "gsm", "fo_ban", "results")
+
+
 def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Circuit band (+ upper/lower from the last daily close), series and the
-    F&O ban flag for each symbol. Missing data -> the symbol is absent, and
-    the risk check reports "skipped" for it."""
+    """Circuit band (+ upper/lower from the last daily close), series, ASM,
+    GSM, F&O ban and results-week facts for each symbol, each from a CURRENT
+    list (a stale cached copy never clears a risk check).
+
+    Contract: every symbol's entry carries ``_available`` =
+    {bands, asm, gsm, fo_ban, results: bool}. A check whose list couldn't be
+    read is False there and its fact is absent; the risk check then says that
+    check was skipped — absence of a fact never means "clean" unless its list
+    was read. When NO list could be read the result is {} (and the risk check
+    shows its single top-level "all NSE checks skipped" warning)."""
     def current(name: str) -> Dict[str, Any]:
         got = fetch(name)
         if got.get("stale"):
             raise FeedUnavailable("source_error", f"{name}: stale data cannot clear a current risk check")
         return got
 
+    def read(label: str, fn):
+        try:
+            return fn()
+        except (FeedUnavailable, ValueError) as exc:
+            logger.info("%s unavailable: %s", label, exc)
+            return None
+
+    bands = read("price bands", lambda: parse_price_bands(current("nse.price_bands")["text"]))
+    ban = read("F&O ban list", lambda: set(parse_fo_ban(current("nse.fo_ban")["text"])))
+    asm = read("ASM list", lambda: parse_surveillance(current("nse.asm")["text"], None))
+    gsm = read("GSM list", lambda: parse_surveillance(None, current("nse.gsm")["text"]))
+    results = read("results calendar",
+                   lambda: parse_results_calendar(current("nse.event_calendar")["text"]))
+    avail = {"bands": bands is not None, "asm": asm is not None, "gsm": gsm is not None,
+             "fo_ban": ban is not None, "results": results is not None}
     out: Dict[str, Dict[str, Any]] = {}
-    try:
-        bands = parse_price_bands(current("nse.price_bands")["text"])
-    except (FeedUnavailable, ValueError) as exc:
-        logger.info("price bands unavailable: %s", exc)
-        bands = {}
-    try:
-        ban = set(parse_fo_ban(current("nse.fo_ban")["text"]))
-    except (FeedUnavailable, ValueError) as exc:
-        logger.info("F&O ban list unavailable: %s", exc)
-        ban = None
-    surv: Dict[str, Dict[str, str]] = {}
-    try:
-        surv = parse_surveillance(current("nse.asm")["text"], current("nse.gsm")["text"])
-    except (FeedUnavailable, ValueError) as exc:
-        logger.info("ASM/GSM lists unavailable: %s", exc)
-    results: Dict[str, List[str]] = {}
-    try:
-        results = parse_results_calendar(current("nse.event_calendar")["text"])
-    except (FeedUnavailable, ValueError) as exc:
-        logger.info("results calendar unavailable: %s", exc)
-    if not bands and ban is None and not surv and not results:
+    if not any(avail.values()):
         return out
     from apps.api.desk.bars import today_ist
 
@@ -569,8 +623,8 @@ def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     week_end = (today + timedelta(days=7)).isoformat()
     closes = _last_closes(symbols) if bands else {}
     for sym in symbols:
-        facts: Dict[str, Any] = {}
-        b = bands.get(sym)
+        facts: Dict[str, Any] = {"_available": dict(avail)}
+        b = (bands or {}).get(sym)
         if b:
             facts["series"] = b["series"]
             if b["band_pct"] is not None:
@@ -581,12 +635,12 @@ def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
                     facts["band_lower"] = round(pc * (1 - b["band_pct"] / 100), 2)
         if ban is not None:
             facts["fo_ban"] = sym in ban
-        facts.update(surv.get(sym, {}))
-        upcoming = [d for d in results.get(sym, []) if today.isoformat() <= d <= week_end]
+        facts.update((asm or {}).get(sym, {}))
+        facts.update((gsm or {}).get(sym, {}))
+        upcoming = [d for d in (results or {}).get(sym, []) if today.isoformat() <= d <= week_end]
         if upcoming:
             facts["results_date"] = upcoming[0]
-        if facts:
-            out[sym] = facts
+        out[sym] = facts
     return out
 
 

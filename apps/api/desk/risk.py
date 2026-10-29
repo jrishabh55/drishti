@@ -61,6 +61,11 @@ def _f(x) -> Optional[float]:
         return None
 
 
+#: ``_available`` keys from desk/datasets.nse_facts and how a warning names them.
+_FACT_LABELS = (("bands", "circuit band"), ("asm", "ASM list"), ("gsm", "GSM list"),
+                ("fo_ban", "F&O ban list"), ("results", "results calendar"))
+
+
 def window_reasons(now_local: datetime, profile: DeskProfile, spec: SessionSpec = NSE
                    ) -> List[str]:
     d = now_local.date()
@@ -276,6 +281,13 @@ def check(orders: List[Dict[str, Any]], profile: DeskProfile, *,
                                  f"({today})")
             # surveillance and other NSE facts
             m = market.get(sym)
+            avail = (m or {}).get("_available")
+            if avail is not None:
+                # a list that couldn't be read is a skipped check, never a clean one
+                skipped = [label for key, label in _FACT_LABELS if not avail.get(key)]
+                if skipped:
+                    warns.append(f"NSE checks skipped for {sym}: {', '.join(skipped)} "
+                                 "unavailable (not treated as clean)")
             if m:
                 if m.get("asm") or m.get("gsm"):
                     stage = m.get("asm") or m.get("gsm")
