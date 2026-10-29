@@ -185,6 +185,8 @@ def pump(user_id: str, store: Optional[JobStore] = None) -> int:
     store = store or get_store()
     submitted = 0
     with _pump_lock:
+        if store.has_active_run_for_user(user_id):
+            return 0
         with _conn(store) as c:
             rows = c.execute(
                 "SELECT c.*, b.request_json FROM eval_cells c JOIN eval_batches b ON b.id=c.batch_id "
@@ -214,6 +216,8 @@ def pump(user_id: str, store: Optional[JobStore] = None) -> int:
                 c.execute("UPDATE eval_cells SET state=?, run_id=?, error=? "
                           "WHERE batch_id=? AND ticker=? AND date=?",
                           (state, run_id, error, row["batch_id"], ticker, row["date"]))
+            if state == 'submitted':
+                break  # the runner serializes by user; don't occupy workers waiting on that lock
     return submitted
 
 
@@ -248,13 +252,13 @@ def _score(store: JobStore, row, rating: Optional[str], holding_days: int) -> Di
     cached = json.loads(row["score_json"]) if row["score_json"] else None
     if cached and cached["status"] == "scored":
         return cached
-    if cached and cached["status"] == "pending" and \
-            datetime.fromisoformat(cached["checked_at"]) > datetime.now(timezone.utc) - PENDING_RECHECK:
+    if cached and cached["status"] in ('pending','error') and \
+            datetime.fromisoformat(cached["checked_at"]) > datetime.now(timezone.utc) - (PENDING_RECHECK if cached['status']=='pending' else timedelta(minutes=5)):
         return cached
     try:
         score = score_cell(row["ticker"], row["date"], holding_days)
     except Exception as exc:  # noqa: BLE001 — explicit, never a guessed outcome
-        return {"status": "error", "reason": f"closes unavailable: {type(exc).__name__}: {exc}"}
+        score = {"status": "error", "reason": f"closes unavailable: {type(exc).__name__}: {exc}", 'checked_at':_now()}
     with _conn(store) as c:
         c.execute("UPDATE eval_cells SET score_json=? WHERE batch_id=? AND ticker=? AND date=?",
                   (json.dumps(score), row["batch_id"], row["ticker"], row["date"]))

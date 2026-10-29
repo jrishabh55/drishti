@@ -332,15 +332,15 @@ def test_batch_needs_exact_cost_confirmation_and_bills_each_cell(job_store, fake
     res = client.post("/api/evaluation/batches", json=_batch_body(confirmed_credits=6))
     assert res.status_code == 201
     view = res.json()
-    # One live run per ticker: two cells submitted, two credits spent.
-    assert [c["phase"] for c in view["cells"]] == ["running", "queued", "queued"] * 2
-    assert fake_clerk["user_1"]["private_metadata"]["credits"] == 8
+    # One live batch run per user avoids tying up workers on the per-user lock.
+    assert [c["phase"] for c in view["cells"]] == ["running"] + ["queued"] * 5
+    assert fake_clerk["user_1"]["private_metadata"]["credits"] == 9
     assert {r.analysis_date for _, r, _ in fake_runner} == {"2026-01-05"}
 
     # A finished cell frees its ticker for the next.
     _complete(job_store, view["cells"][0]["run_id"])
     batches.pump("user_1")
-    assert fake_clerk["user_1"]["private_metadata"]["credits"] == 7
+    assert fake_clerk["user_1"]["private_metadata"]["credits"] == 8
     assert [(r.ticker, r.analysis_date) for _, r, _ in fake_runner][-1] == ("RELIANCE.NS", "2026-01-10")
 
     # Another user cannot see it.
@@ -410,9 +410,11 @@ def test_batch_scores_only_real_completed_closes(job_store, fake_runner, monkeyp
     body = _batch_body(start_date="2026-01-05", end_date="2026-02-09", every_n_days=35)
     view = client.post("/api/evaluation/batches", json=body | {"confirmed_credits": 0}).json()
     # RELIANCE 01-05 Buy, TCS 01-05 Sell; their second dates (02-09) lack a full window.
-    _complete(job_store, view["cells"][0]["run_id"], "Buy")
-    _complete(job_store, view["cells"][2]["run_id"], "Sell")
-    view = client.get(f"/api/evaluation/batches/{view['id']}").json()  # pumps the next cells
+    for _ in range(4):
+        view = client.get(f"/api/evaluation/batches/{view['id']}").json()
+        active = next(c for c in view['cells'] if c['phase'] == 'running')
+        _complete(job_store, active['run_id'], 'Buy' if active['ticker']=='RELIANCE.NS' else 'Sell')
+    view = client.get(f"/api/evaluation/batches/{view['id']}").json()
     _complete(job_store, view["cells"][1]["run_id"], "Buy")
     _complete(job_store, view["cells"][3]["run_id"], "Buy")
 
@@ -527,3 +529,26 @@ def test_batch_memory_is_isolated_from_normal_analysis(tmp_path):
     batch=RunRequest(**base,evaluation_batch_id='00000000-0000-0000-0000-000000000001')
     assert _build_config(normal,user_id='alice')['memory_log_path'] != _build_config(batch,user_id='alice')['memory_log_path']
     assert request_hash(normal) != request_hash(batch)
+
+
+def test_batch_submits_at_most_one_cell_per_user(job_store, fake_runner):
+    cells=batches.plan_cells(['RELIANCE.NS','TCS.NS'],'2026-01-05','2026-01-10',5)
+    bid=batches.create_batch('anonymous',_request(),cells,0,job_store)
+    assert batches.pump('anonymous',job_store)==1
+    assert len(fake_runner)==1
+    assert batches.pump('anonymous',job_store)==0
+
+
+def test_score_failure_is_cached_until_retry_time(job_store, fake_runner, monkeypatch):
+    calls=[]
+    def broken(*args):
+        calls.append(args)
+        raise RuntimeError('vendor unavailable')
+    monkeypatch.setattr(batches,'score_cell',broken)
+    cells=batches.plan_cells(['RELIANCE.NS'],'2026-01-05','2026-01-05',5)
+    bid=batches.create_batch('anonymous',_request(),cells,0,job_store)
+    batches.pump('anonymous',job_store)
+    _complete(job_store,fake_runner[0][0],'Buy')
+    batches.batch_view(bid,'anonymous',job_store)
+    batches.batch_view(bid,'anonymous',job_store)
+    assert len(calls)==1

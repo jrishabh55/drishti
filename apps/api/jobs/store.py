@@ -444,6 +444,10 @@ class JobStore:
             )
             return bool(cur.rowcount)
 
+    def has_active_run_for_user(self, user_id: str) -> bool:
+        with self._conn() as conn:
+            return conn.execute("SELECT 1 FROM runs WHERE user_id=? AND status IN ('queued','running') LIMIT 1", (user_id,)).fetchone() is not None
+
     def has_active_run_for_ticker(
         self, ticker: str, *, user_id: Optional[str] = None
     ) -> bool:

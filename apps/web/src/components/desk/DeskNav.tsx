@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 
 const TABS = [
   { to: '/desk', label: 'Today', exact: true },
+  { to: '/desk/research', label: 'Research', exact: false },
   { to: '/desk/plans', label: 'Plans', exact: false },
   { to: '/desk/paper', label: 'Paper ledger', exact: false },
   { to: '/desk/performance', label: 'Performance', exact: false },

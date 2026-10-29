@@ -140,6 +140,8 @@ async def ingest_loop() -> None:
     if store.instruments_df().empty:
         await asyncio.to_thread(seed_universe, store)
         logger.info("scanner universe seeded")
+    from apps.api.scanner.universe import apply_fo_membership
+    await asyncio.to_thread(apply_fo_membership, store)
     enrich_done_for = ""
     needs_daily = store.latest_ts("1d") is None
     pending = {tf for tf in TF_FETCH if store.latest_ts(tf) is None}

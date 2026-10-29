@@ -153,6 +153,8 @@ def create_app() -> FastAPI:
     app.include_router(evaluation_router, prefix="/api")
     from apps.api.routes.kite import router as kite_router
     app.include_router(kite_router, prefix="/api")
+    from apps.api.routes.desk_research import router as desk_research_router
+    app.include_router(desk_research_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(scanners_router, prefix="/api")
