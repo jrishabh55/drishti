@@ -1,4 +1,7 @@
-"""Paper trading: confirmed tickets filled against (delayed) 5-minute bars.
+"""Paper trading: confirmed tickets filled against the plan's own bars
+(5-minute by default, 1-minute for 1m plans; delayed unless the user streams
+live). Each trade records its ``interval`` and is only ever advanced on bars
+of that interval.
 
 Upstream defaults to Alpaca's paper account; Drishti keeps its own ledger so
 paper trading needs no broker at all. The fill model is deliberately
@@ -20,12 +23,22 @@ conservative and bar-based (we never see ticks):
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from apps.api.desk.bars import Bar
 from apps.api.desk.market import charges as charges_mod, ticks
 from apps.api.desk.market.session import NSE, SessionSpec, clock24, parse_clock
+
+
+def interval_of(trade_or_plan: Dict[str, Any]) -> str:
+    """Legacy trades and plans without an interval were 5-minute."""
+    return trade_or_plan.get("interval") or "5m"
+
+
+def spec_of(trade: Dict[str, Any]) -> SessionSpec:
+    return replace(NSE, bar_min=1) if interval_of(trade) == "1m" else NSE
 
 
 def new_trade(order: Dict[str, Any], *, ticket_id: str, placed_at: datetime,
@@ -34,6 +47,7 @@ def new_trade(order: Dict[str, Any], *, ticket_id: str, placed_at: datetime,
     local = placed_at.astimezone(spec.tz)
     return {
         "ticket_id": ticket_id, "symbol": order["symbol"], "side": "buy", "qty": order["qty"],
+        "interval": interval_of(plan),
         "order_type": order["order_type"], "limit": order.get("price"),
         "stop": order.get("stop") or plan.get("stop"),
         "target": order.get("target") or plan.get("target"),
@@ -53,8 +67,13 @@ def _close_min(b: Bar, spec: SessionSpec) -> int:
 
 
 def advance(trade: Dict[str, Any], bars: Sequence[Bar], now: datetime, profile,
-            spec: SessionSpec = NSE) -> Dict[str, Any]:
-    """Pure: walk the trade forward over completed session bars. Idempotent."""
+            spec: Optional[SessionSpec] = None) -> Dict[str, Any]:
+    """Pure: walk the trade forward over completed session bars of the trade's
+    own interval (``spec`` defaults to it). Idempotent."""
+    spec = spec or spec_of(trade)
+    if spec.bar_min != spec_of(trade).bar_min:
+        raise ValueError(f"a {interval_of(trade)} paper trade can't be advanced on "
+                         f"{spec.bar_min}-minute bars")
     t = dict(trade)
     t["events"] = list(trade.get("events") or [])
     if t["status"] in ("closed", "cancelled"):

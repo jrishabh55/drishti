@@ -553,6 +553,15 @@ class ConfirmBody(BaseModel):
     mode: Literal["paper", "broker"]
 
 
+def _user_lock(user_id: str):
+    """The same per-user lock the live Kite engine holds while it claims and
+    sends a ticket, so a paper confirm, a live send and a cancel of one ticket
+    are serialised (and each paper risk check sees the previous one's cash)."""
+    from apps.api.kite.execution import user_lock
+
+    return user_lock(user_id)
+
+
 @router.post("/desk/tickets/{tid}/confirm")
 def confirm_ticket(tid: str, body: ConfirmBody, user_id: str = Depends(current_user_id)
                    ) -> Dict[str, Any]:
@@ -560,53 +569,59 @@ def confirm_ticket(tid: str, body: ConfirmBody, user_id: str = Depends(current_u
     from apps.api.desk import paper
 
     store = get_desk_store()
-    tk = _own_ticket(tid, user_id)
-    if tk["status"] != "ready":
-        raise HTTPException(status_code=409, detail=f"ticket is {tk['status']}; only a ready "
-                                                    "ticket can be confirmed")
-    verdict = _risk_for([tk["order"]], user_id)
-    res = verdict["results"][0]
-    if res["fingerprint"] != tk["fingerprint"]:
-        raise HTTPException(status_code=409, detail="the order changed since it was checked: "
-                                                    "make a new ticket")
-    now = _now()
-    if res["verdict"] != "PASS":
-        tk.update(status="blocked", verdict=res, verdict_warnings=verdict["warnings"])
-        store.update_ticket(tid, user_id, tk)
-        raise HTTPException(status_code=409, detail={"message": "blocked on re-check",
-                                                     "reasons": res["reasons"]})
-    tk["verdict"] = res
-    if body.mode == "paper":
-        trade = paper.new_trade(tk["order"], ticket_id=tid, placed_at=now,
-                                profile=load_profile(user_id))
-        trade = store.create_paper(user_id, trade)
-        tk.update(status="paper", paper_trade_id=trade["id"], confirmed_at=now.isoformat())
-    else:
-        tk.update(status="sent", sent_at=now.astimezone(NSE_SPEC.tz).isoformat(),
-                  confirmed_at=now.isoformat())
-    store.update_ticket(tid, user_id, tk)
-    plan = store.get_plan(tk["plan_id"], user_id) if tk.get("plan_id") else None
-    if plan:
-        plan["status"] = "ticketed"
-        store.update_plan(plan["id"], user_id, plan)
-    return _own_ticket(tid, user_id)
+    with _user_lock(user_id):
+        tk = _own_ticket(tid, user_id)
+        if tk["status"] != "ready":
+            raise HTTPException(status_code=409, detail=f"ticket is {tk['status']}; only a ready "
+                                                        "ticket can be confirmed")
+        verdict = _risk_for([tk["order"]], user_id)
+        res = verdict["results"][0]
+        if res["fingerprint"] != tk["fingerprint"]:
+            raise HTTPException(status_code=409, detail="the order changed since it was checked: "
+                                                        "make a new ticket")
+        now = _now()
+        if res["verdict"] != "PASS":
+            store.transition_ticket(tid, user_id, ("ready",), dict(
+                tk, status="blocked", verdict=res, verdict_warnings=verdict["warnings"]))
+            raise HTTPException(status_code=409, detail={"message": "blocked on re-check",
+                                                         "reasons": res["reasons"]})
+        tk["verdict"] = res
+        if body.mode == "paper":
+            trade = paper.new_trade(tk["order"], ticket_id=tid, placed_at=now,
+                                    profile=load_profile(user_id))
+            done = store.confirm_paper(user_id, tid, dict(tk, confirmed_at=now.isoformat()), trade)
+        else:
+            done = store.transition_ticket(tid, user_id, ("ready",), dict(
+                tk, status="sent", sent_at=now.astimezone(NSE_SPEC.tz).isoformat(),
+                confirmed_at=now.isoformat()))
+        if not done:   # cancelled / sent / confirmed by another request meanwhile
+            raise HTTPException(status_code=409, detail="ticket is no longer ready")
+        plan = store.get_plan(tk["plan_id"], user_id) if tk.get("plan_id") else None
+        if plan:
+            plan["status"] = "ticketed"
+            store.update_plan(plan["id"], user_id, plan)
+        return _own_ticket(tid, user_id)
 
 
 @router.post("/desk/tickets/{tid}/cancel")
 def cancel_ticket(tid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     store = get_desk_store()
-    tk = _own_ticket(tid, user_id)
-    if tk["status"] not in ("ready", "blocked", "refused"):
-        raise HTTPException(status_code=409, detail=f"ticket is {tk['status']}")
-    tk["status"] = "cancelled"
-    store.update_ticket(tid, user_id, tk)
-    return tk
+    cancellable = ("ready", "blocked", "refused")
+    with _user_lock(user_id):
+        tk = _own_ticket(tid, user_id)
+        if tk["status"] not in cancellable or \
+                not store.transition_ticket(tid, user_id, cancellable, dict(tk, status="cancelled")):
+            raise HTTPException(status_code=409, detail=f"ticket is {_own_ticket(tid, user_id)['status']}")
+        return _own_ticket(tid, user_id)
 
 
 # ---------------------------------------------------------------- paper ledger
 
 def refresh_paper(user_id: str) -> List[Dict[str, Any]]:
-    """Advance the user's pending/open paper trades over the latest bars."""
+    """Advance the user's pending/open paper trades over the latest bars of
+    each trade's own interval (legacy trades: 5m). Bars are read outside the
+    lock; each trade is re-read and written under it, so a concurrent close
+    or confirm is never overwritten with a stale copy."""
     from apps.api.desk import paper
 
     store = get_desk_store()
@@ -615,15 +630,19 @@ def refresh_paper(user_id: str) -> List[Dict[str, Any]]:
     out = []
     for t in store.list_paper(user_id, limit=1000):
         if t["status"] in ("pending", "open"):
+            interval = paper.interval_of(t)
             try:
-                series = bars_source.get_session_rows(user_id, t["symbol"], "5m")
+                series = bars_source.get_session_rows(user_id, t["symbol"], interval)
                 bars, _ = bars_source.session_bars_for(series, now)
             except bars_mod.BarsError:
                 bars = []
-            nt = paper.advance(t, bars, now, prof)
-            if nt != t:
-                store.update_paper(t["id"], user_id, nt)
-                t = store.get_paper(t["id"], user_id) or nt
+            with _user_lock(user_id):
+                cur = store.get_paper(t["id"], user_id) or t
+                if cur["status"] in ("pending", "open"):
+                    nt = paper.advance(cur, bars, now, prof)
+                    if nt != cur:
+                        store.update_paper(t["id"], user_id, nt)
+                t = store.get_paper(t["id"], user_id) or cur
         out.append(t)
     return out
 

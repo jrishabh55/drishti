@@ -128,6 +128,7 @@ def size_trade(plan: Dict[str, Any], profile: DeskProfile, *, cash: Optional[flo
     return {
         "symbol": sym, "side": "buy", "setup": plan.get("setup", ""), "date": plan.get("date"),
         "entry_time": plan.get("entry_time"), "entry_plan": entry_plan, "entry": ref,
+        "interval": plan.get("interval") or "5m",
         "entry_from": ref_from, "stop": stop, "target": target, "risk_per_share": round(risk, 2),
         "reward_risk": rr, "reward_risk_net": rr_net, "capital": capital,
         "cash_buffer": buffer, "cash_available": available, "limits": limits, "qty": qty,
@@ -152,7 +153,7 @@ def order_from(s: Dict[str, Any], plan_id: Optional[str] = None) -> Optional[Dic
     o["plan"] = {"plan_id": plan_id, "entry": s["entry"], "stop": s["stop"], "target": s["target"],
                  "risk_per_share": s["risk_per_share"], "max_loss": s["max_loss"],
                  "setup": s["setup"], "entry_time": s["entry_time"], "flat_by": s["flat_by"],
-                 "date": s["date"]}
+                 "date": s["date"], "interval": s.get("interval") or "5m"}
     o["why"] = (f"{s['qty']} shares of {s['symbol']}, bound by your {s['bound_by']} "
                 f"({s['qty']} × ₹{s['risk_per_share']:.2f} = ₹{s['max_loss']:,.2f} at the stop, "
                 f"≈₹{s['max_loss_net']:,.2f} with charges)")

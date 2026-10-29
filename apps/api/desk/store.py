@@ -262,6 +262,41 @@ class DeskStore:
             "status": doc["status"], "fingerprint": doc["fingerprint"],
             "doc": json.dumps(doc), "updated_at": now_iso()})
 
+    def transition_ticket(self, tid: str, user_id: str, from_statuses: tuple,
+                          doc: Dict[str, Any]) -> bool:
+        """Compare-and-set: write ``doc`` only while the stored ticket is still
+        in one of ``from_statuses``. False when another request got there first."""
+        doc = dict(doc, id=tid)
+        marks = ",".join("?" for _ in from_statuses)
+        with self._conn() as c:
+            cur = c.execute(f"UPDATE desk_tickets SET status=?, fingerprint=?, doc=?, updated_at=? "
+                            f"WHERE id=? AND user_id=? AND status IN ({marks})",
+                            (doc["status"], doc["fingerprint"], json.dumps(doc), now_iso(),
+                             tid, user_id, *from_statuses))
+            return cur.rowcount == 1
+
+    def confirm_paper(self, user_id: str, tid: str, ticket_doc: Dict[str, Any],
+                      trade_doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Claim a READY ticket and create its paper trade in ONE transaction:
+        either both happen or neither (no orphan trade, no double fill).
+        None when the ticket was no longer ready."""
+        pid, now = new_id(), now_iso()
+        trade = dict(trade_doc, id=pid)
+        tk = dict(ticket_doc, id=tid, status="paper", paper_trade_id=pid)
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            cur = c.execute("UPDATE desk_tickets SET status=?, doc=?, updated_at=? "
+                            "WHERE id=? AND user_id=? AND status='ready'",
+                            ("paper", json.dumps(tk), now, tid, user_id))
+            if cur.rowcount != 1:
+                c.rollback()
+                return None
+            c.execute("INSERT INTO paper_trades (id, user_id, ticket_id, symbol, status, "
+                      "trade_date, doc, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                      (pid, user_id, tid, trade["symbol"], trade["status"], trade["trade_date"],
+                       json.dumps(trade), now, now))
+        return self.get_paper(pid, user_id)
+
     def list_tickets(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         with self._conn() as c:
             rows = c.execute("SELECT * FROM desk_tickets WHERE user_id=? "

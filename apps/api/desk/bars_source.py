@@ -131,6 +131,16 @@ def get_history_rows(user_id: str, symbol: str, interval: str = "5m",
     return BarSeries(sym, interval, rows, "delayed:yahoo", _as_of(rows))
 
 
+def spec_for(interval: str):
+    """The NSE session on the series' own bar grid (1m or 5m)."""
+    from dataclasses import replace
+
+    if interval not in ("1m", "5m"):
+        raise ValueError(f"session bars are 1m or 5m, not {interval!r}")
+    return replace(NSE, bar_min=1) if interval == "1m" else NSE
+
+
 def session_bars_for(series: BarSeries, as_of: Optional[datetime] = None
                      ) -> tuple[List[Bar], dict]:
-    return bars_mod.session_bars(series.rows, NSE, as_of or datetime.now(timezone.utc))
+    return bars_mod.session_bars(series.rows, spec_for(series.interval),
+                                 as_of or datetime.now(timezone.utc))
