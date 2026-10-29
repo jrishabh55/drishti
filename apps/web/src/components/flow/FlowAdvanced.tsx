@@ -2,6 +2,7 @@ import type { ConfigResponse, GeminiKeyStatus, HelperStatus } from '#/lib/types'
 import type { FlowState } from './FlowLanding'
 import { HelperSetup } from './FlowLanding'
 import { GeminiSetup } from './GeminiSetup'
+import { ProviderKeySetup } from './ProviderKeySetup'
 
 const ANALYSTS = [
   { id: 'market', name: 'Market', desc: 'Technicals, charts, indicators' },
@@ -78,6 +79,10 @@ export function FlowAdvanced({
     !!provider?.requires_user_key && geminiStatus?.active_source == null
   const blocked = helperBlocked || geminiBlocked
   const models = config?.models_by_provider[form.provider] ?? []
+  const deepKey = form.deepProvider || form.provider
+  const deepProvider = config?.providers.find(p => p.key === deepKey)
+  const deepModels = config?.models_by_provider[deepKey] ?? []
+  const extraProvider = (key: string) => !['openai', 'google', 'chatgpt_helper'].includes(key)
 
   const supportsReasoning =
     provider?.supports_reasoning_effort ||
@@ -294,25 +299,24 @@ export function FlowAdvanced({
               </div>
             </div>
             <div className="cfg-control" style={{ display: 'grid', gap: 12 }}>
-              <div className="seg" style={{ width: '100%' }}>
-                {(config?.providers ?? []).map((p) => (
-                  <button
-                    key={p.key}
-                    className={`seg-btn ${form.provider === p.key ? 'active' : ''}`}
-                    style={{ flex: 1 }}
-                    onClick={() => {
-                      const ms = config?.models_by_provider[p.key] ?? []
-                      patch({
-                        provider: p.key,
-                        shallowThinker: ms[0]?.id ?? '',
-                        deepThinker: ms[1]?.id ?? ms[0]?.id ?? '',
-                      })
-                    }}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
+              <Field label="Quick model provider">
+                <select className="fld-input" value={form.provider} onChange={e => {
+                  const ms = config?.models_by_provider[e.target.value] ?? []
+                  patch({provider:e.target.value, shallowThinker:ms[0]?.id ?? '',
+                    ...(!form.deepProvider ? {deepThinker:ms[1]?.id ?? ms[0]?.id ?? ''} : {})})
+                }}>{config?.providers.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select>
+              </Field>
+              {extraProvider(form.provider) && <ProviderKeySetup key={form.provider} provider={form.provider} />}
+              <Field label="Deep model provider">
+                <select className="fld-input" value={form.deepProvider || ''} onChange={e => {
+                  const key = e.target.value || form.provider
+                  const ms = config?.models_by_provider[key] ?? []
+                  patch({deepProvider:e.target.value, deepThinker:ms[1]?.id ?? ms[0]?.id ?? ''})
+                }}><option value="">Same as quick provider</option>{config?.providers.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select>
+              </Field>
+              {deepKey !== form.provider && extraProvider(deepKey) && <ProviderKeySetup key={deepKey} provider={deepKey} />}
+              {deepKey !== form.provider && deepProvider?.requires_helper && <HelperSetup status={helperStatus} />}
+              {deepKey !== form.provider && deepKey === 'google' && <GeminiSetup status={geminiStatus} onChanged={onGeminiChanged} />}
               {provider?.requires_helper && (
                 <HelperSetup status={helperStatus} />
               )}
@@ -345,14 +349,18 @@ export function FlowAdvanced({
                     value={form.deepThinker}
                     onChange={(e) => patch({ deepThinker: e.target.value })}
                   >
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
+                    {deepModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
                     ))}
                   </select>
                 </Field>
               </div>
+              <Field label="Custom model IDs (optional)">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input className="fld-input" aria-label="Quick model ID" value={form.shallowThinker} onChange={e => patch({shallowThinker:e.target.value})} />
+                  <input className="fld-input" aria-label="Deep model ID" value={form.deepThinker} onChange={e => patch({deepThinker:e.target.value})} />
+                </div>
+              </Field>
               {supportsReasoning && (
                 <Field label="Reasoning effort">
                   <div className="seg" style={{ width: '100%' }}>

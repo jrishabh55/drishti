@@ -78,15 +78,15 @@ def test_helper_is_listed_even_when_not_running(without_helper):
     c = get_config()
     assert c.providers[0].key == HELPER_PROVIDER_KEY
     assert c.providers[0].requires_helper is True
-    assert [p.key for p in c.providers[1:]] == ORIGINAL_KEYS
+    assert [p.key for p in c.providers[1:3]] == ORIGINAL_KEYS
     assert c.models_by_provider[HELPER_PROVIDER_KEY]
 
 
-def test_provider_surface_is_the_three_product_providers(with_helper):
-    """The product deliberately offers exactly three providers: the helper
-    (ChatGPT subscription), OpenAI on the server key, and Gemini BYOC."""
+def test_provider_surface_preserves_existing_and_adds_key_scoped_providers(with_helper):
+    """Existing providers remain first; extra providers use personal keys."""
     c = get_config()
-    assert [p.key for p in c.providers] == [HELPER_PROVIDER_KEY, "openai", "google"]
+    assert [p.key for p in c.providers][:3] == [HELPER_PROVIDER_KEY, "openai", "google"]
+    assert "anthropic" in {p.key for p in c.providers}
     by_key = {p.key: p for p in c.providers}
     assert by_key["openai"].supports_reasoning_effort is True
     assert by_key["google"].supports_google_thinking is True

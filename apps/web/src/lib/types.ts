@@ -17,6 +17,9 @@ export interface RunRequest {
   analysts: string[]
   research_depth: number
   llm_provider: string
+  quick_think_provider?: string | null
+  deep_think_provider?: string | null
+  use_paper_portfolio?: boolean
   backend_url?: string | null
   shallow_thinker: string
   deep_thinker: string

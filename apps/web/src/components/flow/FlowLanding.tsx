@@ -63,6 +63,8 @@ export interface FlowState {
   provider: string
   shallowThinker: string
   deepThinker: string
+  deepProvider?: string
+  usePaperPortfolio?: boolean
   language: string
   reasoningEffort?: string
   checkpoint: boolean
@@ -168,23 +170,27 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
     (p) => p.key === form.provider,
   )
 
+  const deepProvider = config?.providers.find(p => p.key === (form.deepProvider || form.provider))
+  const needsHelper = !!selectedProvider?.requires_helper || !!deepProvider?.requires_helper
+  const needsGemini = form.provider === 'google' || form.deepProvider === 'google'
+
   /* A helper-backed provider with no reachable helper would start a run that
      is guaranteed to fail deep in the pipeline — block submission until the
      probe confirms it (null = probe still in flight, also blocked). */
   const helperBlocked =
-    !!selectedProvider?.requires_helper && helperStatus?.connected !== true
+    needsHelper && helperStatus?.connected !== true
 
   /* A BYOC provider (Gemini) with no resolvable credential fails at submit —
      block until the status probe reports a usable source (null = in flight,
      also blocked). */
   const geminiBlocked =
-    !!selectedProvider?.requires_user_key && geminiStatus?.active_source == null
+    needsGemini && geminiStatus?.active_source == null
 
   /* Fetch the Gemini credential state when a BYOC provider is selected;
      `geminiRefresh` re-runs this after GeminiSetup saves/removes a key. */
   useEffect(() => {
     setGeminiStatus(null)
-    if (!selectedProvider?.requires_user_key) return
+    if (!needsGemini) return
     let stale = false
     api
       .getGeminiKeyStatus()
@@ -203,7 +209,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
     return () => {
       stale = true
     }
-  }, [selectedProvider?.requires_user_key, form.provider, geminiRefresh])
+  }, [needsGemini, geminiRefresh])
 
   /* Check helper reachability when a helper-backed provider is selected,
      then re-probe every 3s until it connects — the setup card's "waiting"
@@ -211,7 +217,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
      An unreachable endpoint reads the same as a stopped helper. */
   useEffect(() => {
     setHelperStatus(null)
-    if (!selectedProvider?.requires_helper) return
+    if (!needsHelper) return
     let stale = false
     let timer: ReturnType<typeof setInterval> | undefined
     const probe = () => {
@@ -238,7 +244,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
       stale = true
       clearInterval(timer)
     }
-  }, [selectedProvider?.requires_helper, form.provider])
+  }, [needsHelper])
 
   function patch(p: Partial<FlowState>) {
     setForm((f) => ({ ...f, ...p }))
@@ -303,6 +309,8 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
       analysts: form.analysts,
       research_depth: form.depth,
       llm_provider: form.provider,
+      deep_think_provider: form.deepProvider || null,
+      use_paper_portfolio: form.usePaperPortfolio ?? false,
       /* The server dictates each provider's endpoint and ignores this field;
          null keeps the cache key stable across clients. */
       backend_url: null,

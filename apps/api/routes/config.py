@@ -106,7 +106,11 @@ def get_config() -> ConfigResponse:
         )
         for label, key, backend_url, caps in _PROVIDERS
     ]
-    models_by_provider = {key: _models_for_provider(key) for _, key, _, _ in _PROVIDERS}
+    from apps.api.integrations.product_providers import EXTRA_PROVIDERS, ADMIN_PROVIDERS
+    for key, label in {**EXTRA_PROVIDERS, **ADMIN_PROVIDERS}.items():
+        providers.append(ProviderOption(key=key, label=label,
+                                       supports_anthropic_effort=key == "anthropic"))
+    models_by_provider = {p.key: _models_for_provider(p.key) for p in providers}
 
     # The helper appears as its own provider so the user never has to paste a
     # URL. ALWAYS listed (first): whether the user's helper is local, on the

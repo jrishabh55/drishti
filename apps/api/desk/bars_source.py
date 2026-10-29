@@ -77,14 +77,15 @@ def get_session_rows(user_id: str, symbol: str, interval: str = "5m", *, now: da
 
     now = now or datetime.now(timezone.utc)
     store = get_scanner_store()
-    df = store.load_symbol_bars(interval, sym, limit=320)
+    retain = 400 if interval == "1m" else 320
+    df = store.load_symbol_bars(interval, sym, limit=retain)
     rows = bars_mod.rows_from_long(df) if not df.empty else []
     notes = []
     if not rows or intraday_stale(_as_of(rows), now):
         try:
             fetched = bars_mod.fetch_history(sym, interval, now=now)
             if fetched and (not rows or max(r[0] for r in fetched) > max(r[0] for r in rows)):
-                rows = sorted(fetched, key=lambda row: row[0])[-320:]
+                rows = sorted(fetched, key=lambda row: row[0])[-retain:]
                 import pandas as pd
 
                 frame = pd.DataFrame([dict(symbol=sym, ts=r[0].astimezone(NSE.tz).isoformat(), open=r[1],

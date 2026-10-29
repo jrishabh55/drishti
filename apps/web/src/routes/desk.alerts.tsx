@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
+import { TelegramSettings } from '#/components/desk/TelegramSettings'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -131,6 +132,7 @@ function AlertsPage() {
             {!events.length && <p className="text-sm text-[var(--text-3)]">Nothing has rung yet.</p>}
           </section>
         </div>
+        <TelegramSettings />
         <DeskFooter />
       </main>
     </div>

@@ -9,7 +9,8 @@ import { Switch } from '#/components/ui/switch'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '#/components/ui/table'
-import { api } from '#/lib/api'
+import { api, jsonFetch } from '#/lib/api'
+import { EntryRules, type EntryRule } from '#/components/desk/EntryRules'
 import type { AlertEvent, EntryStatus, OrbScan, PaperLedger } from '#/lib/desk-types'
 import { inr, orbEmptyMessage, rMult, signedPct } from '#/lib/desk-format'
 
@@ -29,6 +30,8 @@ function DeskToday() {
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [auto, setAuto] = useState(true)
+  const rulesRef = useRef<Record<string, EntryRule>>({})
+  const [rules, setRules] = useState<Record<string, EntryRule>>({})
   const [watch, setWatch] = useState<string[]>([])
   const [statuses, setStatuses] = useState<Record<string, EntryStatus | string>>({})
   const [ledger, setLedger] = useState<PaperLedger | null>(null)
@@ -55,19 +58,20 @@ function DeskToday() {
   const refreshWatch = useCallback(async (symbols: string[]) => {
     const pairs = await Promise.all(symbols.map(async (s) => {
       try {
-        return [s, await api.desk.entry(s)] as const
+        return [s, await api.desk.entry(s, rulesRef.current[s] ?? {})] as const
       } catch (e) {
         return [s, e instanceof Error ? e.message : String(e)] as const
       }
     }))
-    setStatuses(Object.fromEntries(pairs))
+    setStatuses(previous => ({...previous,...Object.fromEntries(pairs)}))
   }, [])
 
   const refreshAll = useCallback(async () => {
     runScan()
     api.desk.paper().then(setLedger).catch(() => {})
     api.desk.alertEvents(true).then(setEvents).catch(() => {})
-    const w = await api.desk.watchlist().catch(() => [] as string[])
+    const [w, savedRules] = await Promise.all([api.desk.watchlist().catch(() => [] as string[]), jsonFetch<Record<string,EntryRule>>('/desk/watch-rules').catch(() => ({}))])
+    rulesRef.current = savedRules; setRules(savedRules)
     setWatch(w)
     refreshWatch(w)
   }, [runScan, refreshWatch])
@@ -79,10 +83,15 @@ function DeskToday() {
     return () => clearInterval(t)
   }, [auto, refreshAll])
 
-  async function plan(symbol: string) {
+  async function plan(symbol: string, status?: EntryStatus) {
     setPlanning(symbol); setError(null)
     try {
-      const p = await api.desk.createPlan({ symbol })
+      const p = await api.desk.createPlan(status?.trigger ? {
+        symbol, interval:status.interval, setup:status.setup, level:status.level,
+        entry:status.trigger.price, entry_time:status.trigger.time, date:status.date,
+        or_high:status.opening_range?.high, or_low:status.opening_range?.low,
+        ...(status.setup==='level'?{stop_rule:'pct' as const,stop_param:1}:{})
+      } : {symbol})
       navigate({ to: '/desk/plans/$id', params: { id: p.id } })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -247,10 +256,15 @@ function DeskToday() {
                   {typeof st === 'object' && st.data_as_of && (
                     <SourceBadge source={st.source} asOf={st.data_as_of} />
                   )}
+                  <EntryRules initial={rules[s]} onApply={async rule => {
+                    const saved = await jsonFetch<EntryRule>(`/desk/watch-rules/${encodeURIComponent(s)}`,{method:'PUT',body:JSON.stringify(rule)})
+                    rulesRef.current = {...rulesRef.current,[s]:saved}; setRules(rulesRef.current)
+                    await refreshWatch([s])
+                  }} />
                   <div className="flex gap-1">
                     <Link to="/analyse" search={{ ticker: `${s}.NS` }} className="es-btn sm no-underline">Analyse</Link>
                     {typeof st === 'object' && st.status === 'triggered' && (
-                      <Button size="sm" onClick={() => plan(s)} disabled={planning === s}>Plan →</Button>
+                      <Button size="sm" onClick={() => plan(s, st)} disabled={planning === s}>Plan →</Button>
                     )}
                     <Button size="sm" variant="ghost" onClick={() => removeWatch(s)}>Remove</Button>
                   </div>

@@ -13,6 +13,7 @@ import { Route as AnalyseRouteImport } from './routes/analyse'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ScannersIndexRouteImport } from './routes/scanners.index'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
+import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as ScannersNewRouteImport } from './routes/scanners.new'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as DeskSettingsRouteImport } from './routes/desk.settings'
@@ -41,6 +42,11 @@ const ScannersIndexRoute = ScannersIndexRouteImport.update({
 const DeskIndexRoute = DeskIndexRouteImport.update({
   id: '/desk/',
   path: '/desk/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsModelsRoute = SettingsModelsRouteImport.update({
+  id: '/settings/models',
+  path: '/settings/models',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ScannersNewRoute = ScannersNewRouteImport.update({
@@ -98,6 +104,7 @@ export interface FileRoutesByFullPath {
   '/desk/settings': typeof DeskSettingsRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
+  '/settings/models': typeof SettingsModelsRoute
   '/desk/': typeof DeskIndexRoute
   '/scanners/': typeof ScannersIndexRoute
   '/desk/plans/$id': typeof DeskPlansIdRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByTo {
   '/desk/settings': typeof DeskSettingsRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
+  '/settings/models': typeof SettingsModelsRoute
   '/desk': typeof DeskIndexRoute
   '/scanners': typeof ScannersIndexRoute
   '/desk/plans/$id': typeof DeskPlansIdRoute
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   '/desk/settings': typeof DeskSettingsRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
+  '/settings/models': typeof SettingsModelsRoute
   '/desk/': typeof DeskIndexRoute
   '/scanners/': typeof ScannersIndexRoute
   '/desk/plans/$id': typeof DeskPlansIdRoute
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
     | '/desk/settings'
     | '/runs/$id'
     | '/scanners/new'
+    | '/settings/models'
     | '/desk/'
     | '/scanners/'
     | '/desk/plans/$id'
@@ -161,6 +171,7 @@ export interface FileRouteTypes {
     | '/desk/settings'
     | '/runs/$id'
     | '/scanners/new'
+    | '/settings/models'
     | '/desk'
     | '/scanners'
     | '/desk/plans/$id'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '/desk/settings'
     | '/runs/$id'
     | '/scanners/new'
+    | '/settings/models'
     | '/desk/'
     | '/scanners/'
     | '/desk/plans/$id'
@@ -192,6 +204,7 @@ export interface RootRouteChildren {
   DeskSettingsRoute: typeof DeskSettingsRoute
   RunsIdRoute: typeof RunsIdRoute
   ScannersNewRoute: typeof ScannersNewRoute
+  SettingsModelsRoute: typeof SettingsModelsRoute
   DeskIndexRoute: typeof DeskIndexRoute
   ScannersIndexRoute: typeof ScannersIndexRoute
   DeskPlansIdRoute: typeof DeskPlansIdRoute
@@ -227,6 +240,13 @@ declare module '@tanstack/react-router' {
       path: '/desk'
       fullPath: '/desk/'
       preLoaderRoute: typeof DeskIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/models': {
+      id: '/settings/models'
+      path: '/settings/models'
+      fullPath: '/settings/models'
+      preLoaderRoute: typeof SettingsModelsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/scanners/new': {
@@ -304,6 +324,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeskSettingsRoute: DeskSettingsRoute,
   RunsIdRoute: RunsIdRoute,
   ScannersNewRoute: ScannersNewRoute,
+  SettingsModelsRoute: SettingsModelsRoute,
   DeskIndexRoute: DeskIndexRoute,
   ScannersIndexRoute: ScannersIndexRoute,
   DeskPlansIdRoute: DeskPlansIdRoute,

@@ -163,6 +163,7 @@ export function Topbar({
         >
           Trade desk
         </Link>
+        <Link to="/settings/models" className="es-nav-link no-underline" activeProps={{className:'active'}}>Models</Link>
       </nav>
       {ticker && (
         <div className="es-crumbs">

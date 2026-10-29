@@ -385,7 +385,7 @@ def normalize_intraday_plan(raw: Dict[str, Any], spec: SessionSpec = NSE) -> Dic
         try:
             k = spec.bar_for_close(parse_clock(raw["entry_time"]))
         except ValueError:
-            raise TMError(f"entry_time {raw['entry_time']} is not a 5-minute bar close "
+            raise TMError(f"entry_time {raw['entry_time']} is not a {spec.bar_min}-minute bar close "
                           f"(e.g. 09:35)") from None
     if raw.get("entry_bar") is not None:
         try:
@@ -442,12 +442,12 @@ def run_intraday(rows: Sequence[Row], plan: Dict[str, Any], *, spec: SessionSpec
     sym = plan["symbol"]
     bars, dropped = session_bars(rows, spec, now)
     if not bars:
-        raise TMError(f"no complete 5-minute bars for {sym} in the data")
+        raise TMError(f"no complete {spec.bar_min}-minute bars for {sym} in the data")
     k = plan["entry_bar"]
     until_min = spec.close_min if until is None else parse_clock(until)
     if (until_min - spec.open_min) % spec.bar_min or until_min > spec.close_min \
             or until_min <= spec.open_min:
-        raise TMError(f"until must be on the 5-minute grid and no later than "
+        raise TMError(f"until must be on the {spec.bar_min}-minute grid and no later than "
                       f"{clock12(spec.close_min)}")
     last = (until_min - spec.open_min) // spec.bar_min - 1
     if last <= k:

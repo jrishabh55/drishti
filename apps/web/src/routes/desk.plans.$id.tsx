@@ -45,7 +45,7 @@ function PlanPage() {
   const navigate = useNavigate()
   const [plan, setPlan] = useState<Plan>(initial)
   const [edit, setEdit] = useState<PlanRequest>({
-    symbol: initial.symbol, date: initial.date, setup: initial.setup, level: initial.level,
+    symbol: initial.symbol, interval: initial.interval, date: initial.date, setup: initial.setup, level: initial.level,
     entry: initial.entry, entry_time: initial.entry_time,
     or_high: initial.opening_range?.high ?? null, or_low: initial.opening_range?.low ?? null,
     or_minutes: initial.or_minutes, stop_rule: initial.stop_rule, stop_param: initial.stop_param,
@@ -66,7 +66,7 @@ function PlanPage() {
 
   const editable = plan.status === 'draft'
   const tmRequest: TimeMachineRequest | null = useMemo(() => plan.entry_time ? {
-    mode: 'intraday', symbol: plan.symbol, date: plan.date, entry: plan.entry, stop: plan.stop,
+    mode: 'intraday', interval: plan.interval, symbol: plan.symbol, date: plan.date, entry: plan.entry, stop: plan.stop,
     target: plan.target, entry_time: plan.entry_time, setup: plan.setup,
     or_minutes: plan.or_minutes, stop_rule: plan.stop_rule, until: plan.flat_by,
   } : null, [plan])
@@ -150,9 +150,14 @@ function PlanPage() {
                       onChange={(e) => setEdit({ ...edit, stop_param: e.target.value ? Number(e.target.value) : null })} />
                   </label>
                 )}
-                <label className="block text-xs text-[var(--text-3)]">Target (R multiple)
-                  <Input type="number" step="0.5" min="0.5" value={edit.target_param ?? 2}
-                    onChange={(e) => setEdit({ ...edit, target_rule: 'r', target_param: Number(e.target.value) })} />
+                <label className="block text-xs text-[var(--text-3)]">Target rule
+                  <Select value={edit.target_rule ?? 'r'} onValueChange={v => setEdit({...edit,target_rule:v as 'r'|'price'})}>
+                    <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="r">R multiple</SelectItem><SelectItem value="price">Fixed price ₹</SelectItem></SelectContent>
+                  </Select>
+                </label>
+                <label className="block text-xs text-[var(--text-3)]">{edit.target_rule === 'price' ? 'Target price ₹' : 'Target (R multiple)'}
+                  <Input type="number" step="0.01" min="0.01" value={edit.target_param ?? 2}
+                    onChange={(e) => setEdit({ ...edit, target_param: Number(e.target.value) })} />
                 </label>
                 <label className="block text-xs text-[var(--text-3)]">Flat by (IST)
                   <Input value={edit.flat_by ?? ''} placeholder="15:15"

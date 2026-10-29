@@ -178,7 +178,7 @@ def daily_bars(rows: Iterable[Row], spec: SessionSpec = NSE,
 
 #: interval -> (yfinance interval, lookback days). One day inside Yahoo's
 #: windows (60d for 5m, 730d for 1h/1d practical) so clock skew can't trip them.
-HISTORY_FETCH = {"5m": ("5m", 59), "1d": ("1d", 729)}
+HISTORY_FETCH = {"1m": ("1m", 6), "5m": ("5m", 59), "1d": ("1d", 729)}
 #: Cache TTL: intraday history is refreshed at most every 10 minutes during
 #: the session; outside it, the last fetch is good until the next open.
 INTRADAY_TTL_S = 600

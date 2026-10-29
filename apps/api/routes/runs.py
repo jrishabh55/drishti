@@ -36,7 +36,9 @@ router = APIRouter()
 
 #: The product's provider surface: OpenAI on the server key (paid in credits),
 #: the ChatGPT-subscription helper, and Gemini on the user's own credential.
-ALLOWED_PROVIDERS = {"openai", "google", "chatgpt_helper"}
+from apps.api.integrations.product_providers import ALL_PROVIDERS, providers_for, validate_connections, uses_server_credit
+
+ALLOWED_PROVIDERS = ALL_PROVIDERS
 
 
 def _user_owns(detail: RunDetail, user_id: str) -> bool:
@@ -105,6 +107,16 @@ def create_run(
                    f"use one of: {', '.join(sorted(ALLOWED_PROVIDERS))}",
         )
 
+    request.llm_provider = provider
+    for tier in ("quick", "deep"):
+        name = f"{tier}_think_provider"
+        value = getattr(request, name, None)
+        if value:
+            value = value.strip().lower()
+            if value not in ALLOWED_PROVIDERS:
+                raise HTTPException(400, f"Unsupported {tier} provider: {value}")
+            setattr(request, name, value)
+
     for field in ("shallow_thinker", "deep_thinker"):
         model = getattr(request, field).strip()
         if not model or model.lower() == "custom":
@@ -165,6 +177,11 @@ def create_run(
                 ),
             )
 
+    try:
+        validate_connections(request, user_id)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
     # Resolve prices before spending anything. Runs after the cache lookup so a
     # cache hit stays instant, and before the active-run guard so a typo can't
     # occupy the per-user ticker slot. On success this warms the OHLCV cache the
@@ -204,7 +221,7 @@ def create_run(
     # Synthetic users (legacy bearer / open mode) have no Clerk record, so the
     # gate only applies to real Clerk users.
     if (
-        provider == "openai"
+        uses_server_credit(request)
         and clerk_users.enabled()
         and user_id not in (ANONYMOUS_USER_ID, SHARED_BEARER_USER_ID)
     ):

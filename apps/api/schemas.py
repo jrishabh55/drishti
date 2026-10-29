@@ -61,6 +61,11 @@ def canonicalize_request(request: "RunRequest") -> Dict[str, Any]:
         canonical["llm_provider"] = canonical["llm_provider"].lower()
     from apps.api.integrations.engine import engine_identity
 
+    for tier in ("quick", "deep"):
+        key = f"{tier}_think_provider"
+        value = getattr(request, key)
+        if value and value.lower() != request.llm_provider.lower():
+            canonical[key] = value.lower()
     canonical["_app_engine"] = engine_identity()
     return canonical
 
@@ -82,7 +87,9 @@ class RunRequest(BaseModel):
         min_length=1,
     )
     research_depth: int = Field(1, ge=1, le=5, description="Both max_debate_rounds and max_risk_discuss_rounds.")
-    llm_provider: str = Field(..., description="openai | anthropic | google | deepseek | ...")
+    llm_provider: str = Field(..., description="Default model provider")
+    quick_think_provider: Optional[str] = None
+    deep_think_provider: Optional[str] = None
     backend_url: Optional[str] = Field(None, description="Provider base_url override; None means provider default.")
     shallow_thinker: str = Field(..., description="Model id for the quick-thinking LLM.")
     deep_thinker: str = Field(..., description="Model id for the deep-thinking LLM.")

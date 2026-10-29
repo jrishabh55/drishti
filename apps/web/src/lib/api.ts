@@ -92,7 +92,7 @@ export function noMarketDataDetail(
   }
 }
 
-async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -223,9 +223,11 @@ export const api = {
       const qs = q.toString()
       return jsonFetch<OrbScan>(`/desk/orb${qs ? `?${qs}` : ''}`, { signal })
     },
-    entry: (symbol: string, params: { setup?: 'orb' | 'level'; level?: number } = {}) => {
+    entry: (symbol: string, params: { setup?: 'orb' | 'level'; level?: number | null; interval?: '1m'|'5m'; min_volume_x?: number | null } = {}) => {
       const q = new URLSearchParams()
       if (params.setup) q.set('setup', params.setup)
+      if (params.interval) q.set('interval', params.interval)
+      if (params.min_volume_x != null) q.set('min_volume_x', String(params.min_volume_x))
       if (params.level != null) q.set('level', String(params.level))
       const qs = q.toString()
       return jsonFetch<EntryStatus>(`/desk/entry/${encodeURIComponent(symbol)}${qs ? `?${qs}` : ''}`)

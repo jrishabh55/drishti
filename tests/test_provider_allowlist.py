@@ -52,7 +52,7 @@ def _body(**over) -> dict:
 # ---------- allowlist ----------
 
 
-@pytest.mark.parametrize("provider", ["anthropic", "xai", "deepseek", "ollama", "azure", ""])
+@pytest.mark.parametrize("provider", ["ollama", "openai_compatible", ""])
 def test_non_product_providers_are_rejected(client, provider):
     r = client.post("/api/runs", json=_body(llm_provider=provider))
     assert r.status_code == 400
@@ -116,3 +116,19 @@ def test_broke_user_can_still_run_gemini_but_not_openai(client, monkeypatch):
 
     r = client.post("/api/runs?skip_preflight=true", json=_body(llm_provider="google"))
     assert r.status_code == 201
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "deepseek", "azure"])
+def test_new_provider_requires_own_key_or_explicit_admin_setup(client, provider):
+    response = client.post('/api/runs?skip_preflight=true', json=_body(llm_provider=provider))
+    assert response.status_code == 409
+
+
+def test_mixed_tiers_charge_server_credit_even_when_default_provider_is_byoc(client, monkeypatch):
+    monkeypatch.setattr(clerk_users, 'enabled', lambda: True)
+    monkeypatch.setattr(user_keys, 'gemini_credential_available', lambda uid: True)
+    debit = MagicMock(return_value=5)
+    monkeypatch.setattr(clerk_users, 'debit_credit', debit)
+    response = client.post('/api/runs?skip_preflight=true', json=_body(llm_provider='google', deep_think_provider='openai'))
+    assert response.status_code == 201
+    debit.assert_called_once_with('user_2abc')

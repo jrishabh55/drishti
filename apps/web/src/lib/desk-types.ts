@@ -64,6 +64,7 @@ export interface OrbScan {
 }
 
 export interface EntryStatus {
+  interval?: '1m' | '5m'
   symbol: string
   setup: 'orb' | 'level'
   date: string
@@ -80,6 +81,7 @@ export interface EntryStatus {
 }
 
 export interface Plan {
+  interval?: '1m' | '5m'
   id: string
   symbol: string
   side: 'buy'
@@ -114,6 +116,7 @@ export interface Plan {
 }
 
 export interface PlanRequest {
+  interval?: '1m' | '5m'
   symbol: string
   date?: string | null
   setup?: 'orb' | 'level'
@@ -132,6 +135,7 @@ export interface PlanRequest {
 }
 
 export interface TimeMachineRequest {
+  interval?: '1m' | '5m'
   mode: 'intraday' | 'swing'
   symbol: string
   date: string

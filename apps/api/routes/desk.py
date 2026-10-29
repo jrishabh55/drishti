@@ -21,6 +21,8 @@ say "DELAYED" honestly.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
@@ -108,6 +110,7 @@ class TimeMachineBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["intraday", "swing"] = "intraday"
+    interval: Literal["1m", "5m"] = "5m"
     symbol: str
     date: str
     side: Literal["buy", "sell"] = "buy"
@@ -138,10 +141,12 @@ def run_timemachine(body: TimeMachineBody, user_id: str = Depends(current_user_i
     now = _now()
     try:
         if body.mode == "intraday":
-            plan = tm.normalize_intraday_plan(body.model_dump())
+            spec = replace(NSE_SPEC, bar_min=1 if body.interval == '1m' else 5)
+            plan = tm.normalize_intraday_plan(body.model_dump(), spec=spec)
+            plan['interval'] = body.interval
             plan["symbol"] = bars_mod.nse_symbol(plan["symbol"])
-            hist = bars_source.get_history_rows(user_id, plan["symbol"], "5m", now=now)
-            today = bars_source.get_session_rows(user_id, plan["symbol"], "5m")
+            hist = bars_source.get_history_rows(user_id, plan["symbol"], body.interval, now=now)
+            today = bars_source.get_session_rows(user_id, plan["symbol"], body.interval)
             until = body.until or load_profile(user_id).flat_by
             key = tm.plan_key("intraday", plan, hist.data_as_of, today=today.data_as_of,
                               until=until, replays=body.replays, seed=body.seed,
@@ -149,7 +154,7 @@ def run_timemachine(body: TimeMachineBody, user_id: str = Depends(current_user_i
             cached = store.get_tm(user_id, key)
             if cached:
                 return cached
-            out = tm.run_intraday(hist.rows + today.rows, plan, now=now,
+            out = tm.run_intraday(hist.rows + today.rows, plan, now=now, spec=spec,
                                   replays=body.replays, seed=body.seed, window=body.window,
                                   until=until, circuit_pct=body.circuit_pct,
                                   source=hist.source)
@@ -211,7 +216,7 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
 # ---------------------------------------------------------------- entry timer
 
 @router.get("/desk/entry/{symbol}")
-def entry_status(symbol: str, setup: Literal["orb", "level"] = "orb",
+def entry_status(symbol: str, interval: Literal["1m", "5m"] = "5m", setup: Literal["orb", "level"] = "orb",
                  level: Optional[float] = None, or_minutes: Optional[int] = None,
                  min_volume_x: Optional[float] = None,
                  user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
@@ -219,16 +224,18 @@ def entry_status(symbol: str, setup: Literal["orb", "level"] = "orb",
 
     prof = load_profile(user_id)
     try:
-        series = bars_source.get_session_rows(user_id, symbol, "5m", now=_now())
+        spec = replace(NSE_SPEC, bar_min=1 if interval == '1m' else 5)
+        series = bars_source.get_session_rows(user_id, symbol, interval, now=_now())
         out = entry_mod.evaluate(series.rows, _now(), symbol=series.symbol, setup=setup,
                                  or_minutes=or_minutes or prof.or_minutes, level=level,
                                  min_volume_x=min_volume_x,
                                  no_entries_before=prof.no_entries_before,
-                                 no_entries_after=prof.no_entries_after, source=series.source)
+                                 no_entries_after=prof.no_entries_after, source=series.source, spec=spec)
     except (entry_mod.EntryError, bars_mod.BarsError) as exc:
         raise _unprocessable(exc) from exc
     out["data_as_of"] = series.data_as_of
     out["notes"] = series.notes
+    out["interval"] = interval
     if out["status"] == "no-data" and series.notes:
         out["reason"] = " ".join(series.notes)
     return out
@@ -244,6 +251,7 @@ class PlanBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     symbol: str
+    interval: Literal["1m", "5m"] = "5m"
     date: Optional[str] = None
     setup: Literal["orb", "level"] = "orb"
     level: Optional[float] = None
@@ -264,6 +272,7 @@ def _build_plan(body: PlanBody, user_id: str) -> Dict[str, Any]:
     from apps.api.desk import entry as entry_mod, exit_plan
     from apps.api.desk.bars import session_bars
 
+    spec = replace(NSE_SPEC, bar_min=1 if body.interval == '1m' else 5)
     prof = load_profile(user_id)
     now = _now()
     sym = bars_mod.nse_symbol(body.symbol)
@@ -276,12 +285,12 @@ def _build_plan(body: PlanBody, user_id: str) -> Dict[str, Any]:
         (body.setup == "orb" and (or_high is None or or_low is None))
     source = None
     if need_bars:
-        series = bars_source.get_session_rows(user_id, sym, "5m")
+        series = bars_source.get_session_rows(user_id, sym, body.interval)
         source = series.source
         ev = entry_mod.evaluate(series.rows, now, symbol=sym, setup=body.setup,
                                 or_minutes=or_minutes, level=body.level,
                                 no_entries_before=prof.no_entries_before,
-                                no_entries_after=prof.no_entries_after, source=series.source)
+                                no_entries_after=prof.no_entries_after, source=series.source, spec=spec)
         orr = ev.get("opening_range") or {}
         if or_high is None and orr:
             or_high, or_low = orr["high"], orr["low"]
@@ -294,12 +303,12 @@ def _build_plan(body: PlanBody, user_id: str) -> Dict[str, Any]:
             day = ev["date"]
     bars_to_entry = None
     if body.stop_rule == "atr":
-        bars = [b for b in session_bars(series.rows if series else [], NSE_SPEC, now)[0]
+        bars = [b for b in session_bars(series.rows if series else [], spec, now)[0]
                 if b["date"] == day]
         if entry_time:
             from apps.api.desk.market.session import parse_clock
 
-            k = NSE_SPEC.bar_for_close(parse_clock(entry_time))
+            k = spec.bar_for_close(parse_clock(entry_time))
             bars = [b for b in bars if b["slot"] <= k]
         bars_to_entry = bars
     plan = exit_plan.build_plan(
@@ -308,7 +317,8 @@ def _build_plan(body: PlanBody, user_id: str) -> Dict[str, Any]:
         stop_param=body.stop_param, target_rule=body.target_rule,
         target_param=body.target_param, flat_by=body.flat_by or prof.flat_by,
         broker_square_off=prof.broker_square_off, min_reward_risk=prof.min_reward_risk,
-        session_bars_to_entry=bars_to_entry)
+        session_bars_to_entry=bars_to_entry, spec=spec)
+    plan["interval"] = body.interval
     plan["notes"] = body.notes
     plan["level"] = body.level
     plan["source"] = source
@@ -659,6 +669,8 @@ def evaluate_alerts(user_id: str) -> List[Dict[str, Any]]:
         if msg:
             events.append(store.add_alert_event(user_id, a["id"], {
                 "symbol": a.get("symbol"), "type": a["type"], "message": msg}))
+    from apps.api.desk.notifications import queue_delivery
+    queue_delivery(user_id)
     return events
 
 

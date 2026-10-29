@@ -112,7 +112,11 @@ def build_graph_for_request(
     graph_cls: Any = TradingAgentsGraph
     extra: Dict[str, Any] = {}
     relay_token: Optional[str] = None
-    if is_helper_provider(request.llm_provider):
+    from apps.api.integrations.product_providers import needs_product_graph, configure_tiers, PerTierGraph
+    if needs_product_graph(request):
+        graph_cls = PerTierGraph
+        extra, relay_token = configure_tiers(request, config, user_id or 'anonymous')
+    elif is_helper_provider(request.llm_provider):
         config["llm_provider"] = "openai_compatible"
         graph_cls = HelperBackedGraph
         # Deliberately NOT request.backend_url in either branch: that field is
