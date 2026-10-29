@@ -92,7 +92,7 @@ def test_outbox_retry_cannot_duplicate_delivered_message_or_send_after_disconnec
 
 def test_application_registers_messaging_routes(env):
     from apps.api.app import create_app
-    assert any(r.path=='/api/messaging/{channel}' for r in create_app().routes)
+    assert '/api/messaging/{channel}' in create_app().openapi()['paths']
 
 
 def test_delivery_loop_recovers_after_one_failed_sweep(env,monkeypatch):
@@ -108,3 +108,23 @@ def test_delivery_loop_recovers_after_one_failed_sweep(env,monkeypatch):
     monkeypatch.setattr(service,'sweep',sweep)
     with pytest.raises(asyncio.CancelledError):asyncio.run(service.messaging_loop())
     assert len(calls)==2
+
+
+def test_queued_alert_is_cancelled_when_user_opts_out_before_delivery(env,monkeypatch):
+    from apps.api.messaging import service,providers
+    row,key,token=_tg(env)
+    row.update(verified=True,chat='42',sender='42',alerts=False);store.save(row)
+    store.enqueue(row['id'],'alert-1','Old alert')
+    sent=[];monkeypatch.setattr(providers,'telegram',lambda *a,**k:sent.append(a))
+    service.flush(row['id'])
+    assert sent==[]
+
+
+def test_whatsapp_connection_update_revokes_approval_capability_when_offline(env):
+    from apps.api.messaging import service
+    c,s,_=env;c.configure_whatsapp('a','','');c.pair_whatsapp('a');c.refresh_whatsapp('a')
+    doc=s.connection('a','whatsapp');doc.update(verified=True,approvals=True,inbound_verified=True);s.save(doc)
+    key=s.secret('a','whatsapp')['hook_secret']
+    service.receive(doc['id'],key,{'instance':doc['instance'],'event':'connection.update','data':{'state':'close'}})
+    assert not c.status('a','whatsapp')['connected']
+    assert not c.status('a','whatsapp')['approvals']

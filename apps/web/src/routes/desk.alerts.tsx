@@ -133,6 +133,7 @@ function AlertsPage() {
           </section>
         </div>
         <TelegramSettings />
+        <a href="/desk/messages" className="block text-sm text-[var(--accent)] underline">Set up WhatsApp, guided Telegram linking and paper approvals →</a>
         <DeskFooter />
       </main>
     </div>

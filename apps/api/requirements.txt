@@ -6,3 +6,5 @@ uvicorn[standard]>=0.46
 sse-starlette>=2.1
 # Clerk JWT verification. PyJWT[crypto] pulls in `cryptography` for RS256.
 pyjwt[crypto]>=2.8
+# Generate WhatsApp linking QR images locally; no external QR service.
+qrcode[pil]>=8.2

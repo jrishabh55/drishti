@@ -57,6 +57,14 @@ def receive(cid, secret, payload):
                 except providers.ProviderError:
                     pass
         else:
+            if payload.get('instance')==doc.get('instance') and payload.get('event') in ('connection.update','CONNECTION_UPDATE'):
+                state=(payload.get('data') or {}).get('state')
+                if state in ('open','close','connecting'):
+                    doc['connected']=state=='open'
+                    if state!='open':
+                        doc.update(verified=False,inbound_verified=False,approvals=False)
+                    store.save(doc)
+                return {'ok':True}
             if payload.get('instance')!=doc.get('instance') or payload.get('event') not in ('messages.upsert','MESSAGES_UPSERT'):
                 return {'ok':True}
             data=payload.get('data') or {}
@@ -132,6 +140,12 @@ def flush(cid):
             return
         for d in reversed(store.deliveries(cid,True)[:10]):
             now=store.now().timestamp()
+            key=d['id'].split(':',1)[1]
+            if ((key.startswith('alert-') and (not doc.get('alerts') or d.get('created_at',0)<doc.get('enabled_since',0)))
+                    or (key.startswith(('proposal-','decision-','trade-')) and not doc.get('approvals'))):
+                d['cancelled']=True
+                store.save_delivery(d)
+                continue
             if d['expires_at']<=now or d['attempts']>=5 or d['next_attempt']>now:
                 continue
             d['attempts']+=1

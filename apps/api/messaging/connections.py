@@ -183,6 +183,12 @@ def configure_telegram(uid, token, replace_webhook=False):
         me=providers.telegram(token,'getMe')
         if not me.get('id') or not re.fullmatch(r'[A-Za-z0-9_]+',me.get('username','')):
             raise providers.ProviderError('Telegram returned unsupported bot details')
+        from apps.api.jobs.store import get_store
+        from apps.api.desk import notifications
+        with get_store()._conn() as db:
+            legacy_users=[r['user_id'] for r in db.execute("SELECT user_id FROM user_api_keys WHERE provider='telegram' AND user_id<>?",(uid,))]
+        if any((notifications._config(other) or {}).get('token','').split(':')[0]==str(me['id']) for other in legacy_users):
+            raise ValueError('This bot is already connected to another user')
         doc=old or store.new(uid,'telegram')
         doc.update(bot_id=str(me['id']),bot_username=me['username'])
         url=hook_url(doc)
@@ -272,6 +278,11 @@ def preferences(uid, channel, alerts, approvals):
         if alerts and not doc.get('alerts'):
             doc['enabled_since']=store.now().timestamp()
         doc.update(alerts=alerts,approvals=approvals)
+        if channel=='telegram' and alerts:
+            from apps.api.desk import notifications
+            legacy=notifications._config(uid)
+            if legacy and legacy.get('enabled'):
+                notifications.configure(uid,legacy['token'],legacy['chat_id'],False)
         return _save(doc)
 
 

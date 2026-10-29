@@ -9,6 +9,7 @@ const TABS = [
   { to: '/desk/connection', label: 'Zerodha', exact: false },
   { to: '/desk/strategies', label: 'Strategies & live', exact: false },
   { to: '/desk/alerts', label: 'Alerts', exact: false },
+  { to: '/desk/messages', label: 'Messages', exact: false },
   { to: '/desk/settings', label: 'Limits & settings', exact: false },
 ] as const
 

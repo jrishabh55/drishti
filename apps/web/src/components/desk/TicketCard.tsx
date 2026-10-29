@@ -3,6 +3,7 @@ import { Button } from '#/components/ui/button'
 import { api } from '#/lib/api'
 import type { Ticket } from '#/lib/desk-types'
 import { inr } from '#/lib/desk-format'
+import { messagingApi } from '#/lib/messaging-api'
 
 /* The order in plain words, its risk verdict, and the user's explicit yes.
    Nothing goes anywhere until "Confirm" on THIS ticket; confirming re-runs
@@ -25,6 +26,7 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [message, setMessage] = useState('')
   const formRef = useRef<HTMLFormElement>(null)
   const s = ticket.sizing
   const v = ticket.verdict
@@ -101,6 +103,7 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
       <List items={ticket.verdict_warnings ?? []} tone="var(--text-3)" />
       {v && <List items={v.info} tone="var(--text-3)" />}
       {error && <p className="text-sm text-[var(--err)]">{error}</p>}
+      {message && <p role="status" className="text-sm text-[var(--text-2)]">{message}</p>}
 
       {ticket.status === 'ready' && (
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line-1)] pt-3">
@@ -108,6 +111,12 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
             onClick={() => act(() => api.desk.confirmTicket(ticket.id, 'paper'))}>
             Confirm — paper trade
           </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
+            setBusy(true); setError(null); setMessage('')
+            try { setMessage((await messagingApi.propose(ticket.id)).message) }
+            catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+            finally { setBusy(false) }
+          }}>Send for paper approval</Button>
           {publisherKey ? (
             <>
               {/* Kite Publisher: the user confirms on Zerodha's own screen.

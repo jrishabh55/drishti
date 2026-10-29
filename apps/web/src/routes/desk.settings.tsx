@@ -82,6 +82,7 @@ function SettingsPage() {
       <main className="mx-auto w-full max-w-[1100px] space-y-6 px-6 py-4">
         <h1 className="text-2xl font-bold">Limits &amp; settings</h1>
         <DeskNav />
+        <a href="/desk/messages" className="block text-sm text-[var(--accent)] underline">Manage WhatsApp and Telegram connections →</a>
         {p && (
           <div className="grid gap-4 md:grid-cols-2">
             {GROUPS.map((g) => (

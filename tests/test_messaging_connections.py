@@ -103,3 +103,31 @@ def test_provider_rejects_redirect_and_never_leaks_exception_url(monkeypatch):
         status_code=302
     monkeypatch.setattr(requests,'request',lambda *a,**k:R())
     with pytest.raises(providers.ProviderError):providers.evolution('https://evo.example','key','/instance/create')
+
+
+def test_guided_telegram_alert_opt_in_prevents_duplicate_legacy_alerts(env):
+    c,s,calls=env
+    from apps.api.desk import notifications
+    notifications.configure('a','123:legacy-secret','42',True)
+    c.configure_telegram('a','123:secret')
+    row=s.connection('a','telegram');row.update(verified=True,inbound_verified=True);s.save(row)
+    c.preferences('a','telegram',True,False)
+    assert not notifications.status('a')['enabled']
+
+
+def test_legacy_bot_cannot_be_taken_over_by_another_user(env):
+    c,s,calls=env
+    from apps.api.desk import notifications
+    notifications.configure('a','123:legacy-secret','42',True)
+    with pytest.raises(ValueError,match='another'):c.configure_telegram('b','123:secret')
+
+
+def test_qr_string_is_rendered_locally_as_a_real_png(env,monkeypatch):
+    c,s,calls=env
+    from apps.api.messaging import providers
+    orig=providers.evolution
+    monkeypatch.setattr(providers,'evolution',lambda base,key,path,*a,**kw: {'code':'2@test-real-qr-payload'} if '/connect/' in path else orig(base,key,path,*a,**kw))
+    c.configure_whatsapp('a','','')
+    import base64
+    qr=c.pair_whatsapp('a')['qr']
+    assert base64.b64decode(qr.split(',')[1]).startswith(b'\x89PNG\r\n\x1a\n')

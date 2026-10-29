@@ -117,7 +117,7 @@ def enqueue(cid, key, text, buttons=None, expires_at=None):
     conn = by_id(cid)
     if not conn:
         return
-    doc = {'id':cid+':'+key,'text':text,'buttons':buttons,'sent':False,'attempts':0,
+    doc = {'id':cid+':'+key,'created_at':now().timestamp(),'text':text,'buttons':buttons,'sent':False,'attempts':0,
            'next_attempt':0,'expires_at':expires_at or now().timestamp()+900,'message_id':None}
     with db() as c:
         c.execute('INSERT OR IGNORE INTO messaging_outbox VALUES (?,?,?,?,?)',
@@ -128,7 +128,7 @@ def deliveries(cid, unsent=False):
     ensure()
     with db() as c:
         docs = [json.loads(r['doc']) for r in c.execute('SELECT doc FROM messaging_outbox WHERE connection_id=? ORDER BY created_at DESC LIMIT 100',(cid,)).fetchall()]
-    return [d for d in docs if not unsent or not d['sent']]
+    return [d for d in docs if not unsent or not d['sent'] and not d.get('cancelled')]
 
 
 def save_delivery(doc):

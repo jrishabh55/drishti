@@ -90,6 +90,12 @@ services:
       DESK_NSE_FEEDS: ${DESK_NSE_FEEDS:-0}
       DESK_SOURCE_PROBE: ${DESK_SOURCE_PROBE:-0}
       EVALUATION_LOOP: ${EVALUATION_LOOP:-1}
+      # Private phone connections; credentials remain API-side only.
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_ALLOWED_ORIGINS: ${EVOLUTION_ALLOWED_ORIGINS:-}
+      MESSAGING_PUBLIC_BASE_URL: ${MESSAGING_PUBLIC_BASE_URL:-}
+      MESSAGING_LOOP: ${MESSAGING_LOOP:-1}
       # Worker threads inside this one container. This is how you scale, NOT
       # replicas — see the comment on `deploy` below.
       WEBAPP_CONCURRENCY: ${WEBAPP_CONCURRENCY:-10}

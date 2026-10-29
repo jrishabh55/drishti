@@ -23,6 +23,7 @@ import { Route as DeskSettingsRouteImport } from './routes/desk.settings'
 import { Route as DeskResearchRouteImport } from './routes/desk.research'
 import { Route as DeskPerformanceRouteImport } from './routes/desk.performance'
 import { Route as DeskPaperRouteImport } from './routes/desk.paper'
+import { Route as DeskMessagesRouteImport } from './routes/desk.messages'
 import { Route as DeskConnectionRouteImport } from './routes/desk.connection'
 import { Route as DeskAlertsRouteImport } from './routes/desk.alerts'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
@@ -100,6 +101,11 @@ const DeskPaperRoute = DeskPaperRouteImport.update({
   path: '/desk/paper',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeskMessagesRoute = DeskMessagesRouteImport.update({
+  id: '/desk/messages',
+  path: '/desk/messages',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskConnectionRoute = DeskConnectionRouteImport.update({
   id: '/desk/connection',
   path: '/desk/connection',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
   '/desk/connection': typeof DeskConnectionRoute
+  '/desk/messages': typeof DeskMessagesRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/research': typeof DeskResearchRoute
@@ -159,6 +166,7 @@ export interface FileRoutesByTo {
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
   '/desk/connection': typeof DeskConnectionRoute
+  '/desk/messages': typeof DeskMessagesRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/research': typeof DeskResearchRoute
@@ -182,6 +190,7 @@ export interface FileRoutesById {
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
   '/desk/connection': typeof DeskConnectionRoute
+  '/desk/messages': typeof DeskMessagesRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/research': typeof DeskResearchRoute
@@ -206,6 +215,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/desk/alerts'
     | '/desk/connection'
+    | '/desk/messages'
     | '/desk/paper'
     | '/desk/performance'
     | '/desk/research'
@@ -228,6 +238,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/desk/alerts'
     | '/desk/connection'
+    | '/desk/messages'
     | '/desk/paper'
     | '/desk/performance'
     | '/desk/research'
@@ -250,6 +261,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/desk/alerts'
     | '/desk/connection'
+    | '/desk/messages'
     | '/desk/paper'
     | '/desk/performance'
     | '/desk/research'
@@ -273,6 +285,7 @@ export interface RootRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   DeskAlertsRoute: typeof DeskAlertsRoute
   DeskConnectionRoute: typeof DeskConnectionRoute
+  DeskMessagesRoute: typeof DeskMessagesRoute
   DeskPaperRoute: typeof DeskPaperRoute
   DeskPerformanceRoute: typeof DeskPerformanceRoute
   DeskResearchRoute: typeof DeskResearchRoute
@@ -390,6 +403,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskPaperRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/desk/messages': {
+      id: '/desk/messages'
+      path: '/desk/messages'
+      fullPath: '/desk/messages'
+      preLoaderRoute: typeof DeskMessagesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/desk/connection': {
       id: '/desk/connection'
       path: '/desk/connection'
@@ -441,6 +461,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   DeskAlertsRoute: DeskAlertsRoute,
   DeskConnectionRoute: DeskConnectionRoute,
+  DeskMessagesRoute: DeskMessagesRoute,
   DeskPaperRoute: DeskPaperRoute,
   DeskPerformanceRoute: DeskPerformanceRoute,
   DeskResearchRoute: DeskResearchRoute,
