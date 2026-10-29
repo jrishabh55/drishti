@@ -100,17 +100,22 @@ def split_sessions(bars: Sequence[Bar]) -> Dict[str, Dict[int, Bar]]:
     return days
 
 
-def full_sessions(days: Dict[str, Dict[int, Bar]], before: str, spec: SessionSpec = NSE
-                  ) -> Tuple[List[Tuple[str, List[Bar]]], List[Dict[str, Any]]]:
-    """Full sessions (every bar present) strictly before ``before``, oldest
-    first, plus the short ones left out (special sessions, gaps)."""
+def full_sessions(days: Dict[str, Dict[int, Bar]], before: str, spec: SessionSpec = NSE,
+                  *, through: Optional[int] = None) -> Tuple[List[Tuple[str, List[Bar]]], List[Dict[str, Any]]]:
+    """Complete sessions or replay windows strictly before ``before``.
+
+    ``through`` is the last required bar, inclusive. Every bar from the open
+    through that bar must exist; later bars are irrelevant and never filled in.
+    """
     full, short = [], []
-    n = spec.n_bars
+    n = spec.n_bars if through is None else through + 1
+    if not 1 <= n <= spec.n_bars:
+        raise ValueError("replay window is outside the session")
     for d in sorted(days):
         if d >= before:
             continue
         s = days[d]
-        if len(s) == n and all(i in s for i in range(n)):
+        if (through is not None or len(s) == n) and all(i in s for i in range(n)):
             full.append((d, [s[i] for i in range(n)]))
         else:
             short.append({"date": d, "bars": len(s)})

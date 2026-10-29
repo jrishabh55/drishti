@@ -32,3 +32,9 @@ Not used, and why:
 
 Not yet observed from the deployed server (datacenter IP). Run
 `python scripts/desk_spike.py` there before setting `DESK_NSE_FEEDS=1`.
+
+`yahoo_RELIANCE_5m_20261029.json.gz`: unmodified serialized OHLCV rows fetched
+through yfinance on 2026-10-29. Reproduces the reported zero-full-sessions bug:
+Yahoo omits closing-auction bars. 38 earlier sessions have every actual bar
+through the plan's 15:15 exit; the 2026-10-15 interior gap remains excluded.
+No missing bar is interpolated.

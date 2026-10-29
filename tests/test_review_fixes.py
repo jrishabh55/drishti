@@ -50,6 +50,7 @@ def test_one_minute_replay_runs_on_twenty_plus_real_sessions():
     assert mc["pool_sessions"] >= 20 and mc["replays"] == 500
     assert abs(mc["p_target"] + mc["p_stop"] + mc["p_neither"] - 1) < 1e-3
     assert out["plan"]["entry_time"] == "09:31"
+    assert out["data"]["interval"] == "1m"
 
 
 def test_yahoo_sized_one_minute_history_is_honestly_unavailable():
@@ -232,3 +233,37 @@ def test_resume_checks_every_tier_before_claiming(tmp_path, monkeypatch):
     product_providers.save_key("u", "anthropic", "sk-ant-test-key")
     assert client.post(f"/api/runs/{run_id}/resume").status_code == 200
     assert len(submitted) == 1
+
+
+def test_time_machine_requires_complete_replay_window_not_unused_closing_bars():
+    day = date(2026, 10, 28)
+    rows = random_walk_sessions(day, 25, start_price=1000.0)
+    # Recorded RELIANCE failure shape: Yahoo has no continuous bars at 15:20.
+    # A 15:15 exit does not use them. Never fill any missing OHLCV.
+    rows = [r for r in rows if r[0].astimezone(NSE.tz).strftime("%H:%M") < "15:15"]
+    plan = tm.normalize_intraday_plan({"symbol":"RELIANCE", "date":day.isoformat(),
+        "entry":1000, "stop":995, "target":1010, "entry_time":"09:35"})
+    out = tm.run_intraday(rows, plan, until="15:15", now=NSE.local(date(2026,10,29),600), replays=100)
+    assert out["mc"]["pool_sessions"] >= 20
+    assert out["mc"]["until"] == "15:15"
+    assert out["mc"]["band_times"][-1] == "15:15"
+    # The same history cannot support a later exit, or a missing interior bar.
+    with pytest.raises(tm.TMError, match="needs at least 20"):
+        tm.run_intraday(rows, plan, until="15:30", now=NSE.local(date(2026,10,29),600), replays=100)
+    gapped = [r for r in rows if r[0].astimezone(NSE.tz).strftime("%H:%M") != "11:45"]
+    with pytest.raises(tm.TMError, match="needs at least 20"):
+        tm.run_intraday(gapped, plan, until="15:15", now=NSE.local(date(2026,10,29),600), replays=100)
+
+
+def test_recorded_reliance_yahoo_history_replays_without_auction_bar_interpolation():
+    import gzip
+    from pathlib import Path
+    raw = json.loads(gzip.decompress((Path(__file__).parent / "fixtures/desk/sources/yahoo_RELIANCE_5m_20261029.json.gz").read_bytes()))
+    rows = bars_mod._deserialize(raw["bars"])
+    day = date(2026, 10, 29)
+    plan = tm.normalize_intraday_plan({"symbol":"RELIANCE", "date":day.isoformat(),
+        "entry":1400, "stop":1395, "target":1410, "entry_time":"09:35"})
+    out = tm.run_intraday(rows, plan, until="15:15", now=NSE.local(day,1000), replays=100)
+    assert out["mc"]["pool_sessions"] == 38
+    assert out["mc"]["replays"] == 100
+    assert "2026-10-15" in {d["date"] for d in out["data"]["short_sessions_left_out"]}

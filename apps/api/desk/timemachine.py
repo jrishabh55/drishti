@@ -466,7 +466,7 @@ def run_intraday(rows: Sequence[Row], plan: Dict[str, Any], *, spec: SessionSpec
     if not eb["l"] - 0.01 <= plan["entry"] <= eb["h"] + 0.01:
         warn.append("the plan's entry %.2f is outside that bar's range %.2f to %.2f"
                     % (plan["entry"], eb["l"], eb["h"]))
-    sessions, short = full_sessions(days, plan["date"], spec)
+    sessions, short = full_sessions(days, plan["date"], spec, through=last)
     if len(sessions) < MIN_SESSIONS:
         hint = ""
         if spec.bar_min == 1:
@@ -474,12 +474,13 @@ def run_intraday(rows: Sequence[Row], plan: Dict[str, Any], *, spec: SessionSpec
                     "fetches, so 1-minute history grows day by day. Connect Kite for deeper "
                     "1-minute history now, or replay this plan on 5-minute bars")
         raise TMError(f"only {len(sessions)} full session(s) of {sym} before {plan['date']} in "
-                      f"the data; the time machine needs at least {MIN_SESSIONS}{hint}")
+                      f"the data through {clock24(until_min)}; the time machine needs at least {MIN_SESSIONS}{hint}")
     band = None
     if circuit_pct:
-        prev_close = sessions[-1][1][-1]["c"]
+        prev_day = days[sessions[-1][0]]
+        prev_close = prev_day[max(prev_day)]["c"]
         band = (prev_close * (1 - circuit_pct / 100), prev_close * (1 + circuit_pct / 100))
-    pool = build_pool(sessions, spec.n_bars)
+    pool = build_pool(sessions, last + 1)
     mc = simulate(pool, plan["entry"], plan["stop"], plan["target"], k, last, replays, seed,
                   window, plan["side"], band)
     until_label = clock12(until_min)
@@ -500,13 +501,14 @@ def run_intraday(rows: Sequence[Row], plan: Dict[str, Any], *, spec: SessionSpec
         "mode": "intraday",
         "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": source,
-        "data": {"symbol": sym, "interval": "5m", "session": spec.name,
+        "data": {"symbol": sym, "interval": f"{spec.bar_min}m", "session": spec.name,
                  "last_bar": f"{last_bar['date']} {last_bar['start']}",
                  "dropped": dropped, "short_sessions_left_out": short},
         "plan": plan_out, "mc": mc, "history": history,
         "verdict": verdict(mc, until_label), "verdict_notes": verdict_notes(mc, until_label),
         "warnings": warn,
-        "note": (f"A simulation built from {sym}'s own last {len(sessions)} full sessions. It is "
+        "note": (f"A simulation built from {sym}'s own last {len(sessions)} complete session windows "
+                 f"through {clock24(until_min)}. It is "
                  "not a prediction: results, news and circuit halts can do things those "
                  "sessions never did. Same seed, same numbers."),
     }
