@@ -179,6 +179,10 @@ def daily_bars(rows: Iterable[Row], spec: SessionSpec = NSE,
 #: interval -> (yfinance interval, lookback days). One day inside Yahoo's
 #: windows (60d for 5m, 730d for 1h/1d practical) so clock skew can't trip them.
 HISTORY_FETCH = {"1m": ("1m", 6), "5m": ("5m", 59), "1d": ("1d", 729)}
+#: Yahoo serves only ~7 days of 1m bars, too few sessions for a replay pool, so
+#: each 1m fetch is merged into the cached history (real bars only, never
+#: filled in) and the merged history is kept for this many calendar days.
+ACCUMULATE_DAYS = {"1m": 60}
 #: Cache TTL: intraday history is refreshed at most every 10 minutes during
 #: the session; outside it, the last fetch is good until the next open.
 INTRADAY_TTL_S = 600
@@ -259,8 +263,18 @@ def fetch_history(symbol: str, interval: str = "5m", *, now: Optional[datetime] 
         if cached:
             return _deserialize(cached["bars"])
         raise BarsError(f"Yahoo returned no {interval} bars for {yf_sym} — check the symbol")
+    if interval in ACCUMULATE_DAYS and cached:
+        rows = _merge_history(_deserialize(cached["bars"]), rows,
+                              now - timedelta(days=ACCUMULATE_DAYS[interval]))
     store.put_history(yf_sym, interval, _serialize(rows), fetched_at=now.isoformat())
     return rows
+
+
+def _merge_history(old: List[Row], new: List[Row], since: datetime) -> List[Row]:
+    """Union of two fetches by bar timestamp (the newer fetch wins), from ``since``."""
+    by_ts = {r[0]: r for r in old if r[0] is not None and r[0] >= since}
+    by_ts.update((r[0], r) for r in new if r[0] is not None)
+    return [by_ts[t] for t in sorted(by_ts)]
 
 
 def last_close_before(bars: Sequence[Bar], day: str) -> Optional[float]:

@@ -77,13 +77,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def billable(provider: str | RunRequest, user_id: str) -> bool:
-    """Mirror of create_run's debit condition: whether a fresh cell costs a credit."""
+def billable(provider: "str | RunRequest", user_id: str) -> bool:
+    """Mirror of create_run's debit condition: whether a fresh cell costs a credit.
+
+    Every tier counts (a deep tier on the server's OpenAI key is billed even
+    when the default provider is not), via the same normalised policy.
+    """
     from apps.api import clerk_users
     from apps.api.auth import ANONYMOUS_USER_ID, SHARED_BEARER_USER_ID
+    from apps.api.integrations.product_providers import ADMIN_PROVIDERS, uses_server_credit
 
-    from apps.api.integrations.product_providers import uses_server_credit
-    server_funded = uses_server_credit(provider) if isinstance(provider, RunRequest) else provider.strip().lower() in ('openai','azure','bedrock')
+    server_funded = (uses_server_credit(provider) if isinstance(provider, RunRequest)
+                     else provider.strip().lower() in {"openai", *ADMIN_PROVIDERS})
     return (server_funded and clerk_users.enabled()
             and user_id not in (ANONYMOUS_USER_ID, SHARED_BEARER_USER_ID))
 

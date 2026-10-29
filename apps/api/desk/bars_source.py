@@ -91,7 +91,12 @@ def get_session_rows(user_id: str, symbol: str, interval: str = "5m", *, now: da
                 frame = pd.DataFrame([dict(symbol=sym, ts=r[0].astimezone(NSE.tz).isoformat(), open=r[1],
                                           high=r[2], low=r[3], close=r[4], volume=r[5]) for r in rows])
                 store.upsert_bars(interval, frame)
-                store.bump_bar_version()
+                if interval == "1m":
+                    # Desk-only rows: the ingest loop never prunes 1m, and no
+                    # scanner reads it, so don't cold-rebuild their panels.
+                    store.prune_bars("1m", keep=retain)
+                else:
+                    store.bump_bar_version()
         except bars_mod.BarsError as exc:
             notes.append(f"Could not refresh {sym}: {exc}")
     if not rows:

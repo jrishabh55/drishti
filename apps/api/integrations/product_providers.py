@@ -93,7 +93,9 @@ def provider_kwargs(user_id: str, provider: str) -> dict:
 
 
 def providers_for(request) -> set[str]:
-    return {getattr(request, f'{tier}_think_provider', None) or request.llm_provider for tier in ('quick', 'deep')}
+    """Each tier's provider, normalised: policy must not depend on a caller's casing."""
+    return {(getattr(request, f'{tier}_think_provider', None) or request.llm_provider or '').strip().lower()
+            for tier in ('quick', 'deep')}
 
 
 def validate_connections(request, user_id: str) -> None:

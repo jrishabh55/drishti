@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from apps.api import user_keys
 from apps.api.jobs.store import get_store
 from apps.api.desk.store import get_desk_store, now_iso
@@ -13,6 +14,8 @@ _LOCK = threading.Lock()
 _QUEUE_LOCK = threading.Lock()
 _QUEUED = set()
 _LAST_ATTEMPT = {}
+#: An alert is only worth sending while it is news; older ones stay in-app only.
+EXPIRY = timedelta(minutes=15)
 _POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix='desk-notifications')
 _SCHEMA = '''CREATE TABLE IF NOT EXISTS desk_notifications (
  user_id TEXT NOT NULL, event_id TEXT NOT NULL, sent_at TEXT NOT NULL,
@@ -74,11 +77,17 @@ def _send(token: str, chat: str, message: str):
         raise RuntimeError('Telegram rejected the notification')
 
 
+def _cutoff(doc: dict) -> str:
+    """Oldest event time still deliverable: not before opt-in, not expired."""
+    fresh = (datetime.now(timezone.utc) - EXPIRY).isoformat()
+    return max(fresh, doc.get('enabled_since', ''))
+
+
 def deliver(uid: str, event: dict) -> bool:
     doc = _config(uid)
     if not doc or not doc.get('enabled'):
         return False
-    if event.get('at') and event['at'] < doc.get('enabled_since', ''):
+    if event.get('at') and event['at'] < _cutoff(doc):
         return False
     # Same-user overlapping page/background checks must not duplicate delivery.
     with _LOCK:
@@ -110,10 +119,33 @@ def retry_recent(uid: str):
         rows = conn.execute(
             "SELECT e.doc FROM desk_alert_events e LEFT JOIN desk_notifications n "
             "ON n.user_id=e.user_id AND n.event_id=e.id "
-            "WHERE e.user_id=? AND e.at>=? AND n.event_id IS NULL ORDER BY e.at LIMIT 3",
-            (uid, doc.get('enabled_since', ''))).fetchall()
+            "WHERE e.user_id=? AND e.at>=? AND n.event_id IS NULL ORDER BY e.at LIMIT 20",
+            (uid, _cutoff(doc))).fetchall()
     for row in rows:
         deliver(uid,json.loads(row['doc']))
+
+
+def pending_users() -> set:
+    """Users with Telegram on and an undelivered, unexpired alert event.
+
+    The desk sweep visits these even when no rule is still active (rules ring
+    once), so a failed send is retried without the user opening a page.
+    """
+    with get_store()._conn() as conn:
+        uids = [r['user_id'] for r in conn.execute(
+            "SELECT user_id FROM user_api_keys WHERE provider='telegram'").fetchall()]
+    fresh = (datetime.now(timezone.utc) - EXPIRY).isoformat()
+    out = set()
+    with _db() as conn:
+        _ensure(conn)
+        for uid in uids:
+            row = conn.execute(
+                "SELECT 1 FROM desk_alert_events e LEFT JOIN desk_notifications n "
+                "ON n.user_id=e.user_id AND n.event_id=e.id "
+                "WHERE e.user_id=? AND e.at>=? AND n.event_id IS NULL LIMIT 1", (uid, fresh)).fetchone()
+            if row and (_config(uid) or {}).get('enabled'):
+                out.add(uid)
+    return out
 
 
 def queue_delivery(uid: str):

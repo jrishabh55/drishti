@@ -388,6 +388,14 @@ def resume_run(
             ),
         )
 
+    # Every tier's connection (helper, Gemini, personal keys, admin providers),
+    # also BEFORE the claim: a missing credential must leave the run
+    # interrupted and resumable once the user fixes it, not burn the claim.
+    try:
+        validate_connections(RunRequest(**detail.config), user_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
     if not store.claim_for_resume(run_id, user_id=user_id):
         # Either someone else won the race between our status read and the
         # claim, or the run has hit the resume cap (each resume re-bills the

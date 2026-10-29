@@ -49,3 +49,9 @@ export function orbEmptyMessage(counts: Record<string, number>): string {
   if (!counts.scanned) return 'No charts passed your price and liquidity filters.'
   return 'No chart has closed above its opening-range high yet.'
 }
+
+/** Switching a plan's target rule keeps the same target: the planned price for
+ *  a fixed-price rule, its R multiple for an R rule — never one read as the other. */
+export function targetRuleSwitch(rule: 'r' | 'price', plan: { target: number; target_r: number }) {
+  return { target_rule: rule, target_param: rule === 'price' ? plan.target : plan.target_r }
+}

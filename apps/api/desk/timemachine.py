@@ -468,8 +468,13 @@ def run_intraday(rows: Sequence[Row], plan: Dict[str, Any], *, spec: SessionSpec
                     % (plan["entry"], eb["l"], eb["h"]))
     sessions, short = full_sessions(days, plan["date"], spec)
     if len(sessions) < MIN_SESSIONS:
+        hint = ""
+        if spec.bar_min == 1:
+            hint = (". Yahoo serves only about 6 days of 1-minute bars; Drishti keeps what it "
+                    "fetches, so 1-minute history grows day by day. Connect Kite for deeper "
+                    "1-minute history now, or replay this plan on 5-minute bars")
         raise TMError(f"only {len(sessions)} full session(s) of {sym} before {plan['date']} in "
-                      f"the data; the time machine needs at least {MIN_SESSIONS}")
+                      f"the data; the time machine needs at least {MIN_SESSIONS}{hint}")
     band = None
     if circuit_pct:
         prev_close = sessions[-1][1][-1]["c"]

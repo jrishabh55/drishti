@@ -27,6 +27,12 @@ def sweep() -> int:
     store = get_desk_store()
     users = {t["user_id"] for t in _with_user(store.open_paper_all_users())}
     users |= {a["user_id"] for a in _with_user(store.active_alerts_all_users())}
+    try:
+        from apps.api.desk.notifications import pending_users
+
+        users |= pending_users()
+    except Exception:  # noqa: BLE001 — notification upkeep never blocks the sweep
+        logger.exception("listing pending notifications failed")
     for uid in sorted(users):
         try:
             desk_routes.refresh_paper(uid)

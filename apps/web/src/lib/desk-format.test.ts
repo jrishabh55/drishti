@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inr, pct01, rMult, signedPct, sourceLabel, istTime, orbEmptyMessage } from './desk-format'
+import { inr, pct01, rMult, signedPct, sourceLabel, istTime, orbEmptyMessage, targetRuleSwitch } from './desk-format'
 
 describe('desk-format', () => {
   it('formats rupees with Indian grouping', () => {
@@ -32,5 +32,13 @@ describe('ORB empty state', () => {
     expect(orbEmptyMessage({ with_data: 10, scanned: 0, unusable: 10 })).toContain('incomplete')
     expect(orbEmptyMessage({ with_data: 10, scanned: 0, unusable: 0 })).toContain('liquidity')
     expect(orbEmptyMessage({ with_data: 10, scanned: 10 })).toContain('No chart has closed above')
+  })
+})
+
+describe('target rule switch', () => {
+  it('keeps the planned target instead of reading the R multiple as a price', () => {
+    const plan = { target: 1532.5, target_r: 2 }
+    expect(targetRuleSwitch('price', plan)).toEqual({ target_rule: 'price', target_param: 1532.5 })
+    expect(targetRuleSwitch('r', plan)).toEqual({ target_rule: 'r', target_param: 2 })
   })
 })

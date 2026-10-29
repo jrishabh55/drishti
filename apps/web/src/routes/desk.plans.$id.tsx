@@ -12,7 +12,7 @@ import {
 } from '#/components/ui/select'
 import { api } from '#/lib/api'
 import type { DeskConfig, Plan, PlanRequest, Ticket, TimeMachineRequest } from '#/lib/desk-types'
-import { inr } from '#/lib/desk-format'
+import { inr, targetRuleSwitch } from '#/lib/desk-format'
 
 export const Route = createFileRoute('/desk/plans/$id')({
   ssr: false,
@@ -151,7 +151,7 @@ function PlanPage() {
                   </label>
                 )}
                 <label className="block text-xs text-[var(--text-3)]">Target rule
-                  <Select value={edit.target_rule ?? 'r'} onValueChange={v => setEdit({...edit,target_rule:v as 'r'|'price'})}>
+                  <Select value={edit.target_rule ?? 'r'} onValueChange={v => setEdit({...edit, ...targetRuleSwitch(v as 'r' | 'price', plan)})}>
                     <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="r">R multiple</SelectItem><SelectItem value="price">Fixed price ₹</SelectItem></SelectContent>
                   </Select>
                 </label>
