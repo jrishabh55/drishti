@@ -55,6 +55,15 @@ describe('research panels', () => {
     expect(screen.getByText('F&O · lot 4700')).toBeTruthy()
   })
 
+  it('marks stale exchange facts and exposes their source freshness', () => {
+    render(<FactsStrip data={{symbol:'RELIANCE', status:'ok', facts:{band_pct:5},
+      sources:[{source:'nse.price_bands', label:'NSE price bands', status:'ok',
+        fetched_at:'2026-10-28T10:00:00Z', stale:true, cached:true}]}} />)
+    expect(screen.getByText('Some exchange facts are stale')).toBeTruthy()
+    expect(screen.getByText('Exchange sources & freshness')).toBeTruthy()
+    expect(screen.getByText('Stale')).toBeTruthy()
+  })
+
   it('shows filed quarters with QoQ / YoY and says when results are missing', () => {
     const q = (end: string, revenue: number) => ({
       period_start: null, period_end: end, quarter: '', basis: 'consolidated', audited: 'Unaudited', bank: false,

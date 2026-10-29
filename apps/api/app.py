@@ -73,6 +73,13 @@ def create_app() -> FastAPI:
         seed_prebuilt(get_scanner_store())
         if os.environ.get("SCANNER_INGEST", "1") != "0":
             scanner_task = asyncio.create_task(ingest_loop(), name="scanner-ingest")
+        source_probe_task = None
+        if os.environ.get("DESK_SOURCE_PROBE", "0") == "1":
+            # Opt-in deployment diagnostic: run the existing server-side data
+            # spike without needing an interactive shell in the container.
+            from scripts.desk_spike import main as probe_sources
+            source_probe_task = asyncio.create_task(asyncio.to_thread(
+                probe_sources, ["--rounds", "1", "--label", "dokploy"]), name="desk-source-probe")
         evaluation_task = None
         if os.environ.get("EVALUATION_LOOP", "1") != "0":
             from apps.api.evaluation.loop import evaluation_loop
@@ -103,7 +110,9 @@ def create_app() -> FastAPI:
                 kite_task.cancel()
             if evaluation_task is not None:
                 evaluation_task.cancel()
-            await asyncio.gather(*(task for task in (scanner_task, desk_task, kite_task, evaluation_task)
+            if source_probe_task is not None:
+                source_probe_task.cancel()
+            await asyncio.gather(*(task for task in (scanner_task, desk_task, kite_task, evaluation_task, source_probe_task)
                                    if task is not None), return_exceptions=True)
             from apps.api.kite import live
             await live.shutdown()

@@ -88,6 +88,8 @@ services:
       # NSE feeds for the risk check (circuit bands, F&O ban). Off until
       # scripts/desk_spike.py has verified them from this server.
       DESK_NSE_FEEDS: ${DESK_NSE_FEEDS:-0}
+      DESK_SOURCE_PROBE: ${DESK_SOURCE_PROBE:-0}
+      EVALUATION_LOOP: ${EVALUATION_LOOP:-1}
       # Worker threads inside this one container. This is how you scale, NOT
       # replicas — see the comment on `deploy` below.
       WEBAPP_CONCURRENCY: ${WEBAPP_CONCURRENCY:-10}

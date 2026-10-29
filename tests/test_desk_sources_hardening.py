@@ -333,3 +333,20 @@ def test_a_block_page_on_xbrl_does_trip_the_host(store, monkeypatch):
     with pytest.raises(datasets.FeedUnavailable):
         datasets.fetch("nse.xbrl", {"file": "INTEGRATED_FILING_INDAS_1_WEB.xml"}, now=NOW)
     assert datasets.host_down("nsearchives.nseindia.com") is not None
+
+
+def test_deployment_probe_does_not_certify_a_200_block_page(tmp_path, monkeypatch):
+    from scripts.desk_spike import probe
+    monkeypatch.setattr(datasets, '_http_get', lambda *args: BLOCK_PAGE)
+    out = probe('nse.asm', tmp_path)
+    assert out['status'] is None and 'HTML' in out['error']
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_deployment_probe_records_a_valid_source_body(tmp_path, monkeypatch):
+    from scripts.desk_spike import probe
+    body = (SRC / 'nse_asm.json').read_bytes()
+    monkeypatch.setattr(datasets, '_http_get', lambda *args: body)
+    out = probe('nse.asm', tmp_path)
+    assert out['status'] == 200 and out['error'] is None
+    assert (tmp_path / 'nse.asm.json').read_bytes() == body

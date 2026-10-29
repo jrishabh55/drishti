@@ -54,6 +54,7 @@ def probe(name: str, out_dir: Path) -> dict:
     t0 = time.time()
     try:
         body = datasets._http_get(ds, url)
+        datasets.check_body(ds, body.decode("utf-8-sig", "replace"))
         status, err = 200, None
     except datasets.FeedUnavailable as exc:
         body, status, err = b"", None, str(exc)

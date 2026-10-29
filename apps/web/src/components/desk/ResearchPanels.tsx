@@ -252,13 +252,17 @@ export function FactsStrip({ data }: { data: FactsResponse }) {
   const pill = (cls: string, text: string) => <span className={`es-pill ${cls}`}>{text}</span>
   const down = (name: string) => data.sources.find(s => s.source === name)?.status === 'unavailable'
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs" aria-label="Exchange facts">
+    <div className="space-y-2" aria-label="Exchange facts">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
       {down('nse.price_bands') ? pill('warn', 'Circuit band: unavailable')
         : pill('', f.band_pct != null ? `Circuit band ${f.band_pct}%` : f.listed_in_band_file ? 'No price band' : 'Not in NSE band file')}
       {down('nse.fo_lots') ? pill('warn', 'F&O: unavailable') : pill('', f.fno ? `F&O · lot ${f.fno_lot}` : 'Not in F&O')}
       {down('nse.fo_ban') ? pill('warn', 'F&O ban list: unavailable') : f.fo_ban ? pill('err', 'In F&O ban') : null}
       {down('nse.asm') ? pill('warn', 'ASM: unavailable') : f.asm ? pill('err', `ASM ${f.asm}`) : null}
       {down('nse.gsm') ? pill('warn', 'GSM: unavailable') : f.gsm ? pill('err', `GSM ${f.gsm}`) : null}
+      {data.sources.some(s => s.stale) && pill('warn', 'Some exchange facts are stale')}
+    </div>
+    <details className="text-xs"><summary className="cursor-pointer text-[var(--text-3)]">Exchange sources & freshness</summary><SourceList sources={data.sources} /></details>
     </div>
   )
 }
