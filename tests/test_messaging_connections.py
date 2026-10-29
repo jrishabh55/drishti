@@ -167,3 +167,9 @@ def test_recipient_verification_messages_are_throttled(env):
     c.configure_whatsapp('a','','');c.pair_whatsapp('a');c.refresh_whatsapp('a')
     c.verify_recipient('a','919876543210')
     with pytest.raises(ValueError,match='Wait'):c.verify_recipient('a','919876543210')
+
+
+def test_refresh_before_qr_provisioning_is_a_local_setup_state_not_provider_error(env):
+    c,s,calls=env;c.configure_whatsapp('a','','')
+    assert not c.refresh_whatsapp('a')['connected']
+    assert calls==[]

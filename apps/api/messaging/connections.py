@@ -156,6 +156,11 @@ def pair_whatsapp(uid, phone=''):
 def refresh_whatsapp(uid):
     with user_lock(uid):
         doc=_owned(uid,'whatsapp')
+        if not doc.get('created'):
+            # Saving server settings does not provision a remote account.
+            # The pairing screen can poll this state without probing a
+            # nonexistent instance or showing a misleading provider error.
+            return status(uid,'whatsapp')
         r=evolution(doc,'/instance/connectionState/'+doc['instance'])
         state=r.get('instance',{}).get('state') if isinstance(r,dict) else None
         if state not in ('open','close','connecting'):
