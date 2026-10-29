@@ -1,0 +1,4 @@
+{"name": "Reclaims the 20-day average", "description": "Day-trader setup: yesterday's close was under SMA(20), today's is above it (ported from day-trader-skill's daily scan).",
+ "definition": {"logic": "AND", "children": [
+   {"timeframe": "1d", "left": {"field": "close"}, "op": "crosses_above",
+    "right": {"fn": "SMA", "of": "close", "period": 20}}]}}

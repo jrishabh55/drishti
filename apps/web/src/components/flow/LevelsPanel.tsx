@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ReplayOdds } from '#/components/desk/ReplayOdds'
 import { api } from '#/lib/api'
 import { ratingTooltip } from '#/lib/rating'
 import type { LevelValue, LevelsResponse } from '#/lib/types'
@@ -97,6 +98,7 @@ export function LevelsPanel({ runId }: { runId: string }) {
   const [data, setData] = useState<LevelsResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [horizon, setHorizon] = useState(10)
 
   useEffect(() => {
     const capitalNum = Number(capital)
@@ -389,6 +391,44 @@ export function LevelsPanel({ runId }: { runId: string }) {
               >
                 {size.basis}
               </div>
+            </div>
+          )}
+
+          {/* Time Machine (swing mode): replay this exact entry/stop/target
+              over the next N sessions, resampled from the stock's own daily
+              bars, plus the same levels rule on its past sessions. */}
+          {levels && data && (
+            <div style={{ padding: '18px 0', borderTop: '1px solid var(--line-1)' }}>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    color: 'var(--text-4)',
+                  }}
+                >
+                  Time Machine
+                </div>
+                <div className="seg">
+                  {[5, 10, 20].map((h) => (
+                    <button key={h} className={`seg-btn${horizon === h ? ' active' : ''}`}
+                      onClick={() => setHorizon(h)}>{h} sessions</button>
+                  ))}
+                </div>
+              </div>
+              <ReplayOdds
+                key={`${levels.entry.price}-${levels.stop.price}-${levels.target.price}-${horizon}`}
+                label="Replay this plan"
+                request={{
+                  mode: 'swing', symbol: data.ticker, date: data.analysis_date,
+                  entry: levels.entry.price, stop: levels.stop.price,
+                  target: levels.target.price, horizon,
+                }}
+              />
             </div>
           )}
 

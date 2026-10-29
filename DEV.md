@@ -178,6 +178,13 @@ What goes here:
   container without a persistent volume mounted there). `SCANNER_INGEST` —
   set to `0` to disable the background yfinance ingest loop (default on);
   handy when iterating on scanner code without waiting on network fetches.
+- Trade Desk (`/desk`, day-trader-skill port — spec
+  `docs/superpowers/specs/2026-10-29-trade-desk-design.md`):
+  `DESK_DB_PATH` (default `data/desk.sqlite`; same volume as the others in
+  Docker), `DESK_LOOP=0` disables the background paper-fill/alert sweep,
+  `DESK_NSE_FEEDS=1` turns on NSE circuit-band/F&O-ban checks (only after
+  `python scripts/desk_spike.py` passes from the server), and
+  `KITE_PUBLISHER_API_KEY` enables the "Place on Zerodha" basket button.
 
 See `.env.example` for the template.
 

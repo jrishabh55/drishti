@@ -1,0 +1,4 @@
+{"name": "20-day closing breakout", "description": "Day-trader setup: today's close is above the highest close of the prior 20 sessions (ported from day-trader-skill's daily scan).",
+ "definition": {"logic": "AND", "children": [
+   {"timeframe": "1d", "left": {"field": "close"}, "op": ">",
+    "right": {"fn": "HIGHEST", "of": "close", "period": 20, "bars_ago": 1}}]}}

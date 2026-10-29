@@ -69,6 +69,14 @@ services:
       WEBAPP_REPORTS_DIR: /home/appuser/.tradingagents/webapp_reports
       # Stock scanner's own SQLite DB — same volume as WEBAPP_DB_PATH, separate file.
       SCANNER_DB_PATH: /home/appuser/.tradingagents/scanner.sqlite
+      # Trade Desk (plans, paper ledger, alerts, NSE feed cache) — same volume.
+      DESK_DB_PATH: /home/appuser/.tradingagents/desk.sqlite
+      # Kite Publisher key for the "Place on Zerodha" button (optional;
+      # without it the desk shows a copyable ticket instead).
+      KITE_PUBLISHER_API_KEY: ${KITE_PUBLISHER_API_KEY:-}
+      # NSE feeds for the risk check (circuit bands, F&O ban). Off until
+      # scripts/desk_spike.py has verified them from this server.
+      DESK_NSE_FEEDS: ${DESK_NSE_FEEDS:-0}
       # Worker threads inside this one container. This is how you scale, NOT
       # replicas — see the comment on `deploy` below.
       WEBAPP_CONCURRENCY: ${WEBAPP_CONCURRENCY:-10}

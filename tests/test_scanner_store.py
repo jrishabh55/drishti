@@ -59,3 +59,13 @@ def test_scanner_crud_and_scoping(tmp_path):
     assert store.get_scanner(sid)["name"] == "Renamed"
     store.delete_scanner(sid)
     assert store.get_scanner(sid) is None
+
+
+def test_load_symbol_bars_returns_newest_of_one_symbol(tmp_path):
+    from tests.scanner_utils import bars_long, make_store
+
+    store = make_store(tmp_path)
+    store.upsert_bars("1d", bars_long("AAA", [float(i) for i in range(10)]))
+    store.upsert_bars("1d", bars_long("BBB", [1.0] * 10))
+    df = store.load_symbol_bars("1d", "AAA", limit=3)
+    assert list(df["close"]) == [7.0, 8.0, 9.0] and set(df["symbol"]) == {"AAA"}

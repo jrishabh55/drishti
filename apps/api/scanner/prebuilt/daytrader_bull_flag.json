@@ -1,0 +1,10 @@
+{"name": "Bull flag (tight after a run)", "description": "Day-trader setup: up more than 10% from 15 to 5 sessions ago, then the last 5 closes held within a 5% range (ported from day-trader-skill's daily scan).",
+ "definition": {"logic": "AND", "children": [
+   {"timeframe": "1d",
+    "left": {"expr": "/", "args": [{"field": "close", "bars_ago": 5}, {"field": "close", "bars_ago": 15}]},
+    "op": ">", "right": {"const": 1.10}},
+   {"timeframe": "1d",
+    "left": {"expr": "/", "args": [
+      {"expr": "-", "args": [{"fn": "HIGHEST", "of": "close", "period": 5}, {"fn": "LOWEST", "of": "close", "period": 5}]},
+      {"field": "close"}]},
+    "op": "<", "right": {"const": 0.05}}]}}

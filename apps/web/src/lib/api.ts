@@ -12,6 +12,21 @@ import type {
   TickerHit,
 } from './types'
 import type { ScanGroup, ScannerStatus, ScanResult, ScannerSummary } from './scanner-types'
+import type {
+  Alert,
+  AlertEvent,
+  DeskConfig,
+  DeskProfile,
+  EntryStatus,
+  OrbScan,
+  PaperLedger,
+  PaperTrade,
+  Plan,
+  PlanRequest,
+  Ticket,
+  TimeMachineRequest,
+  TimeMachineResult,
+} from './desk-types'
 
 /* Default to /api so the Cloudflare Worker (in prod) or Vite proxy (in dev)
    can route to the FastAPI backend. Override at build time with VITE_API_BASE
@@ -190,6 +205,64 @@ export const api = {
       body: JSON.stringify({ prompt }),
     }),
   scannerStatus: () => jsonFetch<ScannerStatus>('/scanners/status'),
+
+  /* ---- Trade Desk (day-trader-skill port) ---- */
+  desk: {
+    config: () => jsonFetch<DeskConfig>('/desk/config'),
+    profile: () => jsonFetch<DeskProfile>('/desk/profile'),
+    saveProfile: (p: DeskProfile) =>
+      jsonFetch<DeskProfile>('/desk/profile', { method: 'PUT', body: JSON.stringify(p) }),
+    watchlist: () => jsonFetch<string[]>('/desk/watchlist'),
+    watch: (symbol: string) =>
+      jsonFetch<string[]>('/desk/watchlist', { method: 'POST', body: JSON.stringify({ symbol }) }),
+    unwatch: (symbol: string) =>
+      jsonFetch<void>(`/desk/watchlist/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
+    orb: (params: { or_minutes?: number; at?: string; date?: string } = {}) => {
+      const q = new URLSearchParams()
+      for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v))
+      const qs = q.toString()
+      return jsonFetch<OrbScan>(`/desk/orb${qs ? `?${qs}` : ''}`)
+    },
+    entry: (symbol: string, params: { setup?: 'orb' | 'level'; level?: number } = {}) => {
+      const q = new URLSearchParams()
+      if (params.setup) q.set('setup', params.setup)
+      if (params.level != null) q.set('level', String(params.level))
+      const qs = q.toString()
+      return jsonFetch<EntryStatus>(`/desk/entry/${encodeURIComponent(symbol)}${qs ? `?${qs}` : ''}`)
+    },
+    previewPlan: (body: PlanRequest) =>
+      jsonFetch<Plan>('/desk/exit-plan', { method: 'POST', body: JSON.stringify(body) }),
+    plans: () => jsonFetch<Plan[]>('/desk/plans'),
+    plan: (id: string) => jsonFetch<Plan>(`/desk/plans/${id}`),
+    createPlan: (body: PlanRequest) =>
+      jsonFetch<Plan>('/desk/plans', { method: 'POST', body: JSON.stringify(body) }),
+    updatePlan: (id: string, body: PlanRequest) =>
+      jsonFetch<Plan>(`/desk/plans/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    deletePlan: (id: string) => jsonFetch<void>(`/desk/plans/${id}`, { method: 'DELETE' }),
+    timeMachine: (body: TimeMachineRequest) =>
+      jsonFetch<TimeMachineResult>('/desk/timemachine', { method: 'POST', body: JSON.stringify(body) }),
+    tickets: () => jsonFetch<Ticket[]>('/desk/tickets'),
+    createTicket: (planId: string, orderType: 'LIMIT' | 'MARKET' = 'LIMIT') =>
+      jsonFetch<Ticket>('/desk/tickets', {
+        method: 'POST',
+        body: JSON.stringify({ plan_id: planId, order_type: orderType }),
+      }),
+    confirmTicket: (id: string, mode: 'paper' | 'broker') =>
+      jsonFetch<Ticket>(`/desk/tickets/${id}/confirm`, { method: 'POST', body: JSON.stringify({ mode }) }),
+    cancelTicket: (id: string) => jsonFetch<Ticket>(`/desk/tickets/${id}/cancel`, { method: 'POST' }),
+    paper: () => jsonFetch<PaperLedger>('/desk/paper'),
+    closePaper: (id: string, price?: number) =>
+      jsonFetch<PaperTrade>(`/desk/paper/${id}/close`, { method: 'POST', body: JSON.stringify({ price }) }),
+    alerts: () => jsonFetch<Alert[]>('/desk/alerts'),
+    createAlert: (body: Partial<Alert>) =>
+      jsonFetch<Alert>('/desk/alerts', { method: 'POST', body: JSON.stringify(body) }),
+    alertsFromPlan: (planId: string) =>
+      jsonFetch<Alert[]>(`/desk/alerts/from-plan/${planId}`, { method: 'POST' }),
+    deleteAlert: (id: string) => jsonFetch<void>(`/desk/alerts/${id}`, { method: 'DELETE' }),
+    alertEvents: (unseenOnly = false) =>
+      jsonFetch<AlertEvent[]>(`/desk/alerts/events${unseenOnly ? '?unseen_only=true' : ''}`),
+    markEventsSeen: () => jsonFetch<void>('/desk/alerts/events/seen', { method: 'POST' }),
+  },
 }
 
 export { API_BASE }

@@ -1,0 +1,4 @@
+{"name": "Oversold (RSI < 30)", "description": "Day-trader setup: RSI(14) is under 30 today (ported from day-trader-skill's daily scan).",
+ "definition": {"logic": "AND", "children": [
+   {"timeframe": "1d", "left": {"fn": "RSI", "of": "close", "period": 14},
+    "op": "<", "right": {"const": 30}}]}}

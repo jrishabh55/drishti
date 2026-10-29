@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 from apps.api.auth import auth_middleware, get_verifier
 from apps.api.routes.config import router as config_router
+from apps.api.routes.desk import router as desk_router
 from apps.api.routes.keys import router as keys_router
 from apps.api.routes.relay import router as relay_router
 from apps.api.routes.runs import router as runs_router
@@ -37,6 +38,7 @@ from apps.api.routes.stream import router as stream_router
 from apps.api.jobs.bus import get_bus
 from apps.api.jobs.runner import get_runner, shutdown_runner
 from apps.api.jobs.store import get_store
+from apps.api.desk.loop import desk_loop
 from apps.api.scanner.ingest import ingest_loop
 from apps.api.scanner.seed import seed_prebuilt
 from apps.api.scanner.store import get_scanner_store
@@ -71,12 +73,23 @@ def create_app() -> FastAPI:
         seed_prebuilt(get_scanner_store())
         if os.environ.get("SCANNER_INGEST", "1") != "0":
             scanner_task = asyncio.create_task(ingest_loop(), name="scanner-ingest")
+        desk_task = None
+        if os.environ.get("DESK_NSE_FEEDS", "0") == "1":
+            # Off until scripts/desk_spike.py has verified the NSE datasets from
+            # this server (spec §3): unverified feeds would only add latency.
+            from apps.api.desk import datasets, feeds
+
+            feeds.register_facts_provider(datasets.nse_facts)
+        if os.environ.get("DESK_LOOP", "1") != "0":
+            desk_task = asyncio.create_task(desk_loop(), name="desk-loop")
         logger.info("webapp ready")
         try:
             yield
         finally:
             if scanner_task is not None:
                 scanner_task.cancel()
+            if desk_task is not None:
+                desk_task.cancel()
             shutdown_runner()
 
     app = FastAPI(
@@ -124,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(runs_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(scanners_router, prefix="/api")
+    app.include_router(desk_router, prefix="/api")
     # No prefix: these two routes deliberately live on different roots. The
     # websocket is public under /api/relay/ws, while the shim sits on /internal
     # so the frontend's /api/* catch-all proxy does not expose it.

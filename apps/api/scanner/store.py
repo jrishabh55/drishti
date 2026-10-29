@@ -108,6 +108,15 @@ class ScannerStore:
         with self._conn() as c:
             return pd.read_sql_query(q, c, params=(timeframe, limit))
 
+    def load_symbol_bars(self, timeframe: str, symbol: str, limit: int = 320) -> pd.DataFrame:
+        """Newest ``limit`` bars of ONE symbol, ascending — the Trade Desk's
+        per-symbol reads (load_bars pulls the whole universe)."""
+        q = ("SELECT symbol, ts, open, high, low, close, volume FROM ("
+             "  SELECT * FROM bars WHERE timeframe = ? AND symbol = ? ORDER BY ts DESC LIMIT ?"
+             ") ORDER BY ts")
+        with self._conn() as c:
+            return pd.read_sql_query(q, c, params=(timeframe, symbol, limit))
+
     def prune_bars(self, timeframe: str, keep: int = 320) -> None:
         with self._conn() as c:
             c.execute(

@@ -1,0 +1,196 @@
+"""Paper trading: confirmed tickets filled against (delayed) 5-minute bars.
+
+Upstream defaults to Alpaca's paper account; Drishti keeps its own ledger so
+paper trading needs no broker at all. The fill model is deliberately
+conservative and bar-based (we never see ticks):
+
+* **Entry** — only bars that START at/after the confirmation count (no
+  back-filling into a bar that was already printing). A MARKET buy fills at
+  that bar's open plus ``slippage_ticks`` adverse ticks. A LIMIT buy fills at
+  the open if the open is at/below the limit, else at the limit once a bar's
+  low reaches it. Not filled by ``no_entries_after`` → cancelled.
+* **Exit** — bar by bar, the STOP is checked before the target in every bar
+  (a bar touching both is a loss, as in the Time Machine), including the
+  fill bar itself. A stop gapped through fills at the bar's open — worse
+  than planned, as a real stop would. The target fills at the target (or a
+  better open). Still open at ``flat_by`` → out at the close of the bar
+  ending at flat-by.
+* Charges come from market/charges.py with the user's broker plan, so the
+  ledger shows gross and net P&L and R.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Sequence
+
+from apps.api.desk.bars import Bar
+from apps.api.desk.market import charges as charges_mod, ticks
+from apps.api.desk.market.session import NSE, SessionSpec, clock24, parse_clock
+
+
+def new_trade(order: Dict[str, Any], *, ticket_id: str, placed_at: datetime,
+              profile, spec: SessionSpec = NSE) -> Dict[str, Any]:
+    plan = order.get("plan") or {}
+    local = placed_at.astimezone(spec.tz)
+    return {
+        "ticket_id": ticket_id, "symbol": order["symbol"], "side": "buy", "qty": order["qty"],
+        "order_type": order["order_type"], "limit": order.get("price"),
+        "stop": order.get("stop") or plan.get("stop"),
+        "target": order.get("target") or plan.get("target"),
+        "planned_entry": plan.get("entry"), "risk_per_share": plan.get("risk_per_share"),
+        "flat_by": plan.get("flat_by") or profile.flat_by,
+        "entry_deadline": profile.no_entries_after or clock24(spec.close_min),
+        "product": order.get("product", "MIS"), "trade_date": local.date().isoformat(),
+        "placed_at": placed_at.isoformat(), "slippage_ticks": profile.slippage_ticks,
+        "status": "pending", "entry_fill": None, "exit_fill": None, "events": [
+            {"at": local.strftime("%H:%M"), "what": f"order placed (paper): buy {order['qty']} "
+                                                    f"{order['symbol']} {order['order_type']}"}],
+    }
+
+
+def _close_min(b: Bar, spec: SessionSpec) -> int:
+    return spec.bar_close_min(b["slot"])
+
+
+def advance(trade: Dict[str, Any], bars: Sequence[Bar], now: datetime, profile,
+            spec: SessionSpec = NSE) -> Dict[str, Any]:
+    """Pure: walk the trade forward over completed session bars. Idempotent."""
+    t = dict(trade)
+    t["events"] = list(trade.get("events") or [])
+    if t["status"] in ("closed", "cancelled"):
+        return t
+    day = t["trade_date"]
+    placed = datetime.fromisoformat(t["placed_at"]).astimezone(spec.tz)
+    placed_min = placed.hour * 60 + placed.minute + (1 if placed.second or placed.microsecond else 0)
+    day_bars = sorted((b for b in bars if b["date"] == day), key=lambda b: b["slot"])
+    now_local = now.astimezone(spec.tz)
+    day_over = now_local.date().isoformat() > day or \
+        now_local.hour * 60 + now_local.minute >= spec.close_min
+    flat_min = parse_clock(t["flat_by"])
+    deadline = parse_clock(t["entry_deadline"])
+    tick = ticks.tick_size(t.get("limit") or t.get("planned_entry") or t["stop"])
+
+    def ev(b_min: int, what: str) -> None:
+        t["events"].append({"at": clock24(b_min), "what": what})
+
+    for b in day_bars:
+        start_min = spec.bar_start_min(b["slot"])
+        close_min = _close_min(b, spec)
+        if t["status"] == "pending":
+            if start_min < placed_min:
+                continue
+            if start_min >= deadline or start_min >= flat_min:
+                t["status"] = "cancelled"
+                ev(start_min, f"not filled by {clock24(min(deadline, flat_min))}: cancelled")
+                break
+            fill = None
+            if t["order_type"] == "MARKET":
+                fill = b["o"] + t["slippage_ticks"] * tick
+            elif b["o"] <= t["limit"]:
+                fill = b["o"]
+            elif b["l"] <= t["limit"]:
+                fill = t["limit"]
+            if fill is None:
+                continue
+            fill = ticks.round_to_tick(fill, tick)
+            t["entry_fill"] = {"time": clock24(start_min), "price": fill}
+            t["status"] = "open"
+            t["mae"] = t["mfe"] = 0.0
+            ev(start_min, f"bought {t['qty']} at ₹{fill:.2f}")
+            # The fill bar can stop us out (conservative), never hit the target.
+            if b["l"] <= t["stop"]:
+                _exit(t, t["stop"], start_min, "stop", ev)
+                break
+            continue
+        if t["status"] != "open":
+            break
+        entry = t["entry_fill"]["price"]
+        risk = entry - t["stop"]
+        if risk > 0:
+            t["mae"] = round(min(t.get("mae", 0.0), (b["l"] - entry) / risk), 2)
+            t["mfe"] = round(max(t.get("mfe", 0.0), (b["h"] - entry) / risk), 2)
+        if b["l"] <= t["stop"]:
+            _exit(t, min(b["o"], t["stop"]), start_min, "stop", ev)
+            break
+        if b["h"] >= t["target"]:
+            _exit(t, max(b["o"], t["target"]), start_min, "target", ev)
+            break
+        if close_min >= flat_min:
+            _exit(t, b["c"], close_min, "flat_by", ev)
+            break
+    if t["status"] == "pending" and day_over:
+        t["status"] = "cancelled"
+        ev(spec.close_min, "session over without a fill: cancelled")
+    if t["status"] == "open" and day_over and day_bars:
+        last = day_bars[-1]
+        _exit(t, last["c"], _close_min(last, spec), "session_end", ev)
+    if t["status"] == "closed":
+        _settle(t, profile)
+    return t
+
+
+def _exit(t: Dict[str, Any], price: float, at_min: int, reason: str, ev) -> None:
+    price = ticks.round_to_tick(price)
+    t["exit_fill"] = {"time": clock24(at_min), "price": price, "reason": reason}
+    t["status"] = "closed"
+    words = {"stop": "stopped out", "target": "target hit", "flat_by": "flat by",
+             "session_end": "closed at the session end", "manual": "closed by you"}
+    ev(at_min, f"{words.get(reason, reason)} at ₹{price:.2f}")
+
+
+def _settle(t: Dict[str, Any], profile) -> None:
+    entry, exit_p, q = t["entry_fill"]["price"], t["exit_fill"]["price"], t["qty"]
+    gross = round((exit_p - entry) * q, 2)
+    c = charges_mod.round_trip_cost(entry, exit_p, q, t.get("product", "MIS"),
+                                    profile.brokerage())
+    risk = (entry - t["stop"]) * q
+    t["pnl_gross"] = gross
+    t["charges"] = round(c, 2)
+    t["pnl_net"] = round(gross - c, 2)
+    t["r_gross"] = round(gross / risk, 2) if risk > 0 else None
+    t["r_net"] = round((gross - c) / risk, 2) if risk > 0 else None
+    t["slippage_vs_plan"] = (round(entry - t["planned_entry"], 2)
+                             if t.get("planned_entry") else None)
+
+
+def close_now(trade: Dict[str, Any], price: float, now: datetime, profile,
+              spec: SessionSpec = NSE) -> Dict[str, Any]:
+    """Manual close at a given price (the user's call, e.g. on news)."""
+    t = dict(trade)
+    t["events"] = list(trade.get("events") or [])
+    local = now.astimezone(spec.tz)
+    m = local.hour * 60 + local.minute
+    if t["status"] == "pending":
+        t["status"] = "cancelled"
+        t["events"].append({"at": clock24(m), "what": "cancelled by you"})
+        return t
+    if t["status"] != "open":
+        return t
+    _exit(t, price, m, "manual", lambda at, w: t["events"].append({"at": clock24(at), "what": w}))
+    _settle(t, profile)
+    return t
+
+
+def stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ledger summary over closed trades (net figures)."""
+    closed = [t for t in trades if t.get("status") == "closed" and t.get("r_net") is not None]
+    if not closed:
+        return {"trades": 0}
+    wins = [t for t in closed if t["pnl_net"] > 0]
+    losses = [t for t in closed if t["pnl_net"] <= 0]
+    gross_win = sum(t["pnl_net"] for t in wins)
+    gross_loss = -sum(t["pnl_net"] for t in losses)
+    equity, peak, dd = 0.0, 0.0, 0.0
+    for t in sorted(closed, key=lambda x: (x["trade_date"], x["exit_fill"]["time"])):
+        equity += t["pnl_net"]
+        peak = max(peak, equity)
+        dd = max(dd, peak - equity)
+    return {
+        "trades": len(closed), "wins": len(wins), "losses": len(losses),
+        "win_rate": round(len(wins) / len(closed), 3),
+        "avg_r_net": round(sum(t["r_net"] for t in closed) / len(closed), 3),
+        "pnl_net": round(sum(t["pnl_net"] for t in closed), 2),
+        "charges": round(sum(t["charges"] for t in closed), 2),
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else None,
+        "max_drawdown": round(dd, 2),
+    }

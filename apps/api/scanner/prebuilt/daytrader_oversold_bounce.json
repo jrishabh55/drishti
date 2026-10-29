@@ -1,0 +1,6 @@
+{"name": "Oversold bounce (green day after RSI < 30)", "description": "Day-trader setup: yesterday's RSI(14) was under 30 and today closed above yesterday (ported from day-trader-skill's daily scan).",
+ "definition": {"logic": "AND", "children": [
+   {"timeframe": "1d", "left": {"fn": "RSI", "of": "close", "period": 14, "bars_ago": 1},
+    "op": "<", "right": {"const": 30}},
+   {"timeframe": "1d", "left": {"field": "close"}, "op": ">",
+    "right": {"field": "close", "bars_ago": 1}}]}}

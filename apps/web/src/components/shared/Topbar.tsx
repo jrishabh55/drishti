@@ -156,6 +156,13 @@ export function Topbar({
         >
           Scanners
         </Link>
+        <Link
+          to="/desk"
+          className="es-nav-link no-underline"
+          activeProps={{ className: 'active' }}
+        >
+          Trade desk
+        </Link>
       </nav>
       {ticker && (
         <div className="es-crumbs">
