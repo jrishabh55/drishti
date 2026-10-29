@@ -2,10 +2,10 @@
 
 Lifecycle:
     queued  → mark_running → run.started event
-            → for chunk in graph.graph.stream(...):
+            → for messages, state in graph.stream_run(...):
                   translator.handle_chunk → persist + publish events
                   check cancel flag
-            → graph.process_signal → parse_rating
+            → final state → run_rating
             → mark_completed → run.final event
     failure  → mark_failed → run.failed event
     cancel   → mark_cancelled → run.cancelled event
@@ -25,6 +25,7 @@ import os
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -35,7 +36,6 @@ from apps.api.jobs.store import JobStore, get_store
 from apps.api.jobs.translator import ChunkTranslator
 from apps.api.schemas import RunRequest
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -44,12 +44,11 @@ logger = logging.getLogger(__name__)
 # news/sentiment already degrade to sentinels inside the core.
 _PRICE_TOOLS = {"get_stock_data", "get_indicators", "get_verified_market_snapshot"}
 
-# Literal prefix the core's vendor router returns for a core category with no
-# usable data (tradingagents/dataflows/interface.py). Matching the TOOL RESULT
+# Prefixes the vendor router returns when price data is absent or unavailable. Matching the TOOL RESULT
 # rather than the analyst's report is deliberate: the report is LLM prose and
 # would be written in the run's `output_language`, so any string match against it
 # breaks the moment someone runs in Hindi or Chinese.
-_NO_DATA_SENTINEL = "NO_DATA_AVAILABLE"
+_PRICE_FAILURE_PREFIXES = ("NO_DATA_AVAILABLE", "DATA_UNAVAILABLE")
 
 
 def find_price_data_failure(chunk: Dict[str, Any]) -> Optional[str]:
@@ -65,7 +64,7 @@ def find_price_data_failure(chunk: Dict[str, Any]) -> Optional[str]:
         content = getattr(message, "content", None)
         if not isinstance(content, str):
             continue
-        if content.lstrip().startswith(_NO_DATA_SENTINEL):
+        if content.lstrip().startswith(_PRICE_FAILURE_PREFIXES):
             # Keep the core's own detail (invalid symbol / stale / not covered).
             return f"{name}: {content.strip()[:400]}"
     return None
@@ -172,7 +171,7 @@ class JobRunner:
     ) -> None:
         # Residential fetch proxy: when this user's helper is connected over
         # the relay, social-data fetches in THIS thread route through their
-        # machine (thread-local — see integrations/fetch_proxy.py). Regardless
+        # machine (run context — see integrations/fetch_proxy.py). Regardless
         # of LLM provider: the proxy serves data fetches, not LLM calls.
         from apps.api.integrations import fetch_proxy
 
@@ -209,7 +208,7 @@ class JobRunner:
             build_graph_for_request,
             effective_analysts,
         )
-        from tradingagents.agents.rating import parse_rating
+        from tradingagents.agents.rating import run_rating
 
         # Use the post-filter analyst list, not request.analysts: on a crypto
         # ticker the Fundamentals analyst is dropped, and the translator's list
@@ -250,7 +249,7 @@ class JobRunner:
             current = json.loads(
                 json.dumps(_redact_config(dict(graph.config)), sort_keys=True, default=str)
             )
-            if expected and current != expected:
+            if not expected or current != expected:
                 self._fail(
                     run_id,
                     "server configuration changed since this run started; "
@@ -284,34 +283,36 @@ class JobRunner:
         # from the top, which is exactly what resume exists to avoid.
         stream_input = None if resume else init_state
         try:
-            for chunk in graph.graph.stream(stream_input, **args):
-                if token.is_cancelled():
-                    self._cancelled(run_id, translator)
-                    return
-                for env in translator.handle_chunk(chunk):
-                    self._publish(run_id, env)
+            with closing(graph.stream_run(stream_input, **args)) as stream:
+                for messages, state in stream:
+                    chunk = {**(state or {}), "messages": messages}
+                    if token.is_cancelled():
+                        self._cancelled(run_id, translator)
+                        return
+                    for env in translator.handle_chunk(chunk):
+                        self._publish(run_id, env)
 
-                # Fail fast when prices are unavailable. Preflight catches a bad
-                # symbol at submit time; this catches a vendor that broke between
-                # submit and the market analyst's call. Breaking the loop
-                # abandons the generator, so the remaining agents never run —
-                # the alternative is paying for a debate over nothing and
-                # emitting a rating with no data behind it.
-                reason = find_price_data_failure(chunk)
-                if reason is not None:
-                    logger.warning("Run %s aborted — no price data. %s", run_id, reason)
-                    self._fail(
-                        run_id,
-                        "Market data unavailable — run stopped before the "
-                        f"remaining agents ran. {reason}",
-                        None,
-                    )
-                    return
-                # Snapshot in-progress state so the download endpoint can
-                # serve a partial report mid-run.
-                self.store.update_final_state(run_id, translator.final_state)
-                # After each chunk, snapshot stats and publish if changed.
-                self._maybe_publish_stats(run_id, translator, stats_handler)
+                    # Fail fast when prices are unavailable. Preflight catches a bad
+                    # symbol at submit time; this catches a vendor that broke between
+                    # submit and the market analyst's call. Breaking the loop
+                    # abandons the generator, so the remaining agents never run —
+                    # the alternative is paying for a debate over nothing and
+                    # emitting a rating with no data behind it.
+                    reason = find_price_data_failure(chunk)
+                    if reason is not None:
+                        logger.warning("Run %s aborted — no price data. %s", run_id, reason)
+                        self._fail(
+                            run_id,
+                            "Market data unavailable — run stopped before the "
+                            f"remaining agents ran. {reason}",
+                            None,
+                        )
+                        return
+                    # Snapshot in-progress state so the download endpoint can
+                    # serve a partial report mid-run.
+                    self.store.update_final_state(run_id, translator.final_state)
+                    # After each chunk, snapshot stats and publish if changed.
+                    self._maybe_publish_stats(run_id, translator, stats_handler)
         except Exception as exc:
             logger.exception("Graph stream raised for run %s", run_id)
             self._fail(run_id, repr(exc), traceback.format_exc())
@@ -320,7 +321,7 @@ class JobRunner:
         # Final state is whatever the translator accumulated.
         final_state = translator.final_state
         decision_text = final_state.get("final_trade_decision")
-        rating: Optional[str] = parse_rating(decision_text) if decision_text else None
+        rating: Optional[str] = run_rating(final_state) if decision_text else None
 
         # One last stats snapshot, then the terminal event.
         self._maybe_publish_stats(run_id, translator, stats_handler, force=True)

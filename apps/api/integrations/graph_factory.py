@@ -13,13 +13,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from apps.api.schemas import RunRequest
 from cli.models import AnalystType
-from cli.stats_handler import StatsCallbackHandler
 from cli.prompts import detect_asset_type, filter_analysts_for_asset_type
+from cli.stats_handler import StatsCallbackHandler
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from apps.api.schemas import RunRequest
-
 
 # Filesystem-safe characters for user_id directory components. Clerk user ids
 # look like ``user_2abcXYZ`` — already safe — but defensive sanitization
@@ -170,23 +169,9 @@ def build_graph_for_request(
         # Parked on the graph (like _checkpointer_ctx) so the runner's teardown
         # can revoke it on every exit path.
         graph._relay_token = relay_token
-    # Mirror TradingAgentsGraph._run_graph's state wiring, since the runner
-    # streams graph.graph.stream() directly instead of calling propagate():
-    # detect the asset type from the ticker (as the CLI does) and resolve the
-    # instrument identity once, so agents anchor to the real company rather
-    # than pattern-matching the price chart to a wrong one.
-    #
-    # Not mirrored: _run_graph also passes past_context (the memory log's prior
-    # runs for this ticker), so API runs are not influenced by earlier runs the
-    # way CLI runs are. Open product question — the per-user log is currently
-    # write-only from the API's perspective.
+    # Use the core's date-aware state construction, including historical identity.
     asset_type = detect_asset_type(request.ticker).value
-    init_state = graph.propagator.create_initial_state(
-        request.ticker,
-        request.analysis_date,
-        asset_type=asset_type,
-        instrument_context=graph.resolve_instrument_context(request.ticker, asset_type),
-    )
+    init_state = graph.create_run_state(request.ticker, request.analysis_date, asset_type)
     stream_args = graph.propagator.get_graph_args(callbacks=[stats_handler])
 
     # Checkpointing: upstream wires this inside propagate(), which the runner
@@ -215,7 +200,10 @@ def build_graph_for_request(
 
 
 def _build_config(request: RunRequest, *, user_id: Optional[str] = None) -> Dict[str, Any]:
+    from apps.api.integrations.engine import engine_identity
+
     config = DEFAULT_CONFIG.copy()
+    config["_app_engine"] = engine_identity()
     config["max_debate_rounds"] = request.research_depth
     config["max_risk_discuss_rounds"] = request.research_depth
     config["quick_think_llm"] = request.shallow_thinker

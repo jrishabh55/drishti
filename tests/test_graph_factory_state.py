@@ -107,13 +107,10 @@ def test_graph_and_translator_agree_on_the_analyst_list():
 
 
 def test_no_unpassed_create_initial_state_params():
-    """Fail loudly when upstream adds a state field the API path doesn't set.
+    """Pin fields reviewed at the app boundary; construction uses create_run_state.
 
-    ``past_context`` is knowingly excluded: the API path never reads the
-    per-user memory log back into a run, unlike propagate(). That's an open
-    product question, not a settled decision — see the note in graph_factory.
-    ``portfolio_context`` stays empty: the API has no portfolio input yet.
-    Anything else new should be wired up or explicitly skipped here.
+    Portfolio input is not exposed by the API yet. Memory lessons are loaded
+    by the graph's Memory Log node, which runs alongside the analysts.
     """
     params = set(inspect.signature(Propagator.create_initial_state).parameters)
     params -= {"self", "company_name", "trade_date"}
@@ -121,3 +118,9 @@ def test_no_unpassed_create_initial_state_params():
         f"create_initial_state signature changed: {sorted(params)} — "
         "check whether graph_factory needs to pass a new field"
     )
+
+
+def test_historical_identity_is_labelled_with_the_run_date():
+    _, state, _, _ = build_graph_for_request(_request("AAPL"))
+    assert "on 2026-07-01" in state["instrument_context"]
+    assert "current name" in state["instrument_context"]

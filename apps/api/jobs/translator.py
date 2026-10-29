@@ -21,7 +21,6 @@ from typing import Any, Dict, Iterator, List, Optional, Set
 
 from apps.api.schemas import EventEnvelope
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -105,7 +104,7 @@ class ChunkTranslator:
                 self._debate_lengths[key] = len(str(text).strip())
         if inv.get("bull_history") or inv.get("bear_history"):
             self._research_team_started = True
-        if inv.get("judge_decision"):
+        if self.final_state.get("investment_plan") or inv.get("judge_decision"):
             self._research_team_completed = True
         if self.final_state.get("trader_investment_plan"):
             self._trader_started = True
@@ -115,8 +114,11 @@ class ChunkTranslator:
             for k in ("aggressive_history", "conservative_history", "neutral_history")
         ):
             self._risk_started.add("risk")
-        if risk.get("judge_decision"):
+        if self.final_state.get("final_trade_decision") or risk.get("judge_decision"):
             self._portfolio_completed = True
+        self._analyst_reports = {
+            key: self.final_state.get(key) for key in ANALYST_REPORT_MAP.values()
+        }
         # Not seeded: _processed_message_ids — event payloads don't persist
         # message ids, so raw message/tool.called events from before the
         # interruption may re-emit once. Cosmetic (ticker panel only); every
@@ -195,38 +197,35 @@ class ChunkTranslator:
 
     def _yield_analyst_events(self, chunk: Dict[str, Any]) -> Iterator[EventEnvelope]:
         """Mirror ``cli/main.py:update_analyst_statuses``."""
-        first_pending: Optional[str] = None
         for analyst_key in self.selected_analysts:
             report_key = ANALYST_REPORT_MAP[analyst_key]
             content = chunk.get(report_key)
 
             if content:
                 # Newly-arrived report. Emit the report event + completion.
-                yield self._event(
-                    "analyst.report",
-                    {"analyst": analyst_key, "section": report_key, "content": content},
-                )
+                if self._analyst_reports.get(report_key) != content:
+                    self._analyst_reports[report_key] = content
+                    yield self._event(
+                        "analyst.report",
+                        {"analyst": analyst_key, "section": report_key, "content": content},
+                    )
                 if analyst_key not in self._analyst_completed:
                     self._analyst_completed.add(analyst_key)
                     yield self._event("analyst.completed", {"analyst": analyst_key})
                 continue
 
-            # No report yet for this analyst — first such one is the active analyst.
+            # All selected analysts run concurrently until their reports arrive.
             if analyst_key not in self._analyst_completed:
-                if first_pending is None:
-                    first_pending = analyst_key
-                    if analyst_key not in self._announced_started:
-                        self._announced_started.add(analyst_key)
-                        yield self._event("analyst.started", {"analyst": analyst_key})
+                if analyst_key not in self._announced_started:
+                    self._announced_started.add(analyst_key)
+                    yield self._event("analyst.started", {"analyst": analyst_key})
 
     def _yield_research_events(self, chunk: Dict[str, Any]) -> Iterator[EventEnvelope]:
-        debate = chunk.get("investment_debate_state")
-        if not debate:
-            return
+        debate = chunk.get("investment_debate_state") or {}
 
         bull_hist = (debate.get("bull_history") or "").strip()
         bear_hist = (debate.get("bear_history") or "").strip()
-        judge = (debate.get("judge_decision") or "").strip()
+        judge = (chunk.get("investment_plan") or debate.get("judge_decision") or "").strip()
 
         if (bull_hist or bear_hist) and not self._research_team_started:
             self._research_team_started = True
@@ -249,6 +248,7 @@ class ChunkTranslator:
                 "debate.update",
                 {"team": "investment", "role": "judge", "delta": judge, "full": judge},
             )
+            yield self._event("report.section", {"section": "investment_plan", "content": judge})
             yield self._event("team.completed", {"team": "research"})
 
     def _yield_trader_events(self, chunk: Dict[str, Any]) -> Iterator[EventEnvelope]:
@@ -265,14 +265,12 @@ class ChunkTranslator:
             yield self._event("team.completed", {"team": "trading"})
 
     def _yield_risk_events(self, chunk: Dict[str, Any]) -> Iterator[EventEnvelope]:
-        risk = chunk.get("risk_debate_state")
-        if not risk:
-            return
+        risk = chunk.get("risk_debate_state") or {}
 
         agg_hist = (risk.get("aggressive_history") or "").strip()
         con_hist = (risk.get("conservative_history") or "").strip()
         neu_hist = (risk.get("neutral_history") or "").strip()
-        judge = (risk.get("judge_decision") or "").strip()
+        judge = (chunk.get("final_trade_decision") or risk.get("judge_decision") or "").strip()
 
         if (agg_hist or con_hist or neu_hist) and "risk" not in self._risk_started:
             self._risk_started.add("risk")

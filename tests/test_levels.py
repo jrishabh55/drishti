@@ -393,3 +393,12 @@ def test_endpoint_rejects_bad_parameters(client, monkeypatch, params):
     _with_run(monkeypatch, _stub_run())
     r = client.get("/api/runs/run-1/levels", params=params)
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize('rating', ['REVIEW', 'review', None, '', 'unreadable'])
+def test_unresolved_ratings_never_offer_actionable_levels(rating):
+    r = _levels(_frame(FLAT), rating=rating)
+    assert r.viable is False
+    assert r.levels is None
+    assert r.size is None
+    assert any('review' in note.lower() for note in r.viability_notes)

@@ -233,6 +233,13 @@ def compute_levels(
     notes: list[str] = []
 
     normalized_rating = (rating or "").strip().lower()
+    if normalized_rating not in {"buy", "overweight", "hold", *_SHORT_RATINGS}:
+        return LevelsResponse(
+            run_id=run_id, ticker=ticker, analysis_date=analysis_date, rating=rating,
+            currency=_quote_currency(ticker), viable=False,
+            viability_notes=["The recommendation needs review; no actionable levels or position size are offered."],
+            model_suggested=model_suggested,
+        )
     if normalized_rating in _SHORT_RATINGS:
         # Return early and empty rather than long-shaped numbers for a short.
         return LevelsResponse(

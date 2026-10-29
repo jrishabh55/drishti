@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-
 # Status vocabulary for jobs. Aligned with the SSE event taxonomy in
 # apps/api/jobs/translator.py.
 # "interrupted" is a RESUMABLE state, distinct from "failed": the run did not
@@ -60,6 +59,9 @@ def canonicalize_request(request: "RunRequest") -> Dict[str, Any]:
     canonical["analysts"] = sorted(canonical["analysts"])
     if isinstance(canonical.get("llm_provider"), str):
         canonical["llm_provider"] = canonical["llm_provider"].lower()
+    from apps.api.integrations.engine import engine_identity
+
+    canonical["_app_engine"] = engine_identity()
     return canonical
 
 

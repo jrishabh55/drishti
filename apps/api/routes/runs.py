@@ -32,7 +32,6 @@ from apps.api.schemas import (
     request_hash,
 )
 
-
 router = APIRouter()
 
 #: The product's provider surface: OpenAI on the server key (paid in credits),
@@ -105,6 +104,12 @@ def create_run(
             detail=f"unsupported llm_provider '{request.llm_provider}' — "
                    f"use one of: {', '.join(sorted(ALLOWED_PROVIDERS))}",
         )
+
+    for field in ("shallow_thinker", "deep_thinker"):
+        model = getattr(request, field).strip()
+        if not model or model.lower() == "custom":
+            raise HTTPException(status_code=400, detail=f"{field} must name an actual model ID")
+        setattr(request, field, model)
 
     # Validate analysis_date — cheap, would otherwise fail deep inside the graph.
     try:
@@ -325,7 +330,8 @@ def resume_run(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"run is {detail.status}; only interrupted runs can be resumed",
         )
-    if store.get_checkpoint_context(run_id) is None:
+    context = store.get_checkpoint_context(run_id)
+    if context is None:
         # Without a checkpoint there is nothing to continue from; resuming would
         # silently restart the whole pipeline and bill for it again.
         raise HTTPException(
@@ -334,6 +340,14 @@ def resume_run(
                 "this run has no checkpoint, so it cannot be resumed — it was "
                 "started with checkpoint_enabled=false. Start a new run instead."
             ),
+        )
+
+    from apps.api.integrations.engine import engine_identity
+
+    if (context.get("effective_config") or {}).get("_app_engine") != engine_identity():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This checkpoint predates an engine upgrade and cannot be resumed. Start a new run instead.",
         )
 
     # Check helper availability BEFORE consuming the atomic claim: a claim that

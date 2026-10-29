@@ -222,3 +222,28 @@ class TestFetchShim:
         finally:
             get_internal_tokens().revoke(token)
         assert r.status_code == 503 and r.json()["ok"] is False
+
+
+def test_parallel_graph_tasks_inherit_only_their_run_proxy():
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+    from apps.api.integrations import fetch_proxy as ctx
+    from apps.api.relay import RelayConnection, reset_relay_registry_for_tests
+    from apps.api.routes.relay import get_internal_tokens
+
+    reg = reset_relay_registry_for_tests()
+    for uid in ['u1','u2']:
+        reg.register(RelayConnection(uid, lambda m: None))
+    token1 = ctx.activate_for_run('u1')
+    first = copy_context()
+    ctx.deactivate(token1)
+    token2 = ctx.activate_for_run('u2')
+    second = copy_context()
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            proxies = [pool.submit(context.run, upstream._current_proxy) for context in [first,second]]
+            assert [future.result().token for future in proxies] == [token1,token2]
+        assert get_internal_tokens().resolve(token2) == 'u2'
+    finally:
+        ctx.deactivate(token2)
+    assert upstream._current_proxy() is None

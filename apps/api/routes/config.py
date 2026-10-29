@@ -7,14 +7,14 @@ list — the CLI keeps every upstream provider.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
 
-from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 from apps.api.auth import current_user_id
 from apps.api.schemas import ConfigResponse, ModelOption, ProviderOption
-
+from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 
 router = APIRouter()
 
@@ -85,7 +85,7 @@ def _models_for_provider(provider_key: str) -> List[ModelOption]:
     out: List[ModelOption] = []
     for mode in ("quick", "deep"):
         for label, value in catalog.get(mode, ()):
-            if value in seen:
+            if value == "custom" or value in seen:
                 continue
             seen.add(value)
             out.append(ModelOption(id=value, label=label))
@@ -255,6 +255,8 @@ def helper_status(request: Request) -> dict:
     in the pipeline with a connection error. Sync def on purpose: FastAPI runs
     it in the threadpool, so the blocking loopback probe never stalls the loop.
     """
+    import os
+
     from apps.api.auth import current_user_id
     from apps.api.integrations.helper_backend import (
         helper_enabled,
@@ -264,8 +266,6 @@ def helper_status(request: Request) -> dict:
     from apps.api.relay import get_relay_registry
     from apps.helper.server import _is_newer
     from apps.helper.version import __version__ as latest
-
-    import os
 
     # Where the UI sends users who don't have the helper yet. Explicit env
     # wins (artifact hosted elsewhere, e.g. a release page); otherwise a build
