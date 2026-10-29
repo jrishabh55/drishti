@@ -182,3 +182,15 @@ def test_alert_retry_expires_from_event_time_not_queue_time(env,monkeypatch):
     sent=[];monkeypatch.setattr(service,'send',lambda *a:sent.append(a) or '1')
     service.flush(row['id'])
     assert sent==[]
+
+
+def test_telegram_button_ack_is_returned_in_webhook_response_without_provider_io(env):
+    from apps.api.messaging import service
+    c,s,calls=env
+    row,key,token=_tg(env)
+    row.update(verified=True,chat='42',sender='42');s.save(row)
+    before=len(calls)
+    response=service.receive(row['id'],key,{'update_id':999,'callback_query':{'id':'cb1','from':{'id':42},
+        'data':'help','message':{'chat':{'id':42,'type':'private'}}}})
+    assert response['method']=='answerCallbackQuery' and response['callback_query_id']=='cb1'
+    assert len(calls)==before

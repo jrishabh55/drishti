@@ -22,6 +22,7 @@ def authorize(cid, secret):
 
 def receive(cid, secret, payload):
     doc=authorize(cid,secret)
+    acknowledgement=None
     with user_lock(doc['user_id']):
         doc=authorize(cid,secret)  # disconnect may have won the lock
         if not isinstance(payload,dict):
@@ -55,10 +56,9 @@ def receive(cid, secret, payload):
                 return {'ok':True}
             reply=_command(doc,text,str(sender['id']))
             if cb.get('id'):
-                try:
-                    providers.telegram(conf['token'],'answerCallbackQuery',{'callback_query_id':cb['id'],'text':reply[:180]})
-                except providers.ProviderError:
-                    pass
+                # Telegram supports Bot API methods in webhook responses.
+                # Acknowledge without holding the trade lock for HTTP I/O.
+                acknowledgement={'method':'answerCallbackQuery','callback_query_id':cb['id'],'text':reply[:180]}
         else:
             if payload.get('instance')==doc.get('instance') and payload.get('event') in ('connection.update','CONNECTION_UPDATE'):
                 state=(payload.get('data') or {}).get('state')
@@ -103,7 +103,7 @@ def receive(cid, secret, payload):
             elif doc.get('verified') and doc.get('inbound_verified'):
                 _command(doc,text,recipient)
         store.mark_seen(cid,str(mid))
-        return {'ok':True}
+        return acknowledgement or {'ok':True}
 
 
 def _command(doc, text, sender):
