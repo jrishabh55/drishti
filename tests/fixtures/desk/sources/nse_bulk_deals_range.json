@@ -1,0 +1,70 @@
+{
+ "data": [
+  {
+   "BD_DT_DATE": "01-OCT-2026",
+   "BD_DT_ORDER": "2026-09-30T18:30:00.000Z",
+   "BD_SYMBOL": "ADVANCE",
+   "BD_SCRIP_NAME": "Advance Agrolife Limited",
+   "BD_CLIENT_NAME": "GROWVIA TRADE PRIVATE LIMITED",
+   "BD_BUY_SELL": "BUY",
+   "BD_QTY_TRD": 350000,
+   "BD_TP_WATP": 116.75,
+   "BD_REMARKS": "-"
+  },
+  {
+   "BD_DT_DATE": "01-OCT-2026",
+   "BD_DT_ORDER": "2026-09-30T18:30:00.000Z",
+   "BD_SYMBOL": "ADVANCE",
+   "BD_SCRIP_NAME": "Advance Agrolife Limited",
+   "BD_CLIENT_NAME": "L7 HITECH PRIVATE LIMITED",
+   "BD_BUY_SELL": "SELL",
+   "BD_QTY_TRD": 350000,
+   "BD_TP_WATP": 116.75,
+   "BD_REMARKS": "-"
+  },
+  {
+   "BD_DT_DATE": "01-OCT-2026",
+   "BD_DT_ORDER": "2026-09-30T18:30:00.000Z",
+   "BD_SYMBOL": "AGARWALTUF",
+   "BD_SCRIP_NAME": "Agarwal Tough Glass Ind L",
+   "BD_CLIENT_NAME": "VAIBHAV RAJENDRA DOSHI",
+   "BD_BUY_SELL": "BUY",
+   "BD_QTY_TRD": 144000,
+   "BD_TP_WATP": 167.02,
+   "BD_REMARKS": "-"
+  },
+  {
+   "BD_DT_DATE": "01-OCT-2026",
+   "BD_DT_ORDER": "2026-09-30T18:30:00.000Z",
+   "BD_SYMBOL": "AGARWALTUF",
+   "BD_SCRIP_NAME": "Agarwal Tough Glass Ind L",
+   "BD_CLIENT_NAME": "VAIBHAV RAJENDRA DOSHI",
+   "BD_BUY_SELL": "SELL",
+   "BD_QTY_TRD": 164400,
+   "BD_TP_WATP": 167.26,
+   "BD_REMARKS": "-"
+  },
+  {
+   "BD_DT_DATE": "01-OCT-2026",
+   "BD_DT_ORDER": "2026-09-30T18:30:00.000Z",
+   "BD_SYMBOL": "ALICON",
+   "BD_SCRIP_NAME": "Alicon Castalloy Limited",
+   "BD_CLIENT_NAME": "RAJEEV SIKAND",
+   "BD_BUY_SELL": "SELL",
+   "BD_QTY_TRD": 135546,
+   "BD_TP_WATP": 863.45,
+   "BD_REMARKS": "-"
+  },
+  {
+   "BD_DT_DATE": "01-OCT-2026",
+   "BD_DT_ORDER": "2026-09-30T18:30:00.000Z",
+   "BD_SYMBOL": "AMBANIORGO",
+   "BD_SCRIP_NAME": "AMBANI ORGOCHEM LIMITED",
+   "BD_CLIENT_NAME": "ECHJAY FORGING INDUSTRIES PRIVATE LIMITED",
+   "BD_BUY_SELL": "SELL",
+   "BD_QTY_TRD": 61000,
+   "BD_TP_WATP": 115.05,
+   "BD_REMARKS": "-"
+  }
+ ]
+}

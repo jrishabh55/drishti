@@ -33,11 +33,18 @@ sys.path.insert(0, str(ROOT))
 
 from apps.api.desk import datasets  # noqa: E402
 
+_SPAN = {"from": (datetime.now() - timedelta(days=60)).date().isoformat(),
+         "to": datetime.now().date().isoformat()}
 SAMPLE_PARAMS = {
-    "nse.announcements": {"symbol": "RELIANCE"},
-    "nse.financial_results": {"symbol": "RELIANCE"},
-    "nse.insider_pit": {"from": (datetime.now() - timedelta(days=7)).date().isoformat(),
-                        "to": datetime.now().date().isoformat()},
+    "nse.announcements": {"symbol": "RELIANCE", **_SPAN},
+    "nse.insider_pit": {"symbol": "RELIANCE", **_SPAN},
+    "nse.deals_history": {"kind": "bulk_deals", "symbol": "RELIANCE", **_SPAN},
+    "nse.integrated_results": {"symbol": "RELIANCE"},
+    "nse.xbrl": {"file": "INTEGRATED_FILING_INDAS_1695741_17072026075004_WEB.xml"},
+    "nse.event_calendar_symbol": {"symbol": "RELIANCE"},
+    "bse.scrip_search": {"symbol": "RELIANCE"},
+    "bse.announcements": {"code": "500325", **_SPAN},
+    "yahoo.rss": {"symbol": "INFY"},
 }
 
 
@@ -52,7 +59,7 @@ def probe(name: str, out_dir: Path) -> dict:
         body, status, err = b"", None, str(exc)
     except Exception as exc:  # noqa: BLE001
         body, status, err = b"", None, f"{type(exc).__name__}: {exc}"
-    ext = "json" if ds.kind == "json" else "csv"
+    ext = ds.kind
     if body:
         (out_dir / f"{name}.{ext}").write_bytes(body)
     return {"dataset": name, "status": status, "bytes": len(body), "error": err,

@@ -1,0 +1,26 @@
+{
+ "data": [
+  {
+   "BD_DT_DATE": "28-OCT-2026",
+   "BD_DT_ORDER": "2026-10-27T18:30:00.000Z",
+   "BD_SYMBOL": "STLTECH",
+   "BD_SCRIP_NAME": "Sterlite Technologies Ltd",
+   "BD_CLIENT_NAME": "POONAWALLA AVIATION PRIVATE LIMITED",
+   "BD_BUY_SELL": "BUY",
+   "BD_QTY_TRD": 601900,
+   "BD_TP_WATP": 887,
+   "BD_REMARKS": null
+  },
+  {
+   "BD_DT_DATE": "28-OCT-2026",
+   "BD_DT_ORDER": "2026-10-27T18:30:00.000Z",
+   "BD_SYMBOL": "STLTECH",
+   "BD_SCRIP_NAME": "Sterlite Technologies Ltd",
+   "BD_CLIENT_NAME": "SERUM INSTITUTE OF INDIA PRIVATE LIMITED",
+   "BD_BUY_SELL": "SELL",
+   "BD_QTY_TRD": 601900,
+   "BD_TP_WATP": 887,
+   "BD_REMARKS": null
+  }
+ ]
+}

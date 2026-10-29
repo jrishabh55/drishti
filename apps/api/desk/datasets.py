@@ -11,10 +11,11 @@ params, never a URL. Responses are cached in desk.sqlite ``feed_cache``
 (shared: public data), with a short negative cache so an NSE outage can't
 slow every risk check down.
 
-VERIFY: endpoints and response formats are from public knowledge of NSE's
-site and are UNVERIFIED until the spike records fixtures. Parsers below
-are written tolerant (header-name matching, not column positions) and are
-tested against the assumed formats; re-test them against real fixtures.
+Endpoints and response shapes were observed on 2026-10-29 and recorded in
+tests/fixtures/desk/sources/ (see its README for what answered and what did
+not). Parsers match header/field names, not positions, and are tested
+against those recorded responses. Re-run the spike from the server before
+enabling DESK_NSE_FEEDS there.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 NEGATIVE_TTL_S = 600
 TIMEOUT_S = 6
+MAX_BYTES = 3_000_000
 
 
 class FeedUnavailable(RuntimeError):
@@ -69,45 +71,114 @@ def _ddmmyyyy(v: Any) -> str:
 class Dataset:
     name: str
     url: str                                  # template; {params} filled by validators
-    kind: Literal["csv", "json"]
+    kind: Literal["csv", "json", "xml"]
     ttl_s: int
     params: Dict[str, Callable[[Any], str]] = field(default_factory=dict)
     route: Route = "server"
     warmup: Optional[str] = None              # homepage to visit first for cookies
-    referer: Optional[str] = None
+    headers: Dict[str, str] = field(default_factory=dict)
     used_by: str = ""
 
 
+def _yyyymmdd(v: Any) -> str:
+    _ddmmyyyy(v)
+    return date.fromisoformat(str(v)).strftime("%Y%m%d")
+
+
+def _choice(*allowed: str) -> Callable[[Any], str]:
+    def check(v: Any) -> str:
+        if v not in allowed:
+            raise FeedUnavailable("bad_params", f"{v!r} is not one of {allowed}")
+        return str(v)
+    return check
+
+
+def _pattern(rx: str, what: str) -> Callable[[Any], str]:
+    compiled = re.compile(rx)
+
+    def check(v: Any) -> str:
+        if not compiled.fullmatch(str(v or "")):
+            raise FeedUnavailable("bad_params", f"{v!r} is not {what}")
+        return str(v)
+    return check
+
+
+def _query(v: Any) -> str:
+    from urllib.parse import quote
+    return quote(_sym(v), safe="")
+
+
+_xbrl_file = _pattern(r"[A-Z0-9_]{8,120}_WEB\.xml", "an NSE XBRL filing name")
+_bse_code = _pattern(r"[0-9]{6}", "a BSE scrip code")
+
 NSE_HOME = "https://www.nseindia.com/"
+NSE_API = "https://www.nseindia.com/api/"
+BSE_API = "https://api.bseindia.com/BseIndiaAPI/api/"
+BSE_HEADERS = {"Referer": "https://www.bseindia.com/", "Origin": "https://www.bseindia.com"}
+# Yahoo's RSS answers 429 to a full browser UA string and 200 to a short one
+# (observed 2026-10-29).
+YAHOO_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+# Observed 2026-10-29 from a residential Indian IP (scripts/desk_spike.py and
+# tests/fixtures/desk/sources/README.md). NOT yet observed from the deployed
+# server: DESK_NSE_FEEDS stays off for the risk check until the spike passes there.
 CATALOG: Dict[str, Dataset] = {d.name: d for d in (
     Dataset("nse.fo_ban", "https://nsearchives.nseindia.com/content/fo/fo_secban.csv",
-            "csv", 6 * 3600, used_by="risk (warn)"),
+            "csv", 6 * 3600, used_by="risk (warn), research facts"),
     Dataset("nse.price_bands", "https://nsearchives.nseindia.com/content/equities/sec_list.csv",
             "csv", 6 * 3600, used_by="risk (circuit headroom), Time Machine clamp"),
+    Dataset("nse.fo_lots", "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv",
+            "csv", 24 * 3600, used_by="F&O universe, research facts"),
     Dataset("nse.bulk_deals", "https://nsearchives.nseindia.com/content/equities/bulk.csv",
-            "csv", 3600, used_by="insider tracker"),
+            "csv", 3600, used_by="deals tracker (latest session)"),
     Dataset("nse.block_deals", "https://nsearchives.nseindia.com/content/equities/block.csv",
-            "csv", 3600, used_by="insider tracker"),
+            "csv", 3600, used_by="deals tracker (latest session)"),
+    Dataset("nse.deals_history",
+            NSE_API + "historicalOR/bulk-block-short-deals?optionType={kind}&symbol={symbol}"
+            "&from={from}&to={to}", "json", 3600,
+            {"kind": _choice("bulk_deals", "block_deals"), "symbol": _query,
+             "from": _ddmmyyyy, "to": _ddmmyyyy}, warmup=NSE_HOME, used_by="insider tracker"),
     Dataset("nse.announcements",
-            "https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={symbol}",
-            "json", 300, {"symbol": _sym}, warmup=NSE_HOME, used_by="news"),
-    Dataset("nse.board_meetings",
-            "https://www.nseindia.com/api/corporate-board-meetings?index=equities",
-            "json", 3 * 3600, warmup=NSE_HOME, used_by="results-week warning"),
+            NSE_API + "corporate-announcements?index=equities&symbol={symbol}"
+            "&from_date={from}&to_date={to}", "json", 300,
+            {"symbol": _query, "from": _ddmmyyyy, "to": _ddmmyyyy}, warmup=NSE_HOME,
+            used_by="news"),
+    # Market-wide PIT (no symbol) answered an empty list on every probe; per symbol works.
     Dataset("nse.insider_pit",
-            "https://www.nseindia.com/api/corporates-pit?index=equities&from_date={from}&to_date={to}",
-            "json", 1800, {"from": _ddmmyyyy, "to": _ddmmyyyy}, warmup=NSE_HOME,
+            NSE_API + "corporates-pit?index=equities&symbol={symbol}&from_date={from}"
+            "&to_date={to}", "json", 1800,
+            {"symbol": _query, "from": _ddmmyyyy, "to": _ddmmyyyy}, warmup=NSE_HOME,
             used_by="insider tracker"),
-    Dataset("nse.financial_results",
-            "https://www.nseindia.com/api/corporates-financial-results?index=equities"
-            "&period=Quarterly&symbol={symbol}",
-            "json", 6 * 3600, {"symbol": _sym}, warmup=NSE_HOME, used_by="results analyst"),
-    Dataset("nse.asm", "https://www.nseindia.com/api/reportASM", "json", 6 * 3600,
-            warmup=NSE_HOME, used_by="risk (block)"),
-    Dataset("nse.gsm", "https://www.nseindia.com/api/reportGSM", "json", 6 * 3600,
-            warmup=NSE_HOME, used_by="risk (block)"),
-    Dataset("nse.holidays", "https://www.nseindia.com/api/holiday-master?type=trading",
+    # corporates-financial-results stops at Dec 2024: SEBI's integrated filing
+    # (2025-) carries the quarterly results now.
+    Dataset("nse.integrated_results",
+            NSE_API + "integrated-filing-results?index=equities&symbol={symbol}"
+            "&type=Integrated%20Filing-%20Financials", "json", 6 * 3600,
+            {"symbol": _query}, warmup=NSE_HOME, used_by="results analyst"),
+    Dataset("nse.xbrl", "https://nsearchives.nseindia.com/corporate/xbrl/{file}", "xml",
+            30 * 24 * 3600, {"file": _xbrl_file}, used_by="results analyst (filed figures)"),
+    Dataset("nse.event_calendar", NSE_API + "event-calendar?index=equities", "json",
+            3 * 3600, warmup=NSE_HOME, used_by="results-week warning"),
+    Dataset("nse.event_calendar_symbol",
+            NSE_API + "event-calendar?index=equities&symbol={symbol}", "json", 3 * 3600,
+            {"symbol": _query}, warmup=NSE_HOME, used_by="results date"),
+    Dataset("nse.asm", NSE_API + "reportASM", "json", 6 * 3600,
+            warmup=NSE_HOME, used_by="risk (block), research facts"),
+    Dataset("nse.gsm", NSE_API + "reportGSM", "json", 6 * 3600,
+            warmup=NSE_HOME, used_by="risk (block), research facts"),
+    Dataset("nse.holidays", NSE_API + "holiday-master?type=trading",
             "json", 24 * 3600, warmup=NSE_HOME, used_by="session calendar"),
+    Dataset("bse.scrip_search", BSE_API + "PeerSmartSearch/w?Type=SS&text={symbol}", "json",
+            7 * 24 * 3600, {"symbol": _query}, headers=BSE_HEADERS,
+            used_by="NSE symbol -> BSE scrip code"),
+    Dataset("bse.announcements",
+            BSE_API + "AnnSubCategoryGetData/w?pageno=1&strCat=-1&strPrevDate={from}"
+            "&strScrip={code}&strSearch=P&strToDate={to}&strType=C&subcategory=-1", "json",
+            300, {"code": _bse_code, "from": _yyyymmdd, "to": _yyyymmdd},
+            headers=BSE_HEADERS, used_by="news"),
+    Dataset("yahoo.rss", "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}.NS"
+            "&region=IN&lang=en-IN", "xml", 600, {"symbol": _query}, headers=YAHOO_HEADERS,
+            used_by="news (unofficial headlines)"),
 )}
 
 
@@ -152,7 +223,7 @@ def _http_get(ds: Dataset, url: str) -> bytes:  # pragma: no cover - network
         wait = 1.0 - (time.monotonic() - _last_call.get(host, 0))
     if wait > 0:
         time.sleep(wait)
-    headers = {"Referer": ds.referer} if ds.referer else {}
+    headers = dict(ds.headers)
     if ds.warmup and time.monotonic() - _warmed.get(host, 0) > 600:
         s.get(ds.warmup, timeout=TIMEOUT_S)
         _warmed[host] = time.monotonic()
@@ -164,7 +235,9 @@ def _http_get(ds: Dataset, url: str) -> bytes:  # pragma: no cover - network
         r = s.get(url, timeout=TIMEOUT_S, headers=headers, allow_redirects=False)
     if r.status_code != 200:
         raise FeedUnavailable("source_error", f"{ds.name}: HTTP {r.status_code}")
-    return r.content[:2_000_000]
+    if len(r.content) > MAX_BYTES:   # a cut-off body would parse as garbage, not as less data
+        raise FeedUnavailable("source_error", f"{ds.name}: response over {MAX_BYTES} bytes")
+    return r.content
 
 
 def fetch(name: str, params: Optional[Dict[str, Any]] = None, *, user_id: str = "",
@@ -220,7 +293,7 @@ def clear_negative_cache_for_tests() -> None:
     _neg.clear()
 
 
-# ---------------------------------------------------------------- parsers (assumed formats)
+# ---------------------------------------------------------------- parsers (recorded formats)
 
 def _norm(h: str) -> str:
     return re.sub(r"[^a-z0-9]", "", h.lower())
@@ -288,6 +361,68 @@ def parse_deals(text: str) -> List[Dict[str, Any]]:
     return out
 
 
+def parse_fo_lots(text: str) -> Dict[str, int]:
+    """fo_mktlots.csv: index rows (NIFTY, BANKNIFTY…), then a
+    "Derivatives on Individual Securities,Symbol,…" divider, then one row per
+    stock underlying with its lot size per expiry. Returns {SYMBOL: lot of the
+    nearest expiry} for the stock underlyings only."""
+    out: Dict[str, int] = {}
+    stocks = False
+    for row in csv.reader(io.StringIO(text)):
+        cells = [c.strip() for c in row]
+        if len(cells) < 3:
+            continue
+        if cells[0].lower().startswith("derivatives on individual securities"):
+            stocks = True
+            continue
+        sym = cells[1].upper()
+        if not stocks or not _SYMBOL.match(sym):
+            continue
+        lot = next((c for c in cells[2:] if c.isdigit()), None)
+        if lot:
+            out[sym] = int(lot)
+    return out
+
+
+def parse_surveillance(asm_text: Optional[str], gsm_text: Optional[str]
+                       ) -> Dict[str, Dict[str, str]]:
+    """reportASM {"longterm": {"data": [...]}, "shortterm": {...}} and reportGSM
+    [...] -> {SYMBOL: {"asm": "LTASM - I (13)"} | {"gsm": "..."}}; the stage
+    string is NSE's survCode verbatim."""
+    out: Dict[str, Dict[str, str]] = {}
+    if asm_text:
+        doc = json.loads(asm_text)
+        for term in ("longterm", "shortterm"):
+            for r in (doc.get(term) or {}).get("data") or []:
+                sym = str(r.get("symbol") or "").upper()
+                if _SYMBOL.match(sym):
+                    out.setdefault(sym, {})["asm"] = str(
+                        r.get("survCode") or r.get("asmSurvIndicator") or "ASM")[:60]
+    if gsm_text:
+        for r in json.loads(gsm_text) or []:
+            sym = str(r.get("symbol") or "").upper()
+            if _SYMBOL.match(sym):
+                out.setdefault(sym, {})["gsm"] = str(
+                    r.get("survCode") or r.get("gsmStage") or "GSM")[:60]
+    return out
+
+
+def parse_results_calendar(text: str) -> Dict[str, List[str]]:
+    """event-calendar [{symbol, purpose, date "30-Oct-2026"}] -> {SYMBOL:
+    [ISO dates of meetings whose purpose names financial results]}, sorted."""
+    out: Dict[str, List[str]] = {}
+    for r in json.loads(text) or []:
+        sym = str(r.get("symbol") or "").upper()
+        if not _SYMBOL.match(sym) or "result" not in str(r.get("purpose") or "").lower():
+            continue
+        try:
+            d = datetime.strptime(str(r.get("date")), "%d-%b-%Y").date().isoformat()
+        except ValueError:
+            continue
+        out.setdefault(sym, []).append(d)
+    return {k: sorted(set(v)) for k, v in out.items()}
+
+
 # ---------------------------------------------------------------- facts for the risk check
 
 def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -305,9 +440,23 @@ def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     except FeedUnavailable as exc:
         logger.info("F&O ban list unavailable: %s", exc)
         ban = None
-    if not bands and ban is None:
+    surv: Dict[str, Dict[str, str]] = {}
+    try:
+        surv = parse_surveillance(fetch("nse.asm")["text"], fetch("nse.gsm")["text"])
+    except (FeedUnavailable, ValueError) as exc:
+        logger.info("ASM/GSM lists unavailable: %s", exc)
+    results: Dict[str, List[str]] = {}
+    try:
+        results = parse_results_calendar(fetch("nse.event_calendar")["text"])
+    except (FeedUnavailable, ValueError) as exc:
+        logger.info("results calendar unavailable: %s", exc)
+    if not bands and ban is None and not surv and not results:
         return out
-    closes = _last_closes(symbols)
+    from apps.api.desk.bars import today_ist
+
+    today = today_ist()
+    week_end = (today + timedelta(days=7)).isoformat()
+    closes = _last_closes(symbols) if bands else {}
     for sym in symbols:
         facts: Dict[str, Any] = {}
         b = bands.get(sym)
@@ -321,6 +470,10 @@ def nse_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
                     facts["band_lower"] = round(pc * (1 - b["band_pct"] / 100), 2)
         if ban is not None:
             facts["fo_ban"] = sym in ban
+        facts.update(surv.get(sym, {}))
+        upcoming = [d for d in results.get(sym, []) if today.isoformat() <= d <= week_end]
+        if upcoming:
+            facts["results_date"] = upcoming[0]
         if facts:
             out[sym] = facts
     return out
@@ -342,3 +495,68 @@ def _last_closes(symbols: List[str]) -> Dict[str, float]:
         if not prev.empty:
             out[sym] = float(prev.iloc[-1]["close"])
     return out
+
+
+# ---------------------------------------------------------------- research helpers
+# Vendor fields are untrusted text: they are cleaned, length-capped and shown
+# as plain text, never interpreted (no markdown/HTML rendering, never fed to
+# a model as instructions). Links survive only as https on the source's own hosts.
+
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+LINK_HOSTS = {
+    "nse": ("www.nseindia.com", "nsearchives.nseindia.com", "archives.nseindia.com"),
+    "bse": ("www.bseindia.com",),
+    "yahoo": ("finance.yahoo.com", "uk.finance.yahoo.com", "in.finance.yahoo.com"),
+}
+LABELS = {
+    "nse.announcements": "NSE corporate announcements",
+    "bse.announcements": "BSE corporate announcements",
+    "bse.scrip_search": "BSE scrip lookup",
+    "yahoo.rss": "Yahoo Finance headlines (unofficial)",
+    "nse.insider_pit": "NSE insider trading (SEBI PIT) disclosures",
+    "nse.deals_history": "NSE bulk/block deals",
+    "nse.bulk_deals": "NSE bulk deals (latest session)",
+    "nse.block_deals": "NSE block deals (latest session)",
+    "nse.integrated_results": "NSE integrated filing — financials",
+    "nse.xbrl": "NSE XBRL results filings",
+    "nse.event_calendar_symbol": "NSE event calendar",
+    "nse.price_bands": "NSE price bands",
+    "nse.fo_ban": "NSE F&O ban list",
+    "nse.fo_lots": "NSE F&O market lots",
+    "nse.asm": "NSE ASM list",
+    "nse.gsm": "NSE GSM list",
+    "yahoo.financials": "Yahoo Finance quarterly statements (unofficial)",
+}
+
+
+def clean_text(v: Any, limit: int = 600) -> str:
+    s = re.sub(r"\s+", " ", _CTRL.sub(" ", str(v if v is not None else ""))).strip()
+    return s if len(s) <= limit else s[:limit - 1].rstrip() + "…"
+
+
+def safe_link(url: Any, source: str) -> Optional[str]:
+    from urllib.parse import urlsplit
+
+    u = str(url or "").strip()
+    try:
+        parts = urlsplit(u)
+    except ValueError:
+        return None
+    if parts.scheme != "https" or parts.hostname not in LINK_HOSTS.get(source, ()):
+        return None
+    return u
+
+
+def status_of(name: str, got: Optional[Dict[str, Any]] = None, *, error: Optional[str] = None,
+              count: Optional[int] = None) -> Dict[str, Any]:
+    """One source line for the UI: ok | empty | unavailable, plus freshness."""
+    st: Dict[str, Any] = {"source": name, "label": LABELS.get(name, name)}
+    if error is not None:
+        st.update(status="unavailable", error=clean_text(error, 300))
+    else:
+        got = got or {}
+        st.update(status="ok" if count else "empty", fetched_at=got.get("fetched_at"),
+                  cached=bool(got.get("cached")), stale=bool(got.get("stale")))
+        if count is not None:
+            st["count"] = count
+    return st

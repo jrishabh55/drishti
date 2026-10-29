@@ -28,14 +28,24 @@ def store(tmp_path):
 
 def test_catalog_urls_are_pinned_and_params_validated():
     ds = datasets.CATALOG["nse.announcements"]
-    assert datasets.build_url(ds, {"symbol": "sbin"}).endswith("symbol=SBIN")
+    span = {"from": "2026-10-01", "to": "2026-10-29"}
+    assert datasets.build_url(ds, {"symbol": "sbin", **span}).endswith(
+        "symbol=SBIN&from_date=01-10-2026&to_date=29-10-2026")
+    assert "symbol=M%26M&" in datasets.build_url(ds, {"symbol": "M&M", **span})
     with pytest.raises(datasets.FeedUnavailable, match="not an NSE symbol"):
-        datasets.build_url(ds, {"symbol": "x&y=1/../"})
+        datasets.build_url(ds, {"symbol": "x&y=1/../", **span})
+    with pytest.raises(datasets.FeedUnavailable, match="not an NSE XBRL"):
+        datasets.build_url(datasets.CATALOG["nse.xbrl"], {"file": "../../etc/passwd"})
+    with pytest.raises(datasets.FeedUnavailable, match="not a BSE scrip"):
+        datasets.build_url(datasets.CATALOG["bse.announcements"],
+                           {"code": "1 OR 1", **span})
+    assert "strPrevDate=20261001&" in datasets.build_url(
+        datasets.CATALOG["bse.announcements"], {"code": "500325", **span})
     with pytest.raises(datasets.FeedUnavailable, match="takes no"):
         datasets.build_url(datasets.CATALOG["nse.fo_ban"], {"url": "https://evil"})
     pit = datasets.build_url(datasets.CATALOG["nse.insider_pit"],
-                             {"from": "2026-10-01", "to": "2026-10-29"})
-    assert "from_date=01-10-2026&to_date=29-10-2026" in pit
+                             {"symbol": "SBIN", "from": "2026-10-01", "to": "2026-10-29"})
+    assert "symbol=SBIN&from_date=01-10-2026&to_date=29-10-2026" in pit
     assert all(d.route == "server" for d in datasets.CATALOG.values())   # server first
 
 
@@ -92,7 +102,13 @@ def test_nse_facts_feed_the_risk_check(store, tmp_path, monkeypatch):
                                           "open": 20, "high": 21, "low": 19.5, "close": 20.0,
                                           "volume": 1e7}]))
     texts = {"nse.price_bands": BANDS, "nse.fo_ban": FO_BAN}
-    monkeypatch.setattr(datasets, "fetch", lambda name, *a, **k: {"text": texts[name]})
+
+    def fetch(name, *a, **k):
+        if name not in texts:
+            raise datasets.FeedUnavailable("source_error", "HTTP 403")
+        return {"text": texts[name]}
+
+    monkeypatch.setattr(datasets, "fetch", fetch)
     facts = datasets.nse_facts(["YESBANK", "RBLBANK", "ZZZ"])
     assert facts["YESBANK"] == {"series": "EQ", "band_pct": 5.0, "band_upper": 21.0,
                                 "band_lower": 19.0, "fo_ban": False}

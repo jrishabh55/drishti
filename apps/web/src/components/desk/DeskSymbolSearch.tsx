@@ -6,7 +6,11 @@ import type { TickerHit } from '#/lib/types'
 
 type SearchState = 'idle' | 'loading' | 'ready' | 'error'
 
-export function DeskSymbolSearch({ onAdd }: { onAdd: (symbol: string) => Promise<void> }) {
+export function DeskSymbolSearch({ onAdd, actionLabel = 'Add', busyLabel = 'Adding…' }: {
+  onAdd: (symbol: string) => Promise<void>
+  actionLabel?: string
+  busyLabel?: string
+}) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [hits, setHits] = useState<TickerHit[]>([])
@@ -86,7 +90,7 @@ export function DeskSymbolSearch({ onAdd }: { onAdd: (symbol: string) => Promise
         </Command>
         {error && <p role="alert" className="mt-1 text-xs text-[var(--err)]">{error}</p>}
       </div>
-      <Button size="sm" variant="outline" onClick={add} disabled={!selected || adding}>{adding ? 'Adding…' : 'Add'}</Button>
+      <Button size="sm" variant="outline" onClick={add} disabled={!selected || adding}>{adding ? busyLabel : actionLabel}</Button>
       {selected && <a className="es-btn sm no-underline" href={`/analyse?ticker=${encodeURIComponent(`${selected}.NS`)}`}>Analyse</a>}
     </div>
   )

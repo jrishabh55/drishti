@@ -20,6 +20,9 @@ from apps.api.scanner.store import ScannerStore
 logger = logging.getLogger(__name__)
 
 DATA_CSV = Path(__file__).parent / "data" / "nse_universe.csv"
+#: Stocks with NSE F&O contracts, from NSE's fo_mktlots.csv (snapshot
+#: 2026-10-29; refresh_fo_csv() regenerates it). Drives the "fno" universe.
+FO_CSV = Path(__file__).parent / "data" / "nse_fo.csv"
 
 #: All-listed-equities master file — the source of truth for the universe.
 #: If this one is unreachable, refresh_universe_csv() bails out entirely
@@ -38,7 +41,26 @@ _FUND_KEYS = {"trailingPE": "pe", "priceToBook": "pb", "returnOnEquity": "roe",
               "debtToEquity": "debt_to_equity", "revenueGrowth": "revenue_growth"}
 
 
+def fo_symbols() -> set[str]:
+    with FO_CSV.open() as f:
+        return {r["symbol"] for r in csv.DictReader(f)}
+
+
+def apply_fo_membership(store: ScannerStore) -> int:
+    """Set each instrument's fno flag from the bundled F&O list (idempotent;
+    for stores seeded before the list existed). Returns how many are F&O."""
+    fo = fo_symbols()
+    inst = store.instruments_df()
+    rows = [{"symbol": sym, "yf_symbol": r["yf_symbol"], "name": r["name"],
+             "index_memberships": r["index_memberships"], "fno": sym in fo}
+            for sym, r in inst.iterrows() if bool(r.get("fno", False)) != (sym in fo)]
+    if rows:
+        store.upsert_instruments(rows)
+    return sum(1 for sym in inst.index if sym in fo)
+
+
 def seed_universe(store: ScannerStore) -> int:
+    fo = fo_symbols()
     rows = []
     with DATA_CSV.open() as f:
         for r in csv.DictReader(f):
@@ -48,6 +70,7 @@ def seed_universe(store: ScannerStore) -> int:
                 "name": r["name"],
                 "industry": r["industry"] or None,
                 "index_memberships": r["index_memberships"].split("|") if r["index_memberships"] else [],
+                "fno": r["symbol"] in fo,
             })
     store.upsert_instruments(rows)
     return len(rows)
@@ -57,6 +80,7 @@ def enrich_universe(store: ScannerStore, limit: int | None = None,
                     sleep_s: float = 0.25) -> int:
     """Fill sector/mcap/fundamentals from yfinance. Weekly cadence; failures skip."""
     inst = store.instruments_df()
+    fo = fo_symbols()
     done = 0
     for symbol, row in inst.iterrows():
         if limit is not None and done >= limit:
@@ -76,7 +100,7 @@ def enrich_universe(store: ScannerStore, limit: int | None = None,
             "industry": info.get("industry") or row.get("industry"),
             "market_cap": info.get("marketCap"),
             "index_memberships": row["index_memberships"],
-            "fno": bool(row.get("fno", False)),
+            "fno": symbol in fo,
             "fundamentals": fundamentals,
         }])
         done += 1
@@ -101,6 +125,29 @@ def _fetch_nse_csv(url: str, *, retries: int = 1) -> list[dict[str, str]] | None
         except Exception as exc:  # noqa: BLE001 — one bad fetch must not kill the refresh
             logger.warning("fetch %s failed (attempt %d/%d): %s", url, attempt + 1, attempts, exc)
     return None
+
+
+def refresh_fo_csv() -> str:
+    """Dev utility: regenerate FO_CSV from NSE's fo_mktlots.csv. Returns
+    "BLOCKED" (and leaves the file alone) if NSE can't be read or the parse
+    looks wrong, rather than shrink the universe to nothing."""
+    from apps.api.desk.datasets import parse_fo_lots
+
+    try:
+        req = urllib.request.Request("https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        lots = parse_fo_lots(urllib.request.urlopen(req, timeout=30).read().decode("utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("refresh_fo_csv: %s", exc)
+        return "BLOCKED"
+    if len(lots) < 100:
+        logger.error("refresh_fo_csv: only %d underlyings parsed, not writing", len(lots))
+        return "BLOCKED"
+    with FO_CSV.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["symbol", "lot"])
+        w.writerows(sorted(lots.items()))
+    return "OK"
 
 
 def refresh_universe_csv() -> str:

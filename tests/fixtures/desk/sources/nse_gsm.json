@@ -1,0 +1,42 @@
+[
+ {
+  "companyName": "AGS Transact Technologies Limited",
+  "gsmStage": "LVIII",
+  "gsmTime": "29-Oct-2026 08:08:02",
+  "isin": "INE583L01014",
+  "survCode": "IBC I & GSM 0 (58)",
+  "survDesc": "ASM IBC Stage I and GSM Stage 0",
+  "symbol": "AGSTRA",
+  "srno": 1
+ },
+ {
+  "companyName": "Ankit Metal & Power Limited",
+  "gsmStage": "LVIII",
+  "gsmTime": "29-Oct-2026 08:08:02",
+  "isin": "INE106I01010",
+  "survCode": "IBC I & GSM 0 (58)",
+  "survDesc": "ASM IBC Stage I and GSM Stage 0",
+  "symbol": "ANKITMETAL",
+  "srno": 2
+ },
+ {
+  "companyName": "Aqylon Nexus Limited",
+  "gsmStage": "L",
+  "gsmTime": "29-Oct-2026 08:08:02",
+  "isin": "INE416A01051",
+  "survCode": "LTASM I & GSM 0 (50)",
+  "survDesc": "LTASM Stage I and GSM Stage 0",
+  "symbol": "AQYLON",
+  "srno": 3
+ },
+ {
+  "companyName": "Asian Tea & Exports Limited",
+  "gsmStage": "0",
+  "gsmTime": "29-Oct-2026 08:08:02",
+  "isin": "INE822B01017",
+  "survCode": "GSM - 0 (99)",
+  "survDesc": "Shortlisted under Graded Surveillance Measure",
+  "symbol": "ASIANTNE",
+  "srno": 4
+ }
+]

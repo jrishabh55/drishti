@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apps.api.scanner.universe import enrich_universe, seed_universe
@@ -51,3 +52,25 @@ def test_enrich_survives_per_symbol_failure(tmp_path):
     with patch("apps.api.scanner.universe.yf.Ticker", side_effect=boom_then_ok):
         n = enrich_universe(store, sleep_s=0)
     assert n == 1
+
+
+def test_fo_membership_from_the_recorded_nse_lot_file(tmp_path):
+    from apps.api.desk.datasets import parse_fo_lots
+    from apps.api.desk.orb import pick_universe
+    from apps.api.scanner.universe import apply_fo_membership, fo_symbols
+
+    recorded = parse_fo_lots((Path(__file__).parent / "fixtures" / "desk" / "sources"
+                              / "nse_fo_mktlots.csv").read_text())
+    assert fo_symbols() == set(recorded)          # bundled snapshot == NSE's file
+    store = make_store(tmp_path)
+    seed_universe(store)
+    inst = store.instruments_df()
+    assert inst.loc["RELIANCE", "fno"] and not inst.loc["20MICRONS", "fno"]
+    syms, notes = pick_universe(inst, "fno")
+    assert notes == [] and "RELIANCE" in syms and "NIFTY" not in syms
+    # a store seeded before the list existed gets the flags without a reseed
+    store.upsert_instruments([{"symbol": "RELIANCE", "yf_symbol": "RELIANCE.NS",
+                               "name": "Reliance", "index_memberships": [], "fno": False}])
+    assert not store.instruments_df().loc["RELIANCE", "fno"]
+    assert apply_fo_membership(store) == len(syms)
+    assert store.instruments_df().loc["RELIANCE", "fno"]
