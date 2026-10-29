@@ -38,9 +38,9 @@ EOD_HOUR_IST = 18  # refresh daily bars after 18:00 IST
 CHUNK_SLEEP_SECONDS = 1.0
 
 
-def refresh_timeframe(store: ScannerStore, timeframe: str) -> int:
+def refresh_timeframe(store: ScannerStore, timeframe: str, *, recent_days: int | None = None) -> int:
     interval, lookback_days = TF_FETCH[timeframe]
-    start = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    start = datetime.now(timezone.utc) - timedelta(days=min(lookback_days, recent_days or lookback_days))
     inst = store.instruments_df()
     if inst.empty:
         return 0
@@ -109,33 +109,74 @@ def _publish_and_warm() -> None:
         logger.exception("scanner panel warmup failed")
 
 
+def intraday_stale(latest: str | None, now: datetime) -> bool:
+    """Whether the latest 5m bar is behind the most recent delayed NSE session."""
+    if latest is None:
+        return True
+    local = now.astimezone(IST)
+    day = local.date()
+    if not is_trading_day(day) or local.hour * 60 + local.minute < 9 * 60 + 15:
+        day -= timedelta(days=1)
+        while not is_trading_day(day):
+            day -= timedelta(days=1)
+    close = datetime.combine(day, datetime.min.time(), tzinfo=IST).replace(hour=15, minute=25)
+    expected = min(local - timedelta(minutes=30), close)
+    try:
+        stamp = datetime.fromisoformat(latest)
+    except ValueError:
+        return True
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=IST)
+    return stamp < expected
+
+
+# Enough recent sessions for 320 retained bars, without refetching years of
+# intraday data just to catch up a deployment after hours.
+CATCHUP_DAYS = {"5m": 14, "15m": 30, "1h": 90}
+
+
 async def ingest_loop() -> None:
     store = get_scanner_store()
     if store.instruments_df().empty:
         await asyncio.to_thread(seed_universe, store)
         logger.info("scanner universe seeded")
     enrich_done_for = ""
-    if store.latest_ts("1d") is None:
-        logger.info("scanner initial backfill starting")
-        await asyncio.to_thread(refresh_all, store)
-        # Fresh deploys would otherwise sit with NULL sectors/fundamentals
-        # until the first Saturday sweep — enrich right after the initial
-        # backfill instead, and mark this week done so Saturday doesn't redo it.
+    needs_daily = store.latest_ts("1d") is None
+    pending = {tf for tf in TF_FETCH if store.latest_ts(tf) is None}
+    now0 = datetime.now(IST)
+    closed_day = now0.date()
+    if now0.hour < EOD_HOUR_IST:
+        closed_day -= timedelta(days=1)
+    while not is_trading_day(closed_day):
+        closed_day -= timedelta(days=1)
+    if (store.latest_ts("1d") or "")[:10] < closed_day.isoformat():
+        pending.add("1d")
+    if intraday_stale(store.latest_ts("5m"), now0):
+        pending.update(CATCHUP_DAYS)
+    # Daily data in an existing volume must not prevent intraday catch-up.
+    for tf in ("5m", "1d", "15m", "1h"):
+        if tf in pending:
+            logger.info("scanner startup backfill: %s", tf)
+            await asyncio.to_thread(refresh_timeframe, store, tf,
+                                    recent_days=45 if tf == "1d" and not needs_daily else CATCHUP_DAYS.get(tf))
+    if pending:
+        await asyncio.to_thread(_publish_and_warm)
+    if needs_daily:
         await asyncio.to_thread(enrich_universe, store)
         await asyncio.to_thread(_publish_and_warm)
         now0 = datetime.now(IST)
         enrich_done_for = f"{now0.isocalendar().year}-{now0.isocalendar().week}"
 
-    last_intraday = 0.0
+    last_intraday = asyncio.get_running_loop().time() if pending else 0.0
     eod_done_for = ""
     while True:
         try:
             now = datetime.now(IST)
             loop_t = asyncio.get_running_loop().time()
-            if is_market_open(now) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
+            if (is_market_open(now) or intraday_stale(store.latest_ts("5m"), now)) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
                 last_intraday = loop_t
                 for tf in ("5m", "15m", "1h"):
-                    await asyncio.to_thread(refresh_timeframe, store, tf)
+                    await asyncio.to_thread(refresh_timeframe, store, tf, recent_days=CATCHUP_DAYS.get(tf))
                 await asyncio.to_thread(_publish_and_warm)
             today = now.date().isoformat()
             if (is_trading_day(now.date()) and now.hour >= EOD_HOUR_IST

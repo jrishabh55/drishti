@@ -89,7 +89,6 @@
   --secondary-foreground: var(--text-1);
   --muted: var(--bg-2);
   --muted-foreground: var(--text-3);
-  --accent: var(--accent);
   --accent-foreground: #ffffff;
   --destructive: var(--err);
   --border: var(--line-1);

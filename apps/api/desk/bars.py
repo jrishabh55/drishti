@@ -201,7 +201,7 @@ def _deserialize(raw: List[list]) -> List[Row]:
 
 
 def _fresh(fetched_at: str, interval: str, now: datetime) -> bool:
-    from apps.api.scanner.calendar import is_market_open
+    from apps.api.scanner.calendar import is_market_open, is_trading_day
 
     age = (now - datetime.fromisoformat(fetched_at)).total_seconds()
     if interval == "1d":
@@ -209,9 +209,13 @@ def _fresh(fetched_at: str, interval: str, now: datetime) -> bool:
         return age < 6 * 3600 and not is_market_open(now)
     if is_market_open(now):
         return age < INTRADAY_TTL_S
-    # Outside market hours the data can't change — but a fetch made *during*
-    # the session is missing the rest of that day.
+    # Yahoo can still publish the final bars after the exchange closes.
+    # Keep partial close snapshots on the short TTL until that delay passes.
     fetched = datetime.fromisoformat(fetched_at)
+    local = now.astimezone(NSE.tz)
+    final_ready = NSE.local(local.date(), NSE.close_min) + timedelta(minutes=30)
+    if is_trading_day(local.date()) and fetched < final_ready:
+        return age < INTRADAY_TTL_S
     return not is_market_open(fetched) and age < 18 * 3600
 
 

@@ -52,6 +52,7 @@ export interface OrbHit {
 export interface OrbScan {
   date: string
   as_of: string
+  data_as_of: string | null
   or_minutes: number
   range: string
   source: DataSource

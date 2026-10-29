@@ -108,6 +108,24 @@ class ScannerStore:
         with self._conn() as c:
             return pd.read_sql_query(q, c, params=(timeframe, limit))
 
+    def load_session_bars(self, timeframe: str, day: str, symbols=None) -> pd.DataFrame:
+        """Read only one NSE date, avoiding a full-universe window query per scan."""
+        from datetime import date, timedelta
+
+        start = date.fromisoformat(day)
+        end = (start + timedelta(days=1)).isoformat()
+        query = "SELECT symbol, ts, open, high, low, close, volume FROM bars WHERE timeframe=? AND ts>=? AND ts<?"
+        args = [timeframe, start.isoformat(), end]
+        if symbols is not None:
+            selected = list(symbols)
+            if not selected:
+                return pd.DataFrame(columns=_BAR_COLS)
+            query += " AND symbol IN (" + ",".join("?" for _ in selected) + ")"
+            args.extend(selected)
+        query += " ORDER BY symbol, ts"
+        with self._conn() as conn:
+            return pd.read_sql_query(query, conn, params=args)
+
     def load_symbol_bars(self, timeframe: str, symbol: str, limit: int = 320) -> pd.DataFrame:
         """Newest ``limit`` bars of ONE symbol, ascending — the Trade Desk's
         per-symbol reads (load_bars pulls the whole universe)."""

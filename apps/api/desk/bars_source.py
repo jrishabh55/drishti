@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Callable, List, Literal, Optional
 
 from apps.api.desk import bars as bars_mod
@@ -66,36 +66,47 @@ def _as_of(rows: List[Row]) -> Optional[str]:
     return max(r[0] for r in rows).isoformat() if rows else None
 
 
-def get_session_rows(user_id: str, symbol: str, interval: str = "5m") -> BarSeries:
-    """Recent intraday rows (today's session and a few before) for one symbol."""
+def get_session_rows(user_id: str, symbol: str, interval: str = "5m", *, now: datetime | None = None) -> BarSeries:
+    """Read cache first; recover a missing/stale watched symbol on demand."""
     sym = bars_mod.nse_symbol(symbol)
     live = _from_providers(user_id, sym, interval, "session")
     if live is not None:
         return live
     from apps.api.scanner.store import get_scanner_store
+    from apps.api.scanner.ingest import intraday_stale
 
-    df = get_scanner_store().load_symbol_bars(interval, sym, limit=320)
+    now = now or datetime.now(timezone.utc)
+    store = get_scanner_store()
+    df = store.load_symbol_bars(interval, sym, limit=320)
     rows = bars_mod.rows_from_long(df) if not df.empty else []
-    notes = [] if rows else [f"{sym} has no {interval} bars in the scanner store yet "
-                             "(not in the scan universe, or ingest hasn't run)"]
+    notes = []
+    if not rows or intraday_stale(_as_of(rows), now):
+        try:
+            fetched = bars_mod.fetch_history(sym, interval, now=now)
+            if fetched and (not rows or max(r[0] for r in fetched) > max(r[0] for r in rows)):
+                rows = sorted(fetched, key=lambda row: row[0])[-320:]
+                import pandas as pd
+
+                frame = pd.DataFrame([dict(symbol=sym, ts=r[0].astimezone(NSE.tz).isoformat(), open=r[1],
+                                          high=r[2], low=r[3], close=r[4], volume=r[5]) for r in rows])
+                store.upsert_bars(interval, frame)
+                store.bump_bar_version()
+        except bars_mod.BarsError as exc:
+            notes.append(f"Could not refresh {sym}: {exc}")
+    if not rows:
+        notes.insert(0, f"{sym} has no {interval} bars available. The entry setup cannot be evaluated.")
+    elif intraday_stale(_as_of(rows), now):
+        notes.append(f"{sym} {interval} data is stale; newest cached bar is {_as_of(rows)}. The current session may be incomplete.")
     return BarSeries(sym, interval, rows, "delayed:yahoo", _as_of(rows), notes)
 
 
-def get_session_rows_universe(user_id: str, interval: str = "5m") -> dict:
-    """{symbol: rows} for the whole scan universe — the ORB scanner's input.
-
-    Live providers don't participate in universe scans yet (a live universe
-    feed is the Kite feature's job); the result says which source it used.
-    """
+def get_session_rows_universe(user_id: str, interval: str = "5m", *, day: date | None = None, symbols=None) -> dict:
+    """Read only the requested NSE session and universe for an ORB scan."""
     from apps.api.scanner.store import get_scanner_store
 
-    df = get_scanner_store().load_bars(interval, limit=320)
-    out: dict = {}
-    if df.empty:
-        return out
-    for sym, g in df.groupby("symbol", sort=False):
-        out[sym] = bars_mod.rows_from_long(g)
-    return out
+    day = day or datetime.now(NSE.tz).date()
+    df = get_scanner_store().load_session_bars(interval, day.isoformat(), symbols)
+    return {sym: bars_mod.rows_from_long(group) for sym, group in df.groupby("symbol", sort=False)} if not df.empty else {}
 
 
 def get_history_rows(user_id: str, symbol: str, interval: str = "5m",

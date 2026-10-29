@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DeskSymbolSearch } from '#/components/desk/DeskSymbolSearch'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
 import { SourceBadge } from '#/components/desk/SourceBadge'
@@ -11,7 +11,7 @@ import {
 } from '#/components/ui/table'
 import { api } from '#/lib/api'
 import type { AlertEvent, EntryStatus, OrbScan, PaperLedger } from '#/lib/desk-types'
-import { inr, rMult, signedPct } from '#/lib/desk-format'
+import { inr, orbEmptyMessage, rMult, signedPct } from '#/lib/desk-format'
 
 export const Route = createFileRoute('/desk/')({
   ssr: false,
@@ -36,14 +36,18 @@ function DeskToday() {
   const [planning, setPlanning] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const scanInFlight = useRef(false)
   const runScan = useCallback(async () => {
+    if (scanInFlight.current) return
+    scanInFlight.current = true
     setScanning(true)
     try {
-      setScan(await api.desk.orb())
+      setScan(await api.desk.orb({}, AbortSignal.timeout(20_000)))
       setScanError(null)
     } catch (e) {
       setScanError(e instanceof Error ? e.message : String(e))
     } finally {
+      scanInFlight.current = false
       setScanning(false)
     }
   }, [])
@@ -157,7 +161,7 @@ function DeskToday() {
         <section className="space-y-2">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-lg font-semibold">Opening-range breakouts</h2>
-            {scan && <SourceBadge source={scan.source} asOf={scan.as_of} />}
+            {scan && <SourceBadge source={scan.source} asOf={scan.data_as_of} />}
             {scan && <span className="es-pill">range {scan.range} · {scan.universe.toUpperCase()}</span>}
             <Button size="sm" variant="outline" onClick={runScan} disabled={scanning}>
               {scanning ? 'Scanning…' : 'Scan now'}
@@ -207,7 +211,7 @@ function DeskToday() {
                     ))}
                     {!scan.hits.length && (
                       <TableRow><TableCell colSpan={9} className="text-sm text-[var(--text-3)]">
-                        No chart has closed above its opening-range high yet.
+                        {orbEmptyMessage(scan.counts)}
                       </TableCell></TableRow>
                     )}
                   </TableBody>
@@ -218,11 +222,11 @@ function DeskToday() {
         </section>
 
         <section className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Watchlist entry timer</h2>
-            <DeskSymbolSearch onAdd={addWatch} />
             <Button size="sm" variant="ghost" onClick={() => refreshWatch(watch)}>Refresh</Button>
           </div>
+          <DeskSymbolSearch onAdd={addWatch} />
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {watch.map((s) => {
               const st = statuses[s]
@@ -240,6 +244,9 @@ function DeskToday() {
                   <p className="text-xs text-[var(--text-3)]">
                     {typeof st === 'string' ? st : st?.reason ?? 'checking…'}
                   </p>
+                  {typeof st === 'object' && st.data_as_of && (
+                    <SourceBadge source={st.source} asOf={st.data_as_of} />
+                  )}
                   <div className="flex gap-1">
                     <Link to="/analyse" search={{ ticker: `${s}.NS` }} className="es-btn sm no-underline">Analyse</Link>
                     {typeof st === 'object' && st.status === 'triggered' && (

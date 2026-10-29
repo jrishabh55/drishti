@@ -41,3 +41,11 @@ export function istTime(iso: string | null | undefined): string {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
   })
 }
+
+/** An empty result only means “no breakouts” when charts were evaluated. */
+export function orbEmptyMessage(counts: Record<string, number>): string {
+  if (!counts.with_data) return 'No bars are available for this session yet. The data feed may be catching up; try again shortly.'
+  if (!counts.scanned && counts.unusable) return 'Session data is incomplete. No charts could be evaluated yet.'
+  if (!counts.scanned) return 'No charts passed your price and liquidity filters.'
+  return 'No chart has closed above its opening-range high yet.'
+}

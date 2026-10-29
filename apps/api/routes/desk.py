@@ -192,7 +192,7 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
         day = _date.fromisoformat(date) if date else None
     except ValueError as exc:
         raise _unprocessable(ValueError("date wants YYYY-MM-DD")) from exc
-    rows = bars_source.get_session_rows_universe(user_id, "5m")
+    rows = bars_source.get_session_rows_universe(user_id, "5m", day=day or _now().astimezone(NSE_SPEC.tz).date(), symbols=symbols)
     daily = scan_store.load_bars("1d", limit=21)
     names = inst["name"].to_dict() if not inst.empty else {}
     try:
@@ -219,7 +219,7 @@ def entry_status(symbol: str, setup: Literal["orb", "level"] = "orb",
 
     prof = load_profile(user_id)
     try:
-        series = bars_source.get_session_rows(user_id, symbol, "5m")
+        series = bars_source.get_session_rows(user_id, symbol, "5m", now=_now())
         out = entry_mod.evaluate(series.rows, _now(), symbol=series.symbol, setup=setup,
                                  or_minutes=or_minutes or prof.or_minutes, level=level,
                                  min_volume_x=min_volume_x,
@@ -229,6 +229,8 @@ def entry_status(symbol: str, setup: Literal["orb", "level"] = "orb",
         raise _unprocessable(exc) from exc
     out["data_as_of"] = series.data_as_of
     out["notes"] = series.notes
+    if out["status"] == "no-data" and series.notes:
+        out["reason"] = " ".join(series.notes)
     return out
 
 
@@ -414,7 +416,7 @@ def _account(user_id: str) -> Dict[str, Any]:
 def _fresh_price(user_id: str, symbol: str) -> Optional[float]:
     """Last completed 5m close today, if any (delayed) — upstream's fresh price."""
     try:
-        series = bars_source.get_session_rows(user_id, symbol, "5m")
+        series = bars_source.get_session_rows(user_id, symbol, "5m", now=_now())
     except bars_mod.BarsError:
         return None
     bars, _ = bars_source.session_bars_for(series, _now())

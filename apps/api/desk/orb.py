@@ -143,6 +143,7 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
     counts = {"universe": len(syms), "with_data": 0, "unusable": 0, "illiquid": 0,
               "scanned": 0, "hits": 0}
     hits: List[Dict[str, Any]] = []
+    newest_bar = None
     as_of = cutoff.astimezone(timezone.utc)
     for sym in syms:
         rows = rows_by_symbol.get(sym)
@@ -151,6 +152,9 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
         counts["with_data"] += 1
         bars, _ = session_bars(rows, spec, as_of)
         bars = [b for b in bars if b["date"] == d.isoformat()]
+        if bars:
+            stamp = spec.local(d, spec.open_min + max(bar["slot"] for bar in bars) * spec.bar_min)
+            newest_bar = max(newest_bar, stamp) if newest_bar is not None else stamp
         if not usable(bars, cutoff, n_range, spec):
             counts["unusable"] += 1
             continue
@@ -177,7 +181,7 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
                      "breakouts are for review, not for entering now.")
     if after_close:
         notes.append("The session is over: this is a replay of today's breakouts.")
-    return {"date": d.isoformat(), "as_of": cutoff.isoformat(), "or_minutes": or_minutes,
+    return {"date": d.isoformat(), "as_of": cutoff.isoformat(), "data_as_of": newest_bar.isoformat() if newest_bar is not None else None, "or_minutes": or_minutes,
             "range": f"09:15–{clock24(spec.open_min + or_minutes)}", "source": source,
             "counts": counts, "hits": hits, "notes": notes,
             "note": "Bars are delayed and checked bar by bar, never tick by tick. A breakout is a "

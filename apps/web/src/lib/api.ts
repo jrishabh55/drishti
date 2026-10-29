@@ -217,11 +217,11 @@ export const api = {
       jsonFetch<string[]>('/desk/watchlist', { method: 'POST', body: JSON.stringify({ symbol }) }),
     unwatch: (symbol: string) =>
       jsonFetch<void>(`/desk/watchlist/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
-    orb: (params: { or_minutes?: number; at?: string; date?: string } = {}) => {
+    orb: (params: { or_minutes?: number; at?: string; date?: string } = {}, signal?: AbortSignal) => {
       const q = new URLSearchParams()
       for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v))
       const qs = q.toString()
-      return jsonFetch<OrbScan>(`/desk/orb${qs ? `?${qs}` : ''}`)
+      return jsonFetch<OrbScan>(`/desk/orb${qs ? `?${qs}` : ''}`, { signal })
     },
     entry: (symbol: string, params: { setup?: 'orb' | 'level'; level?: number } = {}) => {
       const q = new URLSearchParams()

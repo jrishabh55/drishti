@@ -63,7 +63,7 @@ export function DeskSymbolSearch({ onAdd }: { onAdd: (symbol: string) => Promise
       <div className="relative w-full sm:w-80" onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false)
       }}>
-        <Command shouldFilter={false} label="Search NSE stocks" className="overflow-visible border border-[var(--line-1)] bg-[var(--bg-1)]">
+        <Command shouldFilter={false} label="Search NSE stocks" className="overflow-visible bg-transparent p-0 [&_[data-slot=command-input-wrapper]]:p-0">
           <CommandInput value={query} onValueChange={change} disabled={adding}
             aria-label="Search company or NSE symbol" placeholder="Search company or NSE symbol"
             onFocus={() => { if (!selected && query.trim().replace(/^NSE:/i, '').length >= 2) { setOpen(true); setState('loading') } }}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inr, pct01, rMult, signedPct, sourceLabel, istTime } from './desk-format'
+import { inr, pct01, rMult, signedPct, sourceLabel, istTime, orbEmptyMessage } from './desk-format'
 
 describe('desk-format', () => {
   it('formats rupees with Indian grouping', () => {
@@ -22,5 +22,15 @@ describe('desk-format', () => {
   })
   it('shows exchange (IST) time', () => {
     expect(istTime('2026-10-28T04:10:00+00:00')).toBe('09:40')
+  })
+})
+
+
+describe('ORB empty state', () => {
+  it('distinguishes missing session data from a scan without breakouts', () => {
+    expect(orbEmptyMessage({ with_data: 0, scanned: 0 })).toContain('No bars')
+    expect(orbEmptyMessage({ with_data: 10, scanned: 0, unusable: 10 })).toContain('incomplete')
+    expect(orbEmptyMessage({ with_data: 10, scanned: 0, unusable: 0 })).toContain('liquidity')
+    expect(orbEmptyMessage({ with_data: 10, scanned: 10 })).toContain('No chart has closed above')
   })
 })
