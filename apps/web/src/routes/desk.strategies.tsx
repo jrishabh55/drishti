@@ -122,10 +122,11 @@ function StrategiesPage() {
                 <span className="es-mono font-semibold">{t.symbol}</span>
                 <span className="es-mono">{t.filled_qty || t.qty} @ {t.entry_avg ?? t.limit ?? 'MKT'}</span>
                 <span className="text-[var(--text-3)]">stop {t.stop} · target {t.target} · flat by {t.flat_by}</span>
-                <Pill tone={tradeTone(t.status)}>{t.status.replace('_', ' ')}{t.exit_reason ? ` · ${t.exit_reason}` : ''}</Pill>
+                <Pill tone={tradeTone(t.status)}>{t.status.replaceAll('_', ' ')}{t.exit_reason ? ` · ${t.exit_reason}` : ''}</Pill>
                 {t.pnl_net != null && <span className="es-mono">{inr(t.pnl_net)} · {rMult(t.r_net)}</span>}
               </summary>
               {t.attention && <p className="mt-1 text-[var(--err)]">{t.attention}</p>}
+              {t.closed_note && <p className="mt-1 text-[var(--run)]">{t.closed_note}</p>}
               <ul className="mt-1 space-y-0.5 text-xs text-[var(--text-3)]">
                 {t.events.map((e, i) => <li key={i}><span className="es-mono">{e.at}</span> {e.what}</li>)}
               </ul>

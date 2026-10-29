@@ -124,6 +124,8 @@ export interface KiteTrade {
   exit_avg?: number | null
   exit_reason?: string
   attention?: string
+  /** status closed_outside: sold elsewhere (e.g. the Kite app); P&L unknown. */
+  closed_note?: string
   pnl_gross?: number
   pnl_net?: number
   r_net?: number | null

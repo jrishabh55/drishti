@@ -22,6 +22,8 @@ Trade state machine (one row per trade, every transition in ``events``)::
                ↘ entry_rejected | entry_cancelled  (only on proof: Kite refused,
                                                      cancelled, or never listed it)
     any → needs_attention   (net short, or an exit Kite refused: a human decides)
+    needs_attention → closed_outside  (Kite flat for this trade, every order finished:
+                                       sold elsewhere; P&L unknown, entries blocked today)
 
 Kite is the source of truth. Every decision is made from a fresh read of
 ``GET /orders`` (legs found by tag), under the user's lock, and:
@@ -465,6 +467,12 @@ def daily_loss_reasons(user_id: str, now: datetime, profile: DeskProfile,
     (at the stops) count against the same max daily loss here."""
     today = [t for t in get_kite_store().list_trades(user_id, limit=500)
              if t["trade_date"] == _today(now)]
+    outside = [t["symbol"] for t in today if t["status"] == CLOSED_OUTSIDE]
+    if outside:
+        # Its loss is unknown: counting it as 0 could let today's real loss
+        # run past the cap. Blocked for the day instead.
+        return [f"a live {', '.join(sorted(set(outside)))} trade was closed outside the engine "
+                "today; its P&L is unknown, so no new live entries until the next trading day"]
     realized = sum(t.get("pnl_net") or 0.0 for t in today if t["status"] == "closed")
     open_risk = sum(float(t.get("max_loss") or 0) for t in today if t["status"] in OPEN_STATES)
     used = max(0.0, -realized) + open_risk + float(new_max_loss or 0)
@@ -517,6 +525,12 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
                 auth.mark_revoked(user_id)
             raise ExecRefused([f"couldn't read your positions from Kite ({exc}); nothing was "
                                "sent"]) from exc
+        # The kill switch records itself without this lock (so it is never stuck
+        # behind a slow send): re-read it after the broker reads above, as the
+        # last thing before anything is persisted or sent.
+        if control(user_id, now)["killed"]:
+            raise ExecRefused(["the kill switch was used while this order was being checked; "
+                               "nothing was sent"])
         t = store.create_trade(user_id, doc)
         params = {"transaction_type": "BUY", "quantity": t["qty"]}
         if t["order_type"] == "LIMIT":
@@ -638,6 +652,47 @@ def _positions_agree(t: Dict[str, Any], client: rest.KiteClient, now: datetime,
     return False
 
 
+#: A trade the user flattened elsewhere (e.g. in the Kite app). No exit price
+#: or P&L is known, and none is made up.
+CLOSED_OUTSIDE = "closed_outside"
+
+
+def _closed_outside(t: Dict[str, Any], client: rest.KiteClient, now: datetime,
+                    held: int) -> None:
+    """Recognise, read-only, a trade the user closed outside the engine.
+
+    Only on conclusive evidence: the ledger still holds some, every one of the
+    trade's orders is finished at Kite (nothing working, nothing ambiguous —
+    ``_step`` returns before this while any leg is), and, on the trade's own
+    day, Kite's position net of the pre-trade baseline has been 0 for
+    POSITIONS_SETTLE_S on fresh reads.
+    Never sends anything.
+    """
+    legs = t.get("legs") or {}
+    # Same day only: the baseline is that day's position, and today's positions
+    # say nothing about an earlier day's trade.
+    if held <= 0 or t["trade_date"] != _today(now) or any(not _terminal(r) for r in legs.values()):
+        t.pop("outside_flat_since", None)
+        return
+    try:
+        ours = _net_position(client, t["symbol"]) - int(t.get("baseline_qty") or 0)
+    except rest.KiteError:
+        return
+    if ours != 0:
+        t.pop("outside_flat_since", None)
+        return
+    since = t.setdefault("outside_flat_since", now.isoformat())
+    if (now - datetime.fromisoformat(since)).total_seconds() < POSITIONS_SETTLE_S:
+        return
+    t["status"], t["attention"], t["attention_kind"] = CLOSED_OUTSIDE, None, None
+    t["exit_reason"] = t.get("exit_reason") or "outside_engine"
+    t["closed_note"] = (f"Closed outside the engine: Kite shows no {t['symbol']} for this trade "
+                        f"and all its orders are finished, so {held} was sold elsewhere (e.g. "
+                        "the Kite app). Exit price and P&L are unknown (see Kite's tradebook); "
+                        "new live entries are blocked for the rest of today.")
+    _ev(t, now, t["closed_note"])
+
+
 def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
           now: datetime, profile: DeskProfile, save: Callable[[], None]) -> bool:
     """One decision from a fresh order book. Returns True when it sent
@@ -661,6 +716,7 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
         return False
     if t["status"] == "needs_attention":
         if t.get("attention_kind") != "ambiguous":
+            _closed_outside(t, client, now, held)
             return False           # a human decides; the legs are still kept current
         t["attention"] = t["attention_kind"] = None
         t["status"] = "exit_sent" if t.get("exit_reason") else "entry_sent"
