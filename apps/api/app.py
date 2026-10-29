@@ -73,6 +73,10 @@ def create_app() -> FastAPI:
         seed_prebuilt(get_scanner_store())
         if os.environ.get("SCANNER_INGEST", "1") != "0":
             scanner_task = asyncio.create_task(ingest_loop(), name="scanner-ingest")
+        evaluation_task = None
+        if os.environ.get("EVALUATION_LOOP", "1") != "0":
+            from apps.api.evaluation.loop import evaluation_loop
+            evaluation_task = asyncio.create_task(evaluation_loop(), name="evaluation-loop")
         kite_task = None
         from apps.api.kite import loop as kite_loop_mod
         kite_loop_mod.install()
@@ -97,6 +101,10 @@ def create_app() -> FastAPI:
                 desk_task.cancel()
             if kite_task is not None:
                 kite_task.cancel()
+            if evaluation_task is not None:
+                evaluation_task.cancel()
+            await asyncio.gather(*(task for task in (scanner_task, desk_task, kite_task, evaluation_task)
+                                   if task is not None), return_exceptions=True)
             from apps.api.kite import live
             await live.shutdown()
             shutdown_runner()
