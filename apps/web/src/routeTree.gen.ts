@@ -18,9 +18,11 @@ import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as ScannersNewRouteImport } from './routes/scanners.new'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as EvaluationIdRouteImport } from './routes/evaluation.$id'
+import { Route as DeskStrategiesRouteImport } from './routes/desk.strategies'
 import { Route as DeskSettingsRouteImport } from './routes/desk.settings'
 import { Route as DeskPerformanceRouteImport } from './routes/desk.performance'
 import { Route as DeskPaperRouteImport } from './routes/desk.paper'
+import { Route as DeskConnectionRouteImport } from './routes/desk.connection'
 import { Route as DeskAlertsRouteImport } from './routes/desk.alerts'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 import { Route as DeskPlansIndexRouteImport } from './routes/desk.plans.index'
@@ -72,6 +74,11 @@ const EvaluationIdRoute = EvaluationIdRouteImport.update({
   path: '/evaluation/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeskStrategiesRoute = DeskStrategiesRouteImport.update({
+  id: '/desk/strategies',
+  path: '/desk/strategies',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskSettingsRoute = DeskSettingsRouteImport.update({
   id: '/desk/settings',
   path: '/desk/settings',
@@ -85,6 +92,11 @@ const DeskPerformanceRoute = DeskPerformanceRouteImport.update({
 const DeskPaperRoute = DeskPaperRouteImport.update({
   id: '/desk/paper',
   path: '/desk/paper',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeskConnectionRoute = DeskConnectionRouteImport.update({
+  id: '/desk/connection',
+  path: '/desk/connection',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeskAlertsRoute = DeskAlertsRouteImport.update({
@@ -118,9 +130,11 @@ export interface FileRoutesByFullPath {
   '/analyse': typeof AnalyseRoute
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
+  '/desk/connection': typeof DeskConnectionRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
@@ -137,9 +151,11 @@ export interface FileRoutesByTo {
   '/analyse': typeof AnalyseRoute
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
+  '/desk/connection': typeof DeskConnectionRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
@@ -157,9 +173,11 @@ export interface FileRoutesById {
   '/analyse': typeof AnalyseRoute
   '/api/$': typeof ApiSplatRoute
   '/desk/alerts': typeof DeskAlertsRoute
+  '/desk/connection': typeof DeskConnectionRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/scanners/new': typeof ScannersNewRoute
@@ -178,9 +196,11 @@ export interface FileRouteTypes {
     | '/analyse'
     | '/api/$'
     | '/desk/alerts'
+    | '/desk/connection'
     | '/desk/paper'
     | '/desk/performance'
     | '/desk/settings'
+    | '/desk/strategies'
     | '/evaluation/$id'
     | '/runs/$id'
     | '/scanners/new'
@@ -197,9 +217,11 @@ export interface FileRouteTypes {
     | '/analyse'
     | '/api/$'
     | '/desk/alerts'
+    | '/desk/connection'
     | '/desk/paper'
     | '/desk/performance'
     | '/desk/settings'
+    | '/desk/strategies'
     | '/evaluation/$id'
     | '/runs/$id'
     | '/scanners/new'
@@ -216,9 +238,11 @@ export interface FileRouteTypes {
     | '/analyse'
     | '/api/$'
     | '/desk/alerts'
+    | '/desk/connection'
     | '/desk/paper'
     | '/desk/performance'
     | '/desk/settings'
+    | '/desk/strategies'
     | '/evaluation/$id'
     | '/runs/$id'
     | '/scanners/new'
@@ -236,9 +260,11 @@ export interface RootRouteChildren {
   AnalyseRoute: typeof AnalyseRoute
   ApiSplatRoute: typeof ApiSplatRoute
   DeskAlertsRoute: typeof DeskAlertsRoute
+  DeskConnectionRoute: typeof DeskConnectionRoute
   DeskPaperRoute: typeof DeskPaperRoute
   DeskPerformanceRoute: typeof DeskPerformanceRoute
   DeskSettingsRoute: typeof DeskSettingsRoute
+  DeskStrategiesRoute: typeof DeskStrategiesRoute
   EvaluationIdRoute: typeof EvaluationIdRoute
   RunsIdRoute: typeof RunsIdRoute
   ScannersNewRoute: typeof ScannersNewRoute
@@ -316,6 +342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EvaluationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/desk/strategies': {
+      id: '/desk/strategies'
+      path: '/desk/strategies'
+      fullPath: '/desk/strategies'
+      preLoaderRoute: typeof DeskStrategiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/desk/settings': {
       id: '/desk/settings'
       path: '/desk/settings'
@@ -335,6 +368,13 @@ declare module '@tanstack/react-router' {
       path: '/desk/paper'
       fullPath: '/desk/paper'
       preLoaderRoute: typeof DeskPaperRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/desk/connection': {
+      id: '/desk/connection'
+      path: '/desk/connection'
+      fullPath: '/desk/connection'
+      preLoaderRoute: typeof DeskConnectionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desk/alerts': {
@@ -380,9 +420,11 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyseRoute: AnalyseRoute,
   ApiSplatRoute: ApiSplatRoute,
   DeskAlertsRoute: DeskAlertsRoute,
+  DeskConnectionRoute: DeskConnectionRoute,
   DeskPaperRoute: DeskPaperRoute,
   DeskPerformanceRoute: DeskPerformanceRoute,
   DeskSettingsRoute: DeskSettingsRoute,
+  DeskStrategiesRoute: DeskStrategiesRoute,
   EvaluationIdRoute: EvaluationIdRoute,
   RunsIdRoute: RunsIdRoute,
   ScannersNewRoute: ScannersNewRoute,

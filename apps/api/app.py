@@ -73,6 +73,11 @@ def create_app() -> FastAPI:
         seed_prebuilt(get_scanner_store())
         if os.environ.get("SCANNER_INGEST", "1") != "0":
             scanner_task = asyncio.create_task(ingest_loop(), name="scanner-ingest")
+        kite_task = None
+        from apps.api.kite import loop as kite_loop_mod
+        kite_loop_mod.install()
+        if os.environ.get('KITE_LOOP', '1') != '0':
+            kite_task = asyncio.create_task(kite_loop_mod.kite_loop(), name='kite-loop')
         desk_task = None
         if os.environ.get("DESK_NSE_FEEDS", "0") == "1":
             # Off until scripts/desk_spike.py has verified the NSE datasets from
@@ -90,6 +95,10 @@ def create_app() -> FastAPI:
                 scanner_task.cancel()
             if desk_task is not None:
                 desk_task.cancel()
+            if kite_task is not None:
+                kite_task.cancel()
+            from apps.api.kite import live
+            await live.shutdown()
             shutdown_runner()
 
     app = FastAPI(
@@ -142,6 +151,8 @@ def create_app() -> FastAPI:
     app.include_router(watch_rules_router, prefix="/api")
     from apps.api.routes.evaluation import router as evaluation_router
     app.include_router(evaluation_router, prefix="/api")
+    from apps.api.routes.kite import router as kite_router
+    app.include_router(kite_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(scanners_router, prefix="/api")

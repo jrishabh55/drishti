@@ -5,6 +5,8 @@ const TABS = [
   { to: '/desk/plans', label: 'Plans', exact: false },
   { to: '/desk/paper', label: 'Paper ledger', exact: false },
   { to: '/desk/performance', label: 'Performance', exact: false },
+  { to: '/desk/connection', label: 'Zerodha', exact: false },
+  { to: '/desk/strategies', label: 'Strategies & live', exact: false },
   { to: '/desk/alerts', label: 'Alerts', exact: false },
   { to: '/desk/settings', label: 'Limits & settings', exact: false },
 ] as const

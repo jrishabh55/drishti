@@ -73,6 +73,17 @@ services:
       DESK_DB_PATH: /home/appuser/.tradingagents/desk.sqlite
       # Kite Publisher key for the "Place on Zerodha" button (optional;
       # without it the desk shows a copyable ticket instead).
+      KITE_DB_PATH: /home/appuser/.tradingagents/kite.sqlite
+      KITE_ORDERS_ENABLED: ${KITE_ORDERS_ENABLED:-0}
+      AUTOTRADE_USER_IDS: ${AUTOTRADE_USER_IDS:-}
+      WEBAPP_SERVER_PROVIDERS: ${WEBAPP_SERVER_PROVIDERS:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      OPENAI_API_VERSION: ${OPENAI_API_VERSION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
       KITE_PUBLISHER_API_KEY: ${KITE_PUBLISHER_API_KEY:-}
       # NSE feeds for the risk check (circuit bands, F&O ban). Off until
       # scripts/desk_spike.py has verified them from this server.
