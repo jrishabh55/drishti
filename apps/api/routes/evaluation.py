@@ -61,7 +61,7 @@ def start_batch(body: BatchBody, user_id: str = Depends(current_user_id)) -> Dic
     base, cells = body.plan(user_id)
     bid = batches.create_batch(user_id, base, cells, body.confirmed_credits)
     batches.pump(user_id)
-    return batches.batch_view(bid, user_id)  # type: ignore[return-value]
+    return batches.batch_view(bid, user_id, background=True)  # type: ignore[return-value]
 
 
 @router.get("/evaluation/batches")
@@ -72,7 +72,7 @@ def list_batches(user_id: str = Depends(current_user_id)) -> List[Dict[str, Any]
 @router.get("/evaluation/batches/{bid}")
 def get_batch(bid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     batches.pump(user_id)
-    view = batches.batch_view(bid, user_id)
+    view = batches.batch_view(bid, user_id, background=True)
     if view is None:
         raise HTTPException(status_code=404, detail="batch not found")
     return view
@@ -82,7 +82,7 @@ def get_batch(bid: str, user_id: str = Depends(current_user_id)) -> Dict[str, An
 def cancel_batch(bid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     if not batches.cancel_batch(bid, user_id):
         raise HTTPException(status_code=404, detail="batch not found")
-    return batches.batch_view(bid, user_id)  # type: ignore[return-value]
+    return batches.batch_view(bid, user_id, background=True)  # type: ignore[return-value]
 
 
 @router.get("/evaluation/paper-performance")

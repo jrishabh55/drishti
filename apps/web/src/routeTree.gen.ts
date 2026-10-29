@@ -20,6 +20,7 @@ import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as EvaluationIdRouteImport } from './routes/evaluation.$id'
 import { Route as DeskStrategiesRouteImport } from './routes/desk.strategies'
 import { Route as DeskSettingsRouteImport } from './routes/desk.settings'
+import { Route as DeskResearchRouteImport } from './routes/desk.research'
 import { Route as DeskPerformanceRouteImport } from './routes/desk.performance'
 import { Route as DeskPaperRouteImport } from './routes/desk.paper'
 import { Route as DeskConnectionRouteImport } from './routes/desk.connection'
@@ -84,6 +85,11 @@ const DeskSettingsRoute = DeskSettingsRouteImport.update({
   path: '/desk/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeskResearchRoute = DeskResearchRouteImport.update({
+  id: '/desk/research',
+  path: '/desk/research',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskPerformanceRoute = DeskPerformanceRouteImport.update({
   id: '/desk/performance',
   path: '/desk/performance',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/desk/connection': typeof DeskConnectionRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
+  '/desk/research': typeof DeskResearchRoute
   '/desk/settings': typeof DeskSettingsRoute
   '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
@@ -154,6 +161,7 @@ export interface FileRoutesByTo {
   '/desk/connection': typeof DeskConnectionRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
+  '/desk/research': typeof DeskResearchRoute
   '/desk/settings': typeof DeskSettingsRoute
   '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
@@ -176,6 +184,7 @@ export interface FileRoutesById {
   '/desk/connection': typeof DeskConnectionRoute
   '/desk/paper': typeof DeskPaperRoute
   '/desk/performance': typeof DeskPerformanceRoute
+  '/desk/research': typeof DeskResearchRoute
   '/desk/settings': typeof DeskSettingsRoute
   '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
@@ -199,6 +208,7 @@ export interface FileRouteTypes {
     | '/desk/connection'
     | '/desk/paper'
     | '/desk/performance'
+    | '/desk/research'
     | '/desk/settings'
     | '/desk/strategies'
     | '/evaluation/$id'
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/desk/connection'
     | '/desk/paper'
     | '/desk/performance'
+    | '/desk/research'
     | '/desk/settings'
     | '/desk/strategies'
     | '/evaluation/$id'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/desk/connection'
     | '/desk/paper'
     | '/desk/performance'
+    | '/desk/research'
     | '/desk/settings'
     | '/desk/strategies'
     | '/evaluation/$id'
@@ -263,6 +275,7 @@ export interface RootRouteChildren {
   DeskConnectionRoute: typeof DeskConnectionRoute
   DeskPaperRoute: typeof DeskPaperRoute
   DeskPerformanceRoute: typeof DeskPerformanceRoute
+  DeskResearchRoute: typeof DeskResearchRoute
   DeskSettingsRoute: typeof DeskSettingsRoute
   DeskStrategiesRoute: typeof DeskStrategiesRoute
   EvaluationIdRoute: typeof EvaluationIdRoute
@@ -356,6 +369,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/desk/research': {
+      id: '/desk/research'
+      path: '/desk/research'
+      fullPath: '/desk/research'
+      preLoaderRoute: typeof DeskResearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/desk/performance': {
       id: '/desk/performance'
       path: '/desk/performance'
@@ -423,6 +443,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeskConnectionRoute: DeskConnectionRoute,
   DeskPaperRoute: DeskPaperRoute,
   DeskPerformanceRoute: DeskPerformanceRoute,
+  DeskResearchRoute: DeskResearchRoute,
   DeskSettingsRoute: DeskSettingsRoute,
   DeskStrategiesRoute: DeskStrategiesRoute,
   EvaluationIdRoute: EvaluationIdRoute,

@@ -18,6 +18,7 @@ import json
 import logging
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,6 +63,10 @@ CREATE TABLE IF NOT EXISTS eval_cells (
 # inside it); per-user locks if batch volume ever makes this a queue.
 _pump_lock = threading.Lock()
 _schema_ready: set = set()
+_score_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="eval-score")
+_score_jobs: set[tuple[str, str, str, str]] = set()
+_score_lock = threading.Lock()
+
 
 
 def _conn(store: JobStore):
@@ -249,7 +254,7 @@ def score_cell(ticker: str, date: str, holding_days: int) -> Dict[str, Any]:
             "holding_days": days, "resolved": resolved}
 
 
-def _score(store: JobStore, row, rating: Optional[str], holding_days: int) -> Dict[str, Any]:
+def _score(store: JobStore, row, rating: Optional[str], holding_days: int, *, background: bool = False) -> Dict[str, Any]:
     from tradingagents.agents.rating import RATING_REVIEW
 
     if rating == RATING_REVIEW:
@@ -260,6 +265,17 @@ def _score(store: JobStore, row, rating: Optional[str], holding_days: int) -> Di
     if cached and cached["status"] in ('pending','error') and \
             datetime.fromisoformat(cached["checked_at"]) > datetime.now(timezone.utc) - (PENDING_RECHECK if cached['status']=='pending' else timedelta(minutes=5)):
         return cached
+    if background:
+        key = (str(store.db_path), row["batch_id"], row["ticker"], row["date"])
+        with _score_lock:
+            if key not in _score_jobs and len(_score_jobs) < 64:
+                _score_jobs.add(key)
+                try:
+                    _score_pool.submit(_score_job, key, store, dict(row), rating, holding_days)
+                except Exception:
+                    _score_jobs.discard(key)
+                    logger.exception("unable to queue evaluation score")
+        return cached or {"status": "pending", "reason": "checking real closing prices"}
     try:
         score = score_cell(row["ticker"], row["date"], holding_days)
     except Exception as exc:  # noqa: BLE001 — explicit, never a guessed outcome
@@ -268,6 +284,16 @@ def _score(store: JobStore, row, rating: Optional[str], holding_days: int) -> Di
         c.execute("UPDATE eval_cells SET score_json=? WHERE batch_id=? AND ticker=? AND date=?",
                   (json.dumps(score), row["batch_id"], row["ticker"], row["date"]))
     return score
+
+
+def _score_job(key, store, row, rating, holding_days):
+    try:
+        _score(store, row, rating, holding_days)
+    except Exception:
+        logger.exception("evaluation score persistence failed")
+    finally:
+        with _score_lock:
+            _score_jobs.discard(key)
 
 
 def summarize(cells: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -291,7 +317,7 @@ def summarize(cells: List[Dict[str, Any]]) -> Dict[str, Any]:
             "by_rating": by_rating}
 
 
-def batch_view(bid: str, user_id: str, store: Optional[JobStore] = None) -> Optional[Dict[str, Any]]:
+def batch_view(bid: str, user_id: str, store: Optional[JobStore] = None, *, background: bool = False) -> Optional[Dict[str, Any]]:
     from tradingagents.default_config import DEFAULT_CONFIG
 
     store = store or get_store()
@@ -317,7 +343,7 @@ def batch_view(bid: str, user_id: str, store: Optional[JobStore] = None) -> Opti
             cell["phase"] = run.status if run.status in ("failed", "cancelled", "interrupted") else "running"
             cell["error"] = run.error
         else:
-            cell["score"] = _score(store, row, run.rating, holding)
+            cell["score"] = _score(store, row, run.rating, holding, background=background)
             cell["phase"] = cell["score"]["status"]
         cells.append(cell)
     req = json.loads(b["request_json"])

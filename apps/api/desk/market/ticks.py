@@ -6,10 +6,9 @@ assigns each stock's tick from its closing price at month end, so a live
 price straddling a band edge can be one band off for the rest of the month —
 harmless for planning arithmetic (it only moves a stop by a paisa or five).
 
-VERIFY the table against NSE's current circular before relying on it for
-order prices (the broker rejects off-tick limit prices; Kite rounds nothing).
-ponytail: a static table; swap for NSE's per-symbol tick list if we ever
-place orders off these numbers.
+Planning table verified against NSE/CMTR/67133 on 2026-10-29:
+https://nsearchives.nseindia.com/content/circulars/CMTR67133.pdf
+Execution must use the broker instrument's assigned tick size.
 """
 from __future__ import annotations
 

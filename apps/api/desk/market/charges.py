@@ -29,7 +29,7 @@ class ChargeSchedule:
     stt_intraday_sell: float = 0.00025       # 0.025 % on the sell side
     stt_delivery_both: float = 0.001         # 0.1 % on buy and sell
     #: NSE transaction charge (cash segment), fraction of turnover, both sides.
-    exchange_txn: float = 0.0000297          # 0.00297 % — VERIFY current circular
+    exchange_txn: float = 0.0000297          # 0.00297 % — NSE/FA/64232 (IPFT excluded)
     #: SEBI turnover fee: ₹10 per crore.
     sebi_fee: float = 10 / 1e7
     #: Stamp duty, buy side only.

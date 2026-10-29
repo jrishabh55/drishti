@@ -19,7 +19,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /build
 COPY . .
 # Install the upstream package + the API extras.
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir ".[bedrock]" \
  && pip install --no-cache-dir -r apps/api/requirements.txt
 
 FROM python:3.12-slim

@@ -418,7 +418,7 @@ def test_batch_scores_only_real_completed_closes(job_store, fake_runner, monkeyp
     _complete(job_store, view["cells"][1]["run_id"], "Buy")
     _complete(job_store, view["cells"][3]["run_id"], "Buy")
 
-    view = client.get(f"/api/evaluation/batches/{view['id']}").json()
+    view = _wait_for_scores(client, view["id"])
     phases = {(c["ticker"], c["date"]): c["phase"] for c in view["cells"]}
     assert phases == {("RELIANCE.NS", "2026-01-05"): "scored", ("RELIANCE.NS", "2026-02-09"): "pending",
                       ("TCS.NS", "2026-01-05"): "scored", ("TCS.NS", "2026-02-09"): "pending"}
@@ -448,7 +448,7 @@ def test_missing_closes_are_an_explicit_error_not_a_score(job_store, fake_runner
     view = client.post("/api/evaluation/batches", json=_batch_body(tickers=["RELIANCE.NS"], end_date="2026-01-05")
                        | {"confirmed_credits": 0}).json()
     _complete(job_store, view["cells"][0]["run_id"])
-    cell = client.get(f"/api/evaluation/batches/{view['id']}").json()["cells"][0]
+    cell = _wait_for_scores(client, view["id"])["cells"][0]
     assert cell["phase"] == "error" and "vendor down" in cell["score"]["reason"]
 
 
@@ -552,3 +552,45 @@ def test_score_failure_is_cached_until_retry_time(job_store, fake_runner, monkey
     batches.batch_view(bid,'anonymous',job_store)
     batches.batch_view(bid,'anonymous',job_store)
     assert len(calls)==1
+
+
+def _wait_for_scores(client, bid):
+    import time
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        view = client.get(f"/api/evaluation/batches/{bid}").json()
+        if not any((c.get("score") or {}).get("reason") == "checking real closing prices" for c in view["cells"]):
+            return view
+        time.sleep(0.01)
+    raise AssertionError("background scoring did not settle")
+
+
+def test_batch_view_never_waits_for_vendor_and_deduplicates_score_jobs(job_store, fake_runner, monkeypatch):
+    import threading
+    import time
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    def blocked(*args):
+        calls.append(args)
+        started.set()
+        assert release.wait(3)
+        return {"status": "scored", "raw_return": .1, "alpha": .05}
+    monkeypatch.setattr(batches, "score_cell", blocked)
+    base = _request()
+    bid = batches.create_batch("anonymous", base, [(base.ticker, base.analysis_date)], 0, job_store)
+    batches.pump("anonymous", job_store)
+    view = batches.batch_view(bid, "anonymous", job_store)
+    _complete(job_store, view["cells"][0]["run_id"])
+    try:
+        before = time.monotonic()
+        for _ in range(3):
+            view = batches.batch_view(bid, "anonymous", job_store, background=True)
+            assert view["cells"][0]["phase"] == "pending"
+        assert time.monotonic() - before < .5
+        assert started.wait(1)
+        assert len(calls) == 1
+    finally:
+        release.set()
+        deadline = time.monotonic() + 2
+        while any(k[1] == bid for k in batches._score_jobs) and time.monotonic() < deadline:
+            time.sleep(.01)

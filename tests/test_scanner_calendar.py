@@ -44,3 +44,17 @@ def test_boundaries_inclusive():
     assert is_market_open(datetime(2026, 8, 13, 15, 30, tzinfo=IST))
     # One minute after 15:30
     assert not is_market_open(datetime(2026, 8, 13, 15, 31, tzinfo=IST))
+
+
+def test_2026_calendar_matches_recorded_exchange_cm_response():
+    import json
+    from pathlib import Path
+    from apps.api.scanner.calendar import HOLIDAYS
+
+    rows = json.loads((Path(__file__).parent / "fixtures/desk/nse_holidays_2026.json").read_text())["CM"]
+    expected = {datetime.strptime(r["tradingDate"], "%d-%b-%Y").date().isoformat() for r in rows}
+    assert {day for day in HOLIDAYS if day.startswith("2026-")} == expected
+    assert not is_trading_day(date(2026, 3, 3))
+    assert is_trading_day(date(2026, 3, 4))
+    assert not is_trading_day(date(2026, 11, 10))
+    assert is_trading_day(date(2026, 11, 9))
