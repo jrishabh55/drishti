@@ -238,6 +238,7 @@ def test_forget_removes_the_stored_config(tmp_path, monkeypatch, fake_relay_clie
 # ---------- login flow ----------
 
 
+@pytest.mark.integration
 def test_login_flow_completes_via_the_callback(tmp_path, monkeypatch):
     from apps.helper import login_flow as lf
     from apps.helper.credentials.oauth import StoredTokens, TokenStore
@@ -269,6 +270,7 @@ def test_login_flow_completes_via_the_callback(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.integration
 def test_login_flow_rejects_a_foreign_state(tmp_path, monkeypatch):
     from apps.helper import login_flow as lf
     from apps.helper.credentials.oauth import TokenStore

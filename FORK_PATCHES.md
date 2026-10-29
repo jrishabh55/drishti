@@ -1,9 +1,8 @@
 # FORK_PATCHES.md
 
 This repository is a **downstream fork** of the upstream open-source project at
-[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents). The
-upstream is currently configured as the `origin` remote, so see "Git workflow"
-below before adding a separate `upstream` remote and pulling.
+[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents). `origin` points to `jrishabh55/drishti`; `upstream` points to
+`TauricResearch/TradingAgents`.
 
 The fork carries a small number of changes on top of upstream. This document is
 the **single source of truth** for every upstream-tracked file the fork modifies,
@@ -15,6 +14,32 @@ checklist instead of spelunking through history.
 small, surgical, and listed in the table below.
 
 ---
+
+## Upstream v0.7.1 merge (2026-10-29)
+
+Upstream reorganized the core modules. The entries below describe the original
+fork patches; their current locations and merge resolutions are:
+
+- Exchange benchmarks and reflection labels are now supported upstream in
+  `default_config.py` and `memory/settlement.py`. `dataflows/utils.py` retains
+  `benchmark_for` for existing callers and re-exports upstream path validation.
+- Instrument suffix examples moved to `agents/context.py`; `.NS` and `.BO`
+  remain included. CLI ticker examples moved to `cli/prompts.py`.
+- The CLI rating panel moved to `cli/display.py` and `cli/run.py`. Upstream's
+  report writer already includes the final rating, so its writer is retained.
+- Google credentials passthrough remains in `llm_clients/google_client.py`,
+  alongside upstream's output-token cap and timeout support.
+- The model catalog uses upstream's new entries and retains additional fork
+  model choices for compatibility.
+- Reddit OAuth and fetch-proxy call sites moved to `dataflows/vendors/`.
+  Upstream's combined feed, bounded reads, historical windows and screening are
+  retained. `dataflows/reddit.py` aliases the relocated vendor for older callers.
+- `graph/trading_graph.py` retains `_get_provider_kwargs()` as an instance-local
+  extension point for `HelperBackedGraph`; its result goes to upstream's tier
+  factory. Credentials stay out of serialized config.
+- Product imports follow upstream's new `cli/prompts.py`, `agents/rating.py`,
+  `dataflows/symbols.py`, and `dataflows/vendors/yahoo/ohlcv.py` paths.
+- Pytest keeps the fork's root pythonpath and upstream's integration-test opt-in.
 
 ## Patches to upstream-tracked files
 
@@ -237,22 +262,7 @@ These never need to be re-applied on an upstream merge.
 
 ## Git workflow for upstream pulls
 
-`origin` currently points at the upstream repository. Before merging upstream
-changes, set up a separate `upstream` remote so the working `origin` can later
-become a true fork remote (e.g. on your own GitHub).
-
-### One-time setup (when forking to your own remote)
-
-```sh
-# Rename current origin to upstream
-git remote rename origin upstream
-
-# Add your fork as the new origin (replace URL)
-git remote add origin git@github.com:<your-org>/TradingAgents.git
-git push -u origin main
-```
-
-Until that's done, `origin == upstream` and `git pull` already pulls from upstream.
+`origin` is the product fork; `upstream` is the original project.
 
 ### Pull cadence (recommended monthly or after major upstream releases)
 

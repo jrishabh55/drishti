@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cli.models import AnalystType
 from cli.stats_handler import StatsCallbackHandler
-from cli.utils import detect_asset_type, filter_analysts_for_asset_type
+from cli.prompts import detect_asset_type, filter_analysts_for_asset_type
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from apps.api.schemas import RunRequest

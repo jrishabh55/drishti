@@ -14,7 +14,17 @@ from urllib.error import HTTPError
 import pytest
 
 from tradingagents.dataflows import reddit
-from tests.test_reddit_fallback import _resp
+def _resp(read_fn):
+    """Bounded-read response, matching the vendor's response size limit."""
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, size=-1):
+            return read_fn()[:size] if size >= 0 else read_fn()
+    return Response()
+
 
 
 def _json_resp(obj):

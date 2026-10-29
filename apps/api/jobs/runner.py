@@ -209,7 +209,7 @@ class JobRunner:
             build_graph_for_request,
             effective_analysts,
         )
-        from tradingagents.agents.utils.rating import parse_rating
+        from tradingagents.agents.rating import parse_rating
 
         # Use the post-filter analyst list, not request.analysts: on a crypto
         # ticker the Fundamentals analyst is dropped, and the translator's list

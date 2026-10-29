@@ -24,7 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List
 
-from tradingagents.dataflows.stockstats_utils import load_ohlcv
+from tradingagents.dataflows.vendors.yahoo.ohlcv import load_ohlcv
 
 logger = logging.getLogger(__name__)
 

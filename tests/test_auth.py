@@ -167,17 +167,20 @@ def _jwk_from_public_key(public_key, kid: str = "test-kid") -> dict:
     }
 
 
-def _serve_jwks_file(tmp_path: Path, public_key, kid: str = "test-kid") -> str:
-    """Write a JWKs JSON to disk and return a file:// URL.
-
-    PyJWKClient accepts file:// URLs through urllib.
-    """
-    import json
+def _serve_jwks_file(tmp_path: Path, public_key, kid: str = "test-kid", *, monkeypatch) -> str:
+    """Supply local JWKS without file URLs, which current PyJWT rejects."""
+    import jwt
+    from apps.api import auth
 
     jwks = {"keys": [_jwk_from_public_key(public_key, kid=kid)]}
-    path = tmp_path / "jwks.json"
-    path.write_text(json.dumps(jwks))
-    return path.as_uri()
+
+    class LocalJWKClient(jwt.PyJWKClient):
+        def fetch_data(self):
+            return jwks
+
+    monkeypatch.setattr(auth, "PyJWKClient", LocalJWKClient)
+    return "https://jwks.test/keys"
+
 
 
 def _sign(private_key, claims: dict, kid: str = "test-kid") -> str:
@@ -191,7 +194,7 @@ def _sign(private_key, claims: dict, kid: str = "test-kid") -> str:
 
 def test_clerk_jwt_accepts_valid_token(monkeypatch, tmp_path, rsa_keypair):
     private, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
 
     token = _sign(
@@ -211,7 +214,7 @@ def test_clerk_jwt_accepts_valid_token(monkeypatch, tmp_path, rsa_keypair):
 def test_clerk_jwt_accepts_query_param_token(monkeypatch, tmp_path, rsa_keypair):
     """SSE endpoints can't send headers — token in ?token= must work too."""
     private, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
 
     token = _sign(
@@ -230,7 +233,7 @@ def test_clerk_jwt_accepts_query_param_token(monkeypatch, tmp_path, rsa_keypair)
 
 def test_clerk_jwt_rejects_expired_token(monkeypatch, tmp_path, rsa_keypair):
     private, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
 
     token = _sign(
@@ -250,7 +253,7 @@ def test_clerk_jwt_rejects_expired_token(monkeypatch, tmp_path, rsa_keypair):
 def test_clerk_jwt_rejects_token_from_wrong_signer(monkeypatch, tmp_path, rsa_keypair):
     """A token signed with a different keypair than the JWKs publishes is rejected."""
     private, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
 
     # Sign with a DIFFERENT private key.
@@ -272,7 +275,7 @@ def test_clerk_jwt_rejects_token_from_wrong_signer(monkeypatch, tmp_path, rsa_ke
 
 def test_clerk_jwt_rejects_missing_sub(monkeypatch, tmp_path, rsa_keypair):
     private, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
 
     token = _sign(
@@ -286,7 +289,7 @@ def test_clerk_jwt_rejects_missing_sub(monkeypatch, tmp_path, rsa_keypair):
 
 def test_clerk_jwt_enforces_issuer_when_configured(monkeypatch, tmp_path, rsa_keypair):
     private, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
     monkeypatch.setenv("CLERK_ISSUER", "https://expected.clerk.dev")
 
@@ -321,7 +324,7 @@ def test_clerk_jwt_enforces_issuer_when_configured(monkeypatch, tmp_path, rsa_ke
 def test_clerk_jwt_missing_token_rejected(monkeypatch, tmp_path, rsa_keypair):
     """When Clerk is configured, a request with no token at all is 401."""
     _, public = rsa_keypair
-    jwks_url = _serve_jwks_file(tmp_path, public)
+    jwks_url = _serve_jwks_file(tmp_path, public, monkeypatch=monkeypatch)
     monkeypatch.setenv("CLERK_JWKS_URL", jwks_url)
 
     client = TestClient(_build_app())

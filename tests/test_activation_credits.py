@@ -138,7 +138,7 @@ def clerk_client(monkeypatch, tmp_path):
     from cryptography.hazmat.primitives.asymmetric import rsa
 
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    monkeypatch.setenv("CLERK_JWKS_URL", _serve_jwks_file(tmp_path, private.public_key()))
+    monkeypatch.setenv("CLERK_JWKS_URL", _serve_jwks_file(tmp_path, private.public_key(), monkeypatch=monkeypatch))
     token = _sign(
         private,
         {"sub": "user_2abc", "iat": int(time.time()), "exp": int(time.time()) + 300},

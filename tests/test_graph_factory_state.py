@@ -112,11 +112,12 @@ def test_no_unpassed_create_initial_state_params():
     ``past_context`` is knowingly excluded: the API path never reads the
     per-user memory log back into a run, unlike propagate(). That's an open
     product question, not a settled decision — see the note in graph_factory.
+    ``portfolio_context`` stays empty: the API has no portfolio input yet.
     Anything else new should be wired up or explicitly skipped here.
     """
     params = set(inspect.signature(Propagator.create_initial_state).parameters)
     params -= {"self", "company_name", "trade_date"}
-    assert params == {"asset_type", "past_context", "instrument_context"}, (
+    assert params == {"asset_type", "past_context", "instrument_context", "portfolio_context"}, (
         f"create_initial_state signature changed: {sorted(params)} — "
         "check whether graph_factory needs to pass a new field"
     )

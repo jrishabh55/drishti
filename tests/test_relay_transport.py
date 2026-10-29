@@ -102,7 +102,7 @@ def test_shim_rejects_a_non_json_body(app):
 
 def test_the_shim_is_not_under_the_api_prefix(app):
     """The frontend proxies /api/* — the shim must not be reachable that way."""
-    paths = [r.path for r in app.routes if "relay" in getattr(r, "path", "")]
+    paths = [path for path in app.openapi()["paths"] if "relay" in path]
     assert "/internal/relay/v1/{provider}/chat/completions" in paths
     assert not any(p.startswith("/api/internal") for p in paths)
 

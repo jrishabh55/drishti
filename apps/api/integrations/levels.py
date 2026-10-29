@@ -37,7 +37,7 @@ from apps.api.schemas import (
     ModelSuggested,
     PositionSize,
 )
-from tradingagents.dataflows.stockstats_utils import load_ohlcv
+from tradingagents.dataflows.vendors.yahoo.ohlcv import load_ohlcv
 
 # Bars of history used to find the swing low the stop sits under. ~1 month of
 # trading days: recent enough to be the level that invalidates a current
@@ -99,7 +99,7 @@ def _quote_currency(ticker: str) -> Optional[str]:
     try:
         import yfinance as yf
 
-        from tradingagents.dataflows.symbol_utils import normalize_symbol
+        from tradingagents.dataflows.symbols import normalize_symbol
 
         info = yf.Ticker(normalize_symbol(ticker)).info or {}
         currency = info.get("currency")
