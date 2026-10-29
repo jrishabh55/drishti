@@ -267,3 +267,19 @@ def test_recorded_reliance_yahoo_history_replays_without_auction_bar_interpolati
     assert out["mc"]["pool_sessions"] == 38
     assert out["mc"]["replays"] == 100
     assert "2026-10-15" in {d["date"] for d in out["data"]["short_sessions_left_out"]}
+
+
+def test_circuit_reference_uses_latest_previous_day_even_when_replay_window_has_a_gap():
+    day = date(2026, 10, 28)
+    rows = random_walk_sessions(day, 25, start_price=1000.0)
+    prior_day = date(2026, 10, 27)
+    latest = [r for r in rows if r[0].astimezone(NSE.tz).date() == prior_day][-1]
+    rows = [r for r in rows if not (r[0].astimezone(NSE.tz).date() == prior_day
+            and r[0].astimezone(NSE.tz).strftime("%H:%M") == "11:45")]
+    plan = tm.normalize_intraday_plan({"symbol":"RELIANCE", "date":day.isoformat(),
+        "entry":1000, "stop":995, "target":1010, "entry_time":"09:35"})
+    out = tm.run_intraday(rows, plan, until="15:15", now=NSE.local(date(2026,10,29),600),
+                          circuit_pct=5, replays=100)
+    assert out["mc"]["circuit_reference"]["date"] == prior_day.isoformat()
+    assert out["mc"]["circuit_reference"]["close"] == latest[4]
+    assert any("official auction close" in w for w in out["warnings"])

@@ -476,14 +476,23 @@ def run_intraday(rows: Sequence[Row], plan: Dict[str, Any], *, spec: SessionSpec
         raise TMError(f"only {len(sessions)} full session(s) of {sym} before {plan['date']} in "
                       f"the data through {clock24(until_min)}; the time machine needs at least {MIN_SESSIONS}{hint}")
     band = None
+    band_reference = None
     if circuit_pct:
-        prev_day = days[sessions[-1][0]]
-        prev_close = prev_day[max(prev_day)]["c"]
+        prior_date = max(d for d in days if d < plan["date"])
+        prev_day = days[prior_date]
+        last_bar = prev_day[max(prev_day)]
+        prev_close = last_bar["c"]
+        band_reference = {"date": prior_date, "bar": last_bar["start"], "close": prev_close,
+                          "kind": "last_available_intraday_close"}
+        warn.append(f"The simulated circuit band uses the last available intraday close "
+                    f"on {prior_date} at {last_bar['start']}; it may differ from the official auction close.")
         band = (prev_close * (1 - circuit_pct / 100), prev_close * (1 + circuit_pct / 100))
     pool = build_pool(sessions, last + 1)
     mc = simulate(pool, plan["entry"], plan["stop"], plan["target"], k, last, replays, seed,
                   window, plan["side"], band)
     until_label = clock12(until_min)
+    if band_reference is not None:
+        mc["circuit_reference"] = band_reference
     mc.update(until=clock24(until_min), pool_sessions=len(sessions), pool_from=sessions[0][0],
               pool_to=sessions[-1][0],
               band_times=[clock24(spec.bar_close_min(j)) for j in range(k, last + 1)])
