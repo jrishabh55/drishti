@@ -241,7 +241,4 @@ def _build_config(request: RunRequest, *, user_id: Optional[str] = None) -> Dict
         config["memory_log_path"] = str(
             Path(base_dir) / _safe_user_dir(user_id) / "trading_memory.md"
         )
-        # record_decision also writes a full state log under results_dir; keep
-        # it beside the user's memory log rather than in a shared directory.
-        config["results_dir"] = str(Path(base_dir) / _safe_user_dir(user_id) / "results")
     return config

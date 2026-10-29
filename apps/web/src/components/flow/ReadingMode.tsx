@@ -5,6 +5,7 @@ import { StatusBar } from '#/components/shared/StatusBar'
 import { ReportBody } from '#/components/shared/ReportBody'
 import { LevelsPanel } from '#/components/flow/LevelsPanel'
 import { api } from '#/lib/api'
+import { evaluationApi } from '#/lib/evaluation-api'
 import { ratingTooltip } from '#/lib/rating'
 import type { RunDetail } from '#/lib/types'
 
@@ -208,6 +209,13 @@ export function ReadingMode({ run }: { run: RunDetail }) {
                 rel="noreferrer"
               >
                 Export ▾
+              </a>
+              <a
+                className="es-btn ghost sm no-underline"
+                href={evaluationApi.reportHtmlUrl(run.id)}
+                download
+              >
+                HTML
               </a>
             </div>
 

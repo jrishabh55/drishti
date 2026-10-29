@@ -380,6 +380,12 @@ def test_batch_grid_is_bounded(job_store, fake_runner):
     assert res.status_code == 422 and "limit" in res.json()["detail"]
     assert client.post("/api/evaluation/batches/quote", json=_batch_body(tickers=[])).status_code == 422
 
+    # At most MAX_OPEN_BATCHES batches may still be queueing runs.
+    for _ in range(batches.MAX_OPEN_BATCHES):
+        assert client.post("/api/evaluation/batches", json=_batch_body(confirmed_credits=0)).status_code == 201
+    res = client.post("/api/evaluation/batches", json=_batch_body(confirmed_credits=0))
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "too_many_batches"
+
 
 def _fixture_closes(monkeypatch, today="2026-02-14"):
     from tradingagents.memory import settlement

@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 MAX_CELLS = 24
 MAX_TICKERS = 6
+#: Batches a user may have still submitting cells at once.
+MAX_OPEN_BATCHES = 2
 #: How long a "not yet traded" check is trusted before closes are asked for again.
 PENDING_RECHECK = timedelta(hours=1)
 
@@ -133,6 +135,15 @@ def create_batch(user_id: str, base: RunRequest, cells: List[Tuple[str, str]],
             "code": "insufficient_credits", "quote": q,
             "message": f"this batch needs up to {q['max_credits']} credits and you have "
                        f"{q['credits_available']}"})
+    with _conn(store) as c:
+        open_batches = c.execute(
+            "SELECT COUNT(DISTINCT b.id) FROM eval_batches b JOIN eval_cells c ON c.batch_id=b.id "
+            "WHERE b.user_id=? AND b.cancelled=0 AND c.state='queued'", (user_id,)).fetchone()[0]
+    if open_batches >= MAX_OPEN_BATCHES:
+        raise HTTPException(status_code=409, detail={
+            "code": "too_many_batches",
+            "message": f"you already have {open_batches} batches still starting runs; "
+                       "wait for one or stop it first"})
     base = base.model_copy(update={"use_paper_portfolio": False, "portfolio_snapshot": None})
     bid = str(uuid.uuid4())
     with _conn(store) as c:

@@ -3,6 +3,7 @@ import { TEAMS, totalAgents } from '#/lib/teams'
 import type { AgentStatus } from '#/lib/teams'
 import { useRunEvents } from '#/lib/sse'
 import { api } from '#/lib/api'
+import { evaluationApi } from '#/lib/evaluation-api'
 import type { RunDetail, SseEvent } from '#/lib/types'
 import { Topbar } from '#/components/shared/Topbar'
 import { StatusBar } from '#/components/shared/StatusBar'
@@ -629,6 +630,13 @@ export function AgentViewLive({ run }: { run: RunDetail }) {
               rel="noreferrer"
             >
               Markdown
+            </a>
+            <a
+              className="es-btn ghost sm no-underline"
+              href={evaluationApi.reportHtmlUrl(run.id)}
+              download
+            >
+              HTML
             </a>
           </div>
 

@@ -397,6 +397,14 @@ class JobRunner:
         already complete and must not be lost to a memory-log write.
         """
         try:
+            # The core also writes a full state log under results_dir. Keep it
+            # beside the user's own memory log, not in the shared directory.
+            # Set here, not in graph_factory: results_dir is part of the
+            # effective config a resume must match, and changing it there
+            # would refuse every run interrupted before this shipped.
+            log_path = (getattr(graph, "config", None) or {}).get("memory_log_path")
+            if log_path:
+                graph.config = {**graph.config, "results_dir": str(Path(log_path).parent / "results")}
             graph.record_decision(
                 request.ticker, request.analysis_date, recordable_state(final_state, request)
             )
