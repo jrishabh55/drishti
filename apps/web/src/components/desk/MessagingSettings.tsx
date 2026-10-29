@@ -60,7 +60,7 @@ function ConnectionCard({ channel }: { channel: Channel }) {
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
-  const disabled = busy || !status || status.encryption_available === false
+  const disabled = busy || !status || status.encryption_available === false || !!status.cleanup_pending
   const verified = !!(status?.verified && status?.connected)
   const qr = status?.qr?.startsWith('data:image/png;base64,') ? status.qr : undefined
 
@@ -118,7 +118,7 @@ function ConnectionCard({ channel }: { channel: Channel }) {
       <label className="flex items-center justify-between gap-3 text-sm">{label} paper approvals<Switch aria-label={`${label} paper approvals`} disabled={disabled || !verified || !status?.inbound_verified} checked={!!status?.approvals} onCheckedChange={v => act(() => api.preferences(channel,!!status?.alerts,v))} /></label>
       <p className="text-xs text-[var(--text-4)]">Paper approvals expire after five minutes or the entry cutoff. WhatsApp uses explicit reply codes; Telegram offers buttons. Real broker orders stay disabled.</p>
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={disabled || !verified} onClick={() => act(() => api.test(channel),'Test requested. Check this connection for delivery errors.')}>Test {label}</Button>
-        {status?.configured && <Button variant="ghost" disabled={busy} onClick={() => act(() => api.disconnect(channel),`${label} disconnected. Pending approvals revoked.`)}>Disconnect {label}</Button>}</div>
+        {(status?.configured || status?.cleanup_pending) && <Button variant="ghost" disabled={busy} onClick={() => act(() => api.disconnect(channel),`${label} disconnected. Pending approvals revoked.`)}>{status.cleanup_pending ? `Retry ${label} cleanup` : `Disconnect ${label}`}</Button>}</div>
     </div>
     {status?.encryption_available === false && <p className="text-sm text-[var(--run)]">Encrypted credential storage needs administrator setup.</p>}
     {(error || status?.last_error) && <div role="alert" className="text-sm text-[var(--err)]">{error || status?.last_error}</div>}

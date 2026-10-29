@@ -2,11 +2,14 @@
 import asyncio
 import logging
 import secrets
+import threading
 from apps.api.desk.store import get_desk_store
 from apps.api.kite.execution import user_lock
 from apps.api.messaging import connections as c, providers, store
 
 logger=logging.getLogger(__name__)
+_DELIVERY_GUARD=threading.Lock()
+_DELIVERY_LOCKS={}
 
 
 def authorize(cid, secret):
@@ -134,33 +137,48 @@ def flush(cid):
     doc=store.by_id(cid)
     if not doc:
         return
-    with user_lock(doc['user_id']):
-        doc=store.by_id(cid)
-        if not doc or not doc.get('verified') or not doc.get('connected'):
-            return
-        for d in reversed(store.deliveries(cid,True)[:10]):
-            now=store.now().timestamp()
-            key=d['id'].split(':',1)[1]
-            if ((key.startswith('alert-') and (not doc.get('alerts') or d.get('created_at',0)<doc.get('enabled_since',0)))
-                    or (key.startswith(('proposal-','decision-','trade-')) and not doc.get('approvals'))):
-                d['cancelled']=True
+    with _DELIVERY_GUARD:
+        lock=_DELIVERY_LOCKS.setdefault((doc['user_id'],doc['channel']),threading.Lock())
+    if not lock.acquire(blocking=False):
+        return
+    try:
+        for d in store.deliveries(cid,True):
+            with user_lock(doc['user_id']):
+                doc=store.by_id(cid)
+                if not doc or not doc.get('verified') or not doc.get('connected'):
+                    return
+                now=store.now().timestamp()
+                key=d['id'].split(':',1)[1]
+                if (d.get('generation')!=doc.get('generation') or
+                        (key.startswith('alert-') and (not doc.get('alerts') or d.get('created_at',0)<doc.get('enabled_since',0)))
+                        or (key.startswith(('proposal-','decision-','trade-')) and not doc.get('approvals'))):
+                    d['cancelled']=True
+                    store.save_delivery(d)
+                    continue
+                if d['expires_at']<=now or d['attempts']>=5 or d['next_attempt']>now:
+                    continue
+                d['attempts']+=1
+                d['next_attempt']=now+min(300,15*2**d['attempts'])
                 store.save_delivery(d)
-                continue
-            if d['expires_at']<=now or d['attempts']>=5 or d['next_attempt']>now:
-                continue
-            d['attempts']+=1
-            d['next_attempt']=now+min(300,15*2**d['attempts'])
-            store.save_delivery(d)  # retain attempt before crossing network
+                generation=doc.get('generation')
+            # This lock isolates delivery only. Trading, cancellation and
+            # settlement remain free while the provider request is in flight.
+            failed=False
             try:
                 d['message_id']=send(doc,d['text'],d.get('buttons'))
                 d['sent']=True
-                doc['last_error']=None
+            except Exception:
+                failed=True
+            with user_lock(doc['user_id']):
+                store.save_delivery(d)
                 if d['message_id']:
                     store.mark_seen(cid,d['message_id'])
-            except Exception:
-                doc['last_error']='Message delivery failed; Drishti still has the authoritative trade status.'
-            store.save_delivery(d)
-            store.save(doc)
+                current=store.by_id(cid)
+                if current and current.get('generation')==generation:
+                    current['last_error']=('Message delivery failed; Drishti still has the authoritative trade status.' if failed else None)
+                    store.save(current)
+    finally:
+        lock.release()
 
 
 def test_message(uid, channel):
@@ -175,6 +193,7 @@ def test_message(uid, channel):
 def sweep():
     from apps.api.messaging import actions
     actions.update_transitions()
+    store.cleanup()
     ds=get_desk_store()
     for doc in store.all_connections():
         try:
@@ -183,7 +202,7 @@ def sweep():
                     from datetime import datetime
                     at=datetime.fromisoformat(e['at']).timestamp()
                     if at>=max(doc.get('enabled_since',0),store.now().timestamp()-900):
-                        store.enqueue(doc['id'],'alert-'+e['id'],str(e['message']))
+                        store.enqueue(doc['id'],'alert-'+e['id'],str(e['message']),expires_at=at+900)
             flush(doc['id'])
         except Exception:
             logger.warning('Messaging delivery upkeep failed; will retry without affecting trades')

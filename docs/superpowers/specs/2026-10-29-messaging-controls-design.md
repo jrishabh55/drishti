@@ -1,6 +1,6 @@
 # WhatsApp and Telegram connections and paper-trade controls
 
-Status: proposed design for user approval, 29 October 2026.
+Status: approved by the user (“go”), 29 October 2026.
 
 ## Intent and agreed direction
 

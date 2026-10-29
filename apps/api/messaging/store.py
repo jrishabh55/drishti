@@ -37,10 +37,10 @@ def ensure():
         c.executescript(SCHEMA)
 
 
-def connection(uid, channel):
+def connection(uid, channel, include_inactive=False):
     ensure()
     with db() as c:
-        r = c.execute('SELECT doc FROM messaging_connections WHERE user_id=? AND channel=? AND active=1', (uid,channel)).fetchone()
+        r = c.execute('SELECT doc FROM messaging_connections WHERE user_id=? AND channel=?'+('' if include_inactive else ' AND active=1'), (uid,channel)).fetchone()
     return json.loads(r['doc']) if r else None
 
 
@@ -57,7 +57,7 @@ def save(doc):
         with db() as c:
             c.execute('INSERT INTO messaging_connections VALUES (?,?,?,?,?,?) '
                       'ON CONFLICT(user_id,channel) DO UPDATE SET id=excluded.id,bot_id=excluded.bot_id,active=excluded.active,doc=excluded.doc',
-                      (doc['id'],doc['user_id'],doc['channel'],doc.get('bot_id') if doc.get('active',True) else None,
+                      (doc['id'],doc['user_id'],doc['channel'],doc.get('bot_id') if doc.get('active',True) or doc.get('cleanup_pending') else None,
                        int(doc.get('active',True)),json.dumps(doc)))
     except sqlite3.IntegrityError:
         raise ValueError('This bot is already connected to another user') from None
@@ -66,6 +66,7 @@ def save(doc):
 
 def new(uid, channel):
     return {'id':uuid.uuid4().hex,'user_id':uid,'channel':channel,'active':True,
+            'generation':uuid.uuid4().hex,
             'verified':False,'connected':False,'alerts':False,'approvals':False,
             'enabled_since':now().timestamp(),'last_error':None}
 
@@ -117,7 +118,7 @@ def enqueue(cid, key, text, buttons=None, expires_at=None):
     conn = by_id(cid)
     if not conn:
         return
-    doc = {'id':cid+':'+key,'created_at':now().timestamp(),'text':text,'buttons':buttons,'sent':False,'attempts':0,
+    doc = {'id':cid+':'+key,'generation':conn.get('generation'),'created_at':now().timestamp(),'text':text,'buttons':buttons,'sent':False,'attempts':0,
            'next_attempt':0,'expires_at':expires_at or now().timestamp()+900,'message_id':None}
     with db() as c:
         c.execute('INSERT OR IGNORE INTO messaging_outbox VALUES (?,?,?,?,?)',
@@ -127,8 +128,17 @@ def enqueue(cid, key, text, buttons=None, expires_at=None):
 def deliveries(cid, unsent=False):
     ensure()
     with db() as c:
-        docs = [json.loads(r['doc']) for r in c.execute('SELECT doc FROM messaging_outbox WHERE connection_id=? ORDER BY created_at DESC LIMIT 100',(cid,)).fetchall()]
-    return [d for d in docs if not unsent or not d['sent'] and not d.get('cancelled')]
+        if unsent:
+            # Filter before LIMIT: expired/exhausted rows cannot starve a
+            # valid older message. SQLite JSON is already used in Desk stores.
+            rows=c.execute("SELECT doc FROM messaging_outbox WHERE connection_id=? "
+                "AND json_extract(doc,'$.sent')=0 AND coalesce(json_extract(doc,'$.cancelled'),0)=0 "
+                "AND json_extract(doc,'$.expires_at')>? AND json_extract(doc,'$.attempts')<5 "
+                "AND json_extract(doc,'$.next_attempt')<=? ORDER BY created_at LIMIT 10",
+                (cid,now().timestamp(),now().timestamp())).fetchall()
+        else:
+            rows=c.execute('SELECT doc FROM messaging_outbox WHERE connection_id=? ORDER BY created_at DESC LIMIT 100',(cid,)).fetchall()
+    return [json.loads(r['doc']) for r in rows]
 
 
 def save_delivery(doc):
@@ -145,5 +155,12 @@ def seen(cid, mid):
 def mark_seen(cid, mid):
     with db() as c:
         c.execute('INSERT OR IGNORE INTO messaging_inbound VALUES (?,?,?)',(cid,str(mid),now().timestamp()))
+        c.execute('DELETE FROM messaging_inbound WHERE created_at<?',(now().timestamp()-86400,))
+        c.execute('DELETE FROM messaging_outbox WHERE created_at<?',(now().timestamp()-86400*7,))
+
+
+def cleanup():
+    ensure()
+    with db() as c:
         c.execute('DELETE FROM messaging_inbound WHERE created_at<?',(now().timestamp()-86400,))
         c.execute('DELETE FROM messaging_outbox WHERE created_at<?',(now().timestamp()-86400*7,))

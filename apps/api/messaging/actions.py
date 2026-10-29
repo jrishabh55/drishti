@@ -1,6 +1,7 @@
 """One exact, expiring PAPER proposal shared by all verified channels."""
 import hashlib
 import json
+import re
 import secrets
 from datetime import date
 from fastapi import HTTPException
@@ -57,6 +58,8 @@ def propose(uid, ticket_id):
         a=store.action(uid,ticket_id)
         if a:
             # Resending never silently changes its token, recipients or expiry.
+            if a['state']=='pending' and a['expires_at']>store.now().timestamp() and a['snapshot']==snapshot(tk['order']):
+                _queue_proposal(a,tk)
             return _result(a)
         now=store.now()
         p=tk['order'].get('plan') or {}
@@ -70,24 +73,33 @@ def propose(uid, ticket_id):
         token=secrets.token_urlsafe(18)
         a={'id':secrets.token_hex(16),'user_id':uid,'ticket_id':ticket_id,'state':'pending',
            'token':token,'snapshot':snapshot(tk['order']),'expires_at':expiry,
-           'connections':[d['id'] for d in channels],'audit':[], 'last_trade_state':None}
+           'connections':[d['id'] for d in channels],
+           'generations':{d['id']:d.get('generation') for d in channels},
+           'audit':[], 'last_trade_state':None}
         store.save_action(a)
-        order=tk['order'];s=tk.get('sizing') or {}
-        text=(f"PAPER TRADE — {order['symbol']}\n{tk.get('words','')}\n"
-              f"Quantity: {order['qty']} · {order['order_type']}\nEntry: {order.get('price','market')}\n"
-              f"Stop: {order.get('stop')} · Target: {order.get('target')}\n"
-              f"Estimated loss incl. charges: ₹{s.get('max_loss_net','unavailable')}\n"
-              f"Freshness: {p.get('data_as_of') or p.get('source') or 'see the plan; delayed bars may apply'}\n"
-              f"Expires: {store.now().fromtimestamp(expiry,NSE.tz).strftime('%H:%M:%S IST')}\n"
-              f"APPROVE {token}\nREJECT {token}\nSTATUS {token}\n"
-              f"Plan: {providers_url(tk)}\nApproval creates a paper trade only; risk is checked again.")
-        buttons=[[{'text':'Approve paper trade','callback_data':'a:'+token},
-                  {'text':'Reject','callback_data':'r:'+token}],
-                 [{'text':'Status','callback_data':'s:'+token},{'text':'View plan','url':providers_url(tk)}]]
-        for d in channels:
-            store.enqueue(d['id'],'proposal-'+a['id'],text,buttons if d['channel']=='telegram' else None,expiry)
+        _queue_proposal(a,tk)
         return _result(a)
 
+
+def _queue_proposal(a,tk):
+    token=a['token'];expiry=a['expires_at']
+    p=tk['order'].get('plan') or {}
+    order=tk['order'];s=tk.get('sizing') or {}
+    text=(f"PAPER TRADE — {order['symbol']}\n{tk.get('words','')}\n"
+          f"Quantity: {order['qty']} · {order['order_type']}\nEntry: {order.get('price','market')}\n"
+          f"Stop: {order.get('stop')} · Target: {order.get('target')}\n"
+          f"Estimated loss incl. charges: ₹{s.get('max_loss_net','unavailable')}\n"
+          f"Freshness: {p.get('data_as_of') or p.get('source') or 'see the plan; delayed bars may apply'}\n"
+          f"Expires: {store.now().fromtimestamp(expiry,NSE.tz).strftime('%H:%M:%S IST')}\n"
+          f"APPROVE {token}\nREJECT {token}\nSTATUS {token}\n"
+          f"Plan: {providers_url(tk)}\nApproval creates a paper trade only; risk is checked again.")
+    buttons=[[{'text':'Approve paper trade','callback_data':'a:'+token},
+              {'text':'Reject','callback_data':'r:'+token}],
+             [{'text':'Status','callback_data':'s:'+token},{'text':'View plan','url':providers_url(tk)}]]
+    for cid in a['connections']:
+        d=store.by_id(cid)
+        if d and d.get('approvals') and d.get('generation')==a.get('generations',{}).get(cid):
+            store.enqueue(cid,'proposal-'+a['id'],text,buttons if d['channel']=='telegram' else None,expiry)
 
 def providers_url(tk):
     from apps.api.messaging.providers import public_base
@@ -101,20 +113,24 @@ def _state(a, state, channel=None, sender=None):
     store.save_action(a)
     if state not in ('processing','pending'):
         for cid in a['connections']:
-            if (d:=store.by_id(cid)) and d.get('approvals'):
+            if ((d:=store.by_id(cid)) and d.get('approvals')
+                    and d.get('generation')==a.get('generations',{}).get(cid)):
                 store.enqueue(cid,'decision-'+a['id']+'-'+state,'PAPER proposal: '+_result(a)['message'])
     return _result(a)
 
 
 def decide(uid, channel, token, decision, sender):
     from apps.api.routes import desk
+    if not re.fullmatch(r'[A-Za-z0-9_-]{24}',token):
+        raise ValueError('Unknown proposal code')
     with user_lock(uid):
         doc=store.connection(uid,channel)
         if (not doc or not all(doc.get(k) for k in ('verified','connected','inbound_verified'))
                 or sender!=doc.get('sender' if channel=='telegram' else 'recipient')):
             raise ValueError('This private account is not authorized')
         a=next((a for a in store.all_actions() if a['user_id']==uid and secrets.compare_digest(a['token'],token)),None)
-        if not a or doc['id'] not in a['connections']:
+        if (not a or doc['id'] not in a['connections']
+                or doc.get('generation')!=a.get('generations',{}).get(doc['id'])):
             raise ValueError('Unknown or revoked proposal')
         if decision not in ('approve','reject','status'):
             raise ValueError('Unknown proposal action')
@@ -174,7 +190,8 @@ def update_transitions():
                 if trade.get('pnl_net') is not None:
                     text+=f"\nNet P&L: ₹{trade['pnl_net']:.2f}"
             for cid in a['connections']:
-                if (d:=store.by_id(cid)) and d.get('approvals'):
+                if ((d:=store.by_id(cid)) and d.get('approvals')
+                        and d.get('generation')==a.get('generations',{}).get(cid)):
                     store.enqueue(cid,'trade-'+a['id']+'-'+state,text)
             a['last_trade_state']=state
             store.save_action(a)

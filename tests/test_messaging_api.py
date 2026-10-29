@@ -128,3 +128,57 @@ def test_whatsapp_connection_update_revokes_approval_capability_when_offline(env
     service.receive(doc['id'],key,{'instance':doc['instance'],'event':'connection.update','data':{'state':'close'}})
     assert not c.status('a','whatsapp')['connected']
     assert not c.status('a','whatsapp')['approvals']
+
+
+def test_delivery_does_not_hold_trade_lock_during_provider_io(env,monkeypatch):
+    from apps.api.messaging import service
+    from apps.api.kite.execution import user_lock
+    from threading import Event,Thread
+    row,key,token=_tg(env);row.update(verified=True,chat='42',sender='42',alerts=True);store.save(row)
+    store.enqueue(row['id'],'event','One event')
+    entered=Event();release=Event()
+    def slow(*a,**k):entered.set();release.wait(3);return '1'
+    monkeypatch.setattr(service,'send',slow)
+    t=Thread(target=service.flush,args=(row['id'],));t.start()
+    assert entered.wait(2)
+    lock=user_lock('a');acquired=lock.acquire(timeout=.1)
+    if acquired:lock.release()
+    release.set();t.join(3)
+    assert acquired, 'Message network IO must not block paper/broker controls'
+
+
+def test_expired_queue_rows_cannot_starve_live_delivery(env,monkeypatch):
+    from apps.api.messaging import service
+    row,key,token=_tg(env);row.update(verified=True,chat='42',sender='42',alerts=True);store.save(row)
+    store.enqueue(row['id'],'valid','Current event')
+    for n in range(15):store.enqueue(row['id'],'expired'+str(n),'Expired',expires_at=1)
+    sent=[];monkeypatch.setattr(service,'send',lambda d,text,*a:sent.append(text) or '1')
+    service.flush(row['id'])
+    assert sent==['Current event']
+
+
+def test_pending_outbox_cannot_follow_an_account_identity_change(env,monkeypatch):
+    from apps.api.messaging import service
+    row,key,token=_tg(env);row.update(verified=True,chat='42',sender='42',alerts=True);store.save(row)
+    store.enqueue(row['id'],'event','Old account message')
+    row['generation']='new-identity';row['chat']='99';row['sender']='99';store.save(row)
+    sent=[];monkeypatch.setattr(service,'send',lambda *a:sent.append(a) or '1')
+    service.flush(row['id'])
+    assert sent==[]
+
+
+def test_alert_retry_expires_from_event_time_not_queue_time(env,monkeypatch):
+    from datetime import timedelta
+    from apps.api.messaging import service,providers
+    from apps.api.desk import store as ds
+    row,key,token=_tg(env)
+    now=store.now()
+    row.update(verified=True,chat='42',sender='42',alerts=True,enabled_since=(now-timedelta(hours=1)).timestamp());store.save(row)
+    monkeypatch.setattr(ds,'now_iso',lambda:(now-timedelta(minutes=14)).isoformat())
+    ds.get_desk_store().add_alert_event('a','alert1',{'message':'14 minute old alert'})
+    monkeypatch.setattr(service,'send',lambda *a:(_ for _ in ()).throw(providers.ProviderError()))
+    service.sweep()
+    monkeypatch.setattr(store,'now',lambda:now+timedelta(minutes=2))
+    sent=[];monkeypatch.setattr(service,'send',lambda *a:sent.append(a) or '1')
+    service.flush(row['id'])
+    assert sent==[]

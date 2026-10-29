@@ -34,19 +34,19 @@ def _save(doc):
 
 
 def status(uid, channel):
-    doc = store.connection(uid,channel) or {}
+    doc = store.connection(uid,channel,True) or {}
     conf = store.secret(uid,channel)
     x = {k:doc.get(k) for k in ('id','connected','verified','alerts','approvals','last_error','bot_username',
                                'phone','recipient','pending_identity','inbound_verified','pairing_expires_at','cleanup_pending')}
-    x.update(configured=bool(doc),encryption_available=user_keys.encryption_enabled())
+    x.update(configured=bool(doc and doc.get('active')),encryption_available=user_keys.encryption_enabled())
     if channel == 'whatsapp':
         x.update(server_url=conf.get('url') or os.getenv('EVOLUTION_API_URL',''),
                  server_configured=bool((conf.get('key') or os.getenv('EVOLUTION_API_KEY','')) and
                                         (conf.get('url') or os.getenv('EVOLUTION_API_URL',''))),
                  credential_source='personal' if conf.get('key') else 'server')
-        if conf.get('pairing_expires_at',0) > store.now().timestamp():
+        if doc.get('active') and conf.get('pairing_expires_at',0) > store.now().timestamp():
             x.update(qr=conf.get('qr'),pairing_code=conf.get('pairing_code'))
-    elif conf.get('pair_expires',0)>store.now().timestamp():
+    elif doc.get('active') and conf.get('pair_expires',0)>store.now().timestamp():
         x['pair_url']=conf.get('pair_url')
     return x
 
@@ -63,6 +63,9 @@ def hook_url(doc):
 
 def configure_whatsapp(uid, url='', key=''):
     with user_lock(uid):
+        previous=store.connection(uid,'whatsapp',True)
+        if previous and previous.get('cleanup_pending'):
+            raise ValueError('Retry pending remote cleanup before creating another connection')
         base = providers.trusted_base(url)
         old=store.connection(uid,'whatsapp')
         conf=store.secret(uid,'whatsapp')
@@ -80,17 +83,25 @@ def configure_whatsapp(uid, url='', key=''):
 
 
 def _qr(result):
-    candidate=result.get('base64') or (result.get('qrcode') or {}).get('base64')
+    nested=result.get('qrcode') or {}
+    if not isinstance(nested,dict):
+        raise providers.ProviderError('Evolution returned an unsupported QR response')
+    candidate=result.get('base64') or nested.get('base64')
     if candidate:
         if not isinstance(candidate,str) or len(candidate)>500000:
             raise providers.ProviderError('Evolution returned an invalid QR image')
         raw=candidate.removeprefix('data:image/png;base64,')
         try:
-            base64.b64decode(raw,validate=True)
+            data=base64.b64decode(raw,validate=True)
+            from PIL import Image
+            image=Image.open(io.BytesIO(data))
+            if image.format!='PNG' or max(image.size)>2048:
+                raise ValueError('Unsupported QR format or size')
+            image.verify()
         except Exception:
             raise providers.ProviderError('Evolution returned an invalid QR image') from None
         return 'data:image/png;base64,'+raw
-    code=result.get('code') or (result.get('qrcode') or {}).get('code')
+    code=result.get('code') or nested.get('code')
     if code and isinstance(code,str) and len(code)<10000:
         import qrcode
         buf=io.BytesIO()
@@ -173,6 +184,9 @@ def refresh_whatsapp(uid):
 
 def configure_telegram(uid, token, replace_webhook=False):
     with user_lock(uid):
+        previous=store.connection(uid,'telegram',True)
+        if previous and previous.get('cleanup_pending'):
+            raise ValueError('Retry pending remote cleanup before creating another connection')
         if not user_keys.encryption_enabled():
             raise ValueError('Encrypted credential storage needs administrator setup')
         old=store.connection(uid,'telegram')
@@ -229,7 +243,10 @@ def verify_recipient(uid, recipient):
         n=number(recipient or doc.get('phone',''))
         code=''.join(secrets.choice('0123456789') for _ in range(6))
         conf=store.secret(uid,'whatsapp')
-        conf.update(challenge_hash=digest(code),challenge_expires=store.now().timestamp()+300,challenge_recipient=n,challenge_attempts=0)
+        if conf.get('challenge_requested_at',0)>store.now().timestamp()-60:
+            raise ValueError('Wait one minute before requesting another verification message')
+        conf.update(challenge_hash=digest(code),challenge_expires=store.now().timestamp()+300,challenge_recipient=n,challenge_attempts=0,
+                    challenge_requested_at=store.now().timestamp())
         store.secret(uid,'whatsapp',conf)
         result=evolution(doc,'/message/sendText/'+doc['instance'],'POST',{'number':n,'text':'Drishti connection code: '+code+'\nEnter this code in Drishti. Expires in 5 minutes.'})
         mid=(result.get('key') or {}).get('id') if isinstance(result,dict) else None
@@ -264,6 +281,10 @@ def confirm_pair(uid, channel, code=''):
             conf.update(inbound_hash=digest(link),inbound_expires=store.now().timestamp()+300)
             evolution(doc,'/message/sendText/'+doc['instance'],'POST',{'number':doc['recipient'],
                 'text':'Drishti connected. To enable paper-trade replies, send this as a NEW message (do not forward):\nLINK '+link})
+        # Identity changes revoke every earlier proposal and queued message,
+        # while retaining the remote callback URL/owned instance.
+        doc['generation']=secrets.token_hex(16)
+        doc.update(alerts=False,approvals=False,enabled_since=store.now().timestamp())
         store.secret(uid,channel,conf)
         return _save(doc)
 
@@ -288,8 +309,10 @@ def preferences(uid, channel, alerts, approvals):
 
 def disconnect(uid, channel):
     with user_lock(uid):
-        doc=_owned(uid,channel)
-        doc.update(active=False,connected=False,verified=False,alerts=False,approvals=False)
+        doc=store.connection(uid,channel,True)
+        if not doc:
+            return status(uid,channel)
+        doc.update(active=False,connected=False,verified=False,alerts=False,approvals=False,cleanup_pending=True)
         store.save(doc)  # revoke before any fallible network operation
         conf=store.secret(uid,channel)
         error=None

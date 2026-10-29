@@ -111,3 +111,30 @@ def test_paper_transition_messages_are_deduplicated_and_include_net_pnl(ready):
     actions.update_transitions();actions.update_transitions()
     ds=store.deliveries(store.connection('a','telegram')['id'])
     assert len([d for d in ds if 'Net P&L' in d['text'] and '19.50' in d['text']])==1
+
+
+def test_crash_after_action_creation_is_repaired_by_explicit_resend(ready,monkeypatch):
+    from apps.api.messaging import actions
+    tk,_=ready;original=store.enqueue
+    monkeypatch.setattr(store,'enqueue',lambda *a,**k:(_ for _ in ()).throw(RuntimeError('crash')))
+    with pytest.raises(RuntimeError):actions.propose('a',tk['id'])
+    assert store.action('a',tk['id'])['state']=='pending'
+    monkeypatch.setattr(store,'enqueue',original)
+    actions.propose('a',tk['id'])
+    assert store.deliveries(store.connection('a','telegram')['id'])
+
+
+def test_relinked_identity_cannot_use_old_proposal_token(ready):
+    from apps.api.messaging import actions,connections
+    tk,now=ready;actions.propose('a',tk['id']);token=token_for('a',tk['id'])
+    row=store.connection('a','telegram');row.update(pending_sender='99',pending_chat='99');store.save(row)
+    store.secret('a','telegram',{'pair_expires':now.timestamp()+300})
+    connections.confirm_pair('a','telegram')
+    with pytest.raises(ValueError,match='revoked'):actions.decide('a','telegram',token,'approve','99')
+    assert get_desk_store().list_paper('a')==[]
+
+
+def test_invalid_unicode_reply_code_is_refused_without_crashing_callback(ready):
+    from apps.api.messaging import actions
+    tk,_=ready;actions.propose('a',tk['id'])
+    with pytest.raises(ValueError,match='Unknown'):actions.decide('a','telegram','✅','approve','42')

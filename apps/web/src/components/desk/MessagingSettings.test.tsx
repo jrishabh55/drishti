@@ -53,3 +53,10 @@ it('explains setup failure and leaves approvals disabled until inbound verificat
   expect(await screen.findByText('Evolution is unavailable')).toBeTruthy()
   expect((screen.getByRole('switch',{name:'WhatsApp paper approvals'}) as HTMLButtonElement).disabled).toBe(true)
 })
+
+it('retains a visible cleanup retry after disconnect failed at the provider', async () => {
+  vi.mocked(messagingApi.status).mockImplementation(async ch=>({...base,cleanup_pending:ch==='whatsapp',last_error:ch==='whatsapp'?'Remote cleanup failed':null}))
+  render(<MessagingSettings />)
+  expect(await screen.findByRole('button',{name:'Retry WhatsApp cleanup'})).toHaveProperty('disabled',false)
+  expect(screen.getByRole('button',{name:'Save WhatsApp server'})).toHaveProperty('disabled',true)
+})

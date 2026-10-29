@@ -54,6 +54,8 @@ Reject cancels a pending proposal; it never sells an existing position. Status u
 
 Disconnect revokes pending actions locally before attempting remote logout/webhook cleanup. If remote cleanup fails, Drishti reports it; check the provider dashboard. Never remove unrelated Evolution instances or replace another user's webhook.
 
+Remote cleanup failures remain visible after reloading; use **Retry cleanup** before creating another connection. Confirming a linked identity rotates its binding generation and turns delivery/approval toggles off until you opt in again. Earlier queued messages and proposals cannot follow a newly linked identity. A provider send already in flight may still finish; new sends and trade actions use the current binding.
+
 ## Release checks
 
 Automated verification uses isolated databases and controlled provider responses; it creates no real provider accounts/messages or broker orders. Live acceptance needs the account owner's phone scan, Telegram Start, identity confirmation and explicit test-message actions. Record those separately from offline test results.

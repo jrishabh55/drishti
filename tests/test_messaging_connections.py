@@ -18,7 +18,7 @@ def env(tmp_path, monkeypatch):
     def evolution(base,key,path,method='GET',body=None,params=None):
         calls.append((path,method,body,params))
         if path=='/instance/create': return {'instance': {'instanceName':body['instanceName']}}
-        if '/connect/' in path: return {'base64':'data:image/png;base64,aGVsbG8=', 'pairingCode':'12345678'}
+        if '/connect/' in path: return {'base64':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC', 'pairingCode':'12345678'}
         if '/connectionState/' in path:return {'instance':{'state':'open'}}
         if path=='/instance/fetchInstances': return [{'name':params['instanceName'], 'ownerJid':'919876543210@s.whatsapp.net'}]
         return {'status':'SUCCESS'}
@@ -131,3 +131,39 @@ def test_qr_string_is_rendered_locally_as_a_real_png(env,monkeypatch):
     import base64
     qr=c.pair_whatsapp('a')['qr']
     assert base64.b64decode(qr.split(',')[1]).startswith(b'\x89PNG\r\n\x1a\n')
+
+
+def test_arbitrary_base64_is_not_certified_as_a_qr_image(env):
+    c,s,calls=env
+    from apps.api.messaging import providers
+    with pytest.raises(providers.ProviderError):c._qr({'base64':'aGVsbG8='})
+
+
+def test_failed_remote_cleanup_remains_visible_and_can_be_retried(env,monkeypatch):
+    c,s,calls=env
+    from apps.api.messaging import providers
+    c.configure_telegram('a','123:secret');doc=s.connection('a','telegram')
+    old=providers.telegram
+    def fail(token,method,body=None):
+        if method=='getWebhookInfo':return {'url':c.hook_url(doc)}
+        if method=='deleteWebhook':raise providers.ProviderError()
+        return old(token,method,body)
+    monkeypatch.setattr(providers,'telegram',fail)
+    c.disconnect('a','telegram')
+    assert c.status('a','telegram')['cleanup_pending']
+    with pytest.raises(ValueError,match='cleanup'):c.configure_telegram('a','123:secret',True)
+    monkeypatch.setattr(providers,'telegram',old)
+    assert not c.disconnect('a','telegram')['cleanup_pending']
+
+
+def test_unsupported_nested_qr_shape_is_a_sanitized_provider_error(env):
+    c,s,calls=env
+    from apps.api.messaging import providers
+    with pytest.raises(providers.ProviderError):c._qr({'qrcode':'unexpected payload'})
+
+
+def test_recipient_verification_messages_are_throttled(env):
+    c,s,calls=env
+    c.configure_whatsapp('a','','');c.pair_whatsapp('a');c.refresh_whatsapp('a')
+    c.verify_recipient('a','919876543210')
+    with pytest.raises(ValueError,match='Wait'):c.verify_recipient('a','919876543210')
