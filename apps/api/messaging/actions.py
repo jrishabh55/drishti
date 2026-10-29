@@ -99,7 +99,7 @@ def _queue_proposal(a,tk):
     for cid in a['connections']:
         d=store.by_id(cid)
         if d and d.get('approvals') and d.get('generation')==a.get('generations',{}).get(cid):
-            store.enqueue(cid,'proposal-'+a['id'],text,buttons if d['channel']=='telegram' else None,expiry)
+            store.enqueue(cid,'proposal-'+a['id'],text,buttons,expiry)
 
 def providers_url(tk):
     from apps.api.messaging.providers import public_base

@@ -1,5 +1,6 @@
 """Authenticated inbound events and bounded, retryable message delivery."""
 import asyncio
+import json
 import logging
 import secrets
 import threading
@@ -10,6 +11,34 @@ from apps.api.messaging import connections as c, providers, store
 logger=logging.getLogger(__name__)
 _DELIVERY_GUARD=threading.Lock()
 _DELIVERY_LOCKS={}
+
+
+def _whatsapp_text(message):
+    """Normalize reply IDs without treating display text as an action."""
+    if not isinstance(message,dict):
+        return ''
+    for name in ('extendedTextMessage','buttonsResponseMessage','interactiveResponseMessage'):
+        part=message.get(name) or {}
+        if not isinstance(part,dict):
+            return ''
+        context=part.get('contextInfo') or {}
+        if not isinstance(context,dict) or context.get('isForwarded'):
+            return ''
+    if 'interactiveResponseMessage' in message:
+        flow=(message.get('interactiveResponseMessage') or {}).get('nativeFlowResponseMessage') or {}
+        if not isinstance(flow,dict) or flow.get('name')!='quick_reply':
+            return ''
+        raw=flow.get('paramsJson')
+        if not isinstance(raw,str) or len(raw)>1024:
+            return ''
+        try:
+            params=json.loads(raw)
+        except ValueError:
+            return ''
+        text=params.get('id') if isinstance(params,dict) else None
+        return text if isinstance(text,str) and len(text)<=128 else ''
+    return (message.get('conversation') or (message.get('extendedTextMessage') or {}).get('text') or
+            (message.get('buttonsResponseMessage') or {}).get('selectedButtonId') or '')
 
 
 def authorize(cid, secret):
@@ -86,10 +115,7 @@ def receive(cid, secret, payload):
             if any(d.get('message_id')==str(mid) for d in store.deliveries(cid)):
                 return {'ok':True}
             message=data.get('message') or {}
-            if (message.get('extendedTextMessage') or {}).get('contextInfo',{}).get('isForwarded'):
-                return {'ok':True}
-            text=(message.get('conversation') or (message.get('extendedTextMessage') or {}).get('text') or
-                  (message.get('buttonsResponseMessage') or {}).get('selectedButtonId') or '')
+            text=_whatsapp_text(message)
             if not isinstance(text,str):
                 return {'ok':True}
             if (doc.get('verified') and text.startswith('LINK ') and conf.get('inbound_hash')
@@ -129,6 +155,19 @@ def send(doc, text, buttons=None):
             body['reply_markup']={'inline_keyboard':buttons}
         r=providers.telegram(conf['token'],'sendMessage',body)
         return str(r.get('message_id','')) if isinstance(r,dict) else ''
+    replies=[{'type':'reply','displayText':b['text'][:20],'id':b['callback_data']}
+             for row in (buttons or []) for b in row if b.get('callback_data')][:3]
+    if replies:
+        try:
+            r=c.evolution(doc,'/message/sendButtons/'+doc['instance'],'POST',
+                          {'number':doc['recipient'],'title':'Drishti paper trade',
+                           'description':text[:4000],'footer':'Paper trading only','buttons':replies})
+            return str((r.get('key') or {}).get('id','')) if isinstance(r,dict) else ''
+        except providers.ProviderError as exc:
+            # Only a definitive unsupported endpoint permits a second send.
+            # Timeouts/server failures may already have delivered the buttons.
+            if exc.status not in (404,405,501):
+                raise
     r=c.evolution(doc,'/message/sendText/'+doc['instance'],'POST',{'number':doc['recipient'],'text':text[:4000]})
     return str((r.get('key') or {}).get('id','')) if isinstance(r,dict) else ''
 

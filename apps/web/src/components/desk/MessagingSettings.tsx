@@ -116,7 +116,7 @@ function ConnectionCard({ channel }: { channel: Channel }) {
     <div className="space-y-3 border-t border-[var(--line-1)] pt-4">
       <label className="flex items-center justify-between gap-3 text-sm">{label} alerts<Switch aria-label={`${label} alerts`} disabled={disabled || !verified} checked={!!status?.alerts} onCheckedChange={v => act(() => api.preferences(channel,v,!!status?.approvals))} /></label>
       <label className="flex items-center justify-between gap-3 text-sm">{label} paper approvals<Switch aria-label={`${label} paper approvals`} disabled={disabled || !verified || !status?.inbound_verified} checked={!!status?.approvals} onCheckedChange={v => act(() => api.preferences(channel,!!status?.alerts,v))} /></label>
-      <p className="text-xs text-[var(--text-4)]">Paper approvals expire after five minutes or the entry cutoff. WhatsApp uses explicit reply codes; Telegram offers buttons. Real broker orders stay disabled.</p>
+      <p className="text-xs text-[var(--text-4)]">Paper approvals expire after five minutes or the entry cutoff. Both channels offer buttons. WhatsApp button display depends on your client; reply codes are also included. Real broker orders stay disabled.</p>
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={disabled || !verified} onClick={() => act(() => api.test(channel),'Test requested. Check this connection for delivery errors.')}>Test {label}</Button>
         {(status?.configured || status?.cleanup_pending) && <Button variant="ghost" disabled={busy} onClick={() => act(() => api.disconnect(channel),`${label} disconnected. Pending approvals revoked.`)}>{status.cleanup_pending ? `Retry ${label} cleanup` : `Disconnect ${label}`}</Button>}</div>
     </div>
