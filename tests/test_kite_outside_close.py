@@ -128,3 +128,30 @@ def test_previous_day_trade_is_not_judged_by_todays_positions(env):
     get_kite_store().update_trade("user_a", tr)
     t = _drive_for(client, t, clock, ist(10, 1), (5, 20, 45, 60, 80, 120))
     assert t["status"] != "closed_outside"
+
+
+def test_yesterday_trade_never_sells_todays_manual_position(env):
+    from tests.test_kite_execution import _login
+    client, desk, _, fake, clock = env
+    _armed(client, fake, clock)
+    t = _send(client, _ticket(desk)).json()
+    fake.fill('E', 800.0)
+    store = get_kite_store()
+    doc = store.get_trade(t['id'], 'user_a')
+    doc['legs']['entry'].update(status='COMPLETE', filled=50, avg=800.0)
+    store.update_trade('user_a', doc)
+    fake.orders.clear()  # broker's new-day order book; yesterday's DAY orders are over
+    fake.manual['SBIN'] = 50  # today's shares belong to the user, not yesterday's trade
+    clock['now'] = ist(9,0) + timedelta(days=1)
+    _login(client, fake)
+    clock['now'] = ist(10,0) + timedelta(days=1)
+    before = len(fake.placed())
+    t = refresh(client, t)
+    assert fake.placed()[before:] == []
+    assert t['status'] == 'session_ended'
+    assert 'verify' in t['closed_note'].lower()
+    assert t.get('pnl_net') is None and t.get('exit_fill') is None
+    assert store.list_trades('user_a', open_only=True) == []
+    clock['now'] = ist(15,10) + timedelta(days=1)
+    refresh(client, t)
+    assert fake.placed()[before:] == []

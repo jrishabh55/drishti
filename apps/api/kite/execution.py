@@ -700,6 +700,19 @@ def _step(t: Dict[str, Any], client: rest.KiteClient, orders: Dict[str, Dict],
     steps again. Never acts while any leg's broker state is ambiguous."""
     if t["status"] not in OPEN_STATES:
         return False
+    if t["trade_date"] < _today(now):
+        # MIS and DAY-order state belongs to its original session. Today's
+        # position can be the user's new trade: never protect, cancel or sell it
+        # to reconcile yesterday's ledger. Archive without claiming a known fill.
+        t["status"], t["exit_reason"] = "session_ended", "prior_session_ended"
+        t["closed_note"] = (f"The MIS session for {t['trade_date']} ended. Drishti will send no "
+                            "further orders for this trade. Verify its fills and any remaining "
+                            "positions in Kite; its final exit and P&L are unconfirmed.")
+        t["attention"] = t["attention_kind"] = None
+        for key in ("pnl_net", "pnl_gross", "exit_fill", "exit_avg"):
+            t[key] = None
+        _ev(t, now, "prior MIS session ended; verify the broker history (P&L unknown)")
+        return False
     _sync(t, orders, now)
     legs = t["legs"]
     e = legs.get("entry")
