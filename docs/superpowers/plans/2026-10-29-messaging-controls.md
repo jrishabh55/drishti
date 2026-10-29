@@ -49,5 +49,5 @@
 - [x] Write frontend tests for unconfigured/error/pairing/connected states, QR/code rendering, Telegram confirmation, toggles and paper-proposal action; observe red.
 - [x] Implement with existing shadcn/tokens, polling cleanup, secret clearing, server defaults and actionable capability errors; preserve legacy Telegram alerts.
 - [x] Run full Python suite, frontend tests/typecheck/build and Compose config; independent whole-branch review; fix material issues with regression tests.
-- [ ] Integrate/push/deploy under existing authorization; preserve encryption/live-order flags. Configure discovered Evolution URL and backend-only key securely. Verify health and real setup screens; phone linking remains user interaction.
-- [ ] Record actual checks and external setup dependencies. Close the reviewer session after completion.
+- [x] Integrate/push/deploy under existing authorization; preserve encryption/live-order flags. Configure discovered Evolution URL and backend-only key securely. Verify health and real setup screens; phone linking remains user interaction.
+- [x] Record actual checks and external setup dependencies. Close the reviewer session after completion.

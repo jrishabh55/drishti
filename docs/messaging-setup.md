@@ -59,3 +59,12 @@ Remote cleanup failures remain visible after reloading; use **Retry cleanup** be
 ## Release checks
 
 Automated verification uses isolated databases and controlled provider responses; it creates no real provider accounts/messages or broker orders. Live acceptance needs the account owner's phone scan, Telegram Start, identity confirmation and explicit test-message actions. Record those separately from offline test results.
+
+### Verified release — 30 October 2026 IST
+
+- Product commit `1adcb1c`, deployed successfully as Dokploy `GmQmSPN22BxzT0nXTiSlx`; API and web healthy with zero failing health streaks.
+- Full UTC regression suite: **2,373 Python tests and 103 subtests passed**, 3 existing deselections; **57 frontend tests**, TypeScript checking, production build and Compose validation passed.
+- Independent review identified seven delivery/recovery/identity/QR issues; each was addressed with regression coverage. Callback acknowledgments use Telegram's documented webhook response operation, and unprovisioned WhatsApp refresh stays local until QR/pairing is requested.
+- Live Chrome verification confirmed both setup cards, the Evolution URL/server-key readiness, saved WhatsApp configuration, QR/phone controls and disabled unverified approval toggles. Manual and polled pre-QR refresh returned HTTP 200. Unauthenticated setup requests returned 401 and unsigned callbacks 403. The account retained its five analysis credits.
+- Running API configuration confirmed the Evolution URL/key, public callback origin, enabled messaging loop and existing encryption key; `KITE_ORDERS_ENABLED=0` remains explicit. No QR was provisioned, phone account linked, message sent, paid analysis run or real trade placed during verification. Actual phone linking and provider callbacks await the user's scan/Start and verification steps above.
+- One local suite run crossed midnight: twelve parametrized cases in `tests/test_undated_tools_as_of.py` and `tests/test_yahoo_rate_limit.py` captured the previous date before execution, so the runtime historical-data guard withheld their mock calls. Both files passed all 61 tests after midnight in local time and UTC; the complete UTC suite then passed. No upstream core code or existing tests changed.
