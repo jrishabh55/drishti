@@ -29,7 +29,7 @@ export interface BatchQuote {
 }
 
 export type CellPhase =
-  | 'queued' | 'running' | 'rejected' | 'cancelled' | 'failed' | 'interrupted'
+  | 'queued' | 'submitting' | 'running' | 'rejected' | 'cancelled' | 'failed' | 'interrupted'
   | 'pending' | 'scored' | 'unscored' | 'error'
 
 export interface BatchCell {
@@ -40,6 +40,9 @@ export interface BatchCell {
   rating: string | null
   run_status: string | null
   error: string | null
+  /** Queued after a refused attempt: when it is next tried (ISO). */
+  retry_at?: string | null
+  attempts?: number
   score: {
     status: string
     benchmark?: string
@@ -62,6 +65,8 @@ export interface BatchView {
   settings: Record<string, unknown>
   cells: BatchCell[]
   summary: { scored: number; pending: number; running: number; failed: number; by_rating: Record<string, RatingScore> }
+  /** Only on the cancel response: queued cells cleared, and cells already mid-submission. */
+  cancel_result?: { cleared: number; starting: number }
 }
 
 export interface BatchRow {

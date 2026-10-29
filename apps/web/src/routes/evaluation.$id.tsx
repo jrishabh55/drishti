@@ -27,6 +27,7 @@ function BatchPage() {
   const { id } = Route.useParams()
   const [view, setView] = useState<BatchView | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const load = () => evaluationApi.getBatch(id).then(setView).catch((e) => setError(e instanceof Error ? e.message : String(e)))
   useEffect(() => {
@@ -36,7 +37,13 @@ function BatchPage() {
   }, [id])
 
   async function stop() {
-    try { setView(await evaluationApi.cancelBatch(id)) } catch (e) { setError(String(e)) }
+    try {
+      const next = await evaluationApi.cancelBatch(id)
+      setView(next)
+      const r = next.cancel_result
+      if (r) setNotice(`${r.cleared} queued ${r.cleared === 1 ? 'run' : 'runs'} cleared.` +
+        (r.starting ? ` ${r.starting} already starting will finish and may use a credit.` : ''))
+    } catch (e) { setError(String(e)) }
   }
 
   const s = view?.summary
@@ -54,6 +61,7 @@ function BatchPage() {
           )}
         </div>
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
+        {notice && <p role="status" className="text-sm">{notice}</p>}
         {view && s && (
           <>
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -110,7 +118,7 @@ function BatchPage() {
                       <TableCell className="es-mono">{c.date}</TableCell>
                       <TableCell>{c.rating ?? '—'}</TableCell>
                       <TableCell className="text-sm">
-                        <span className={`es-pill ${c.phase === 'scored' ? '' : c.phase === 'running' || c.phase === 'queued' ? 'run' : 'info'}`}>{c.phase}</span>{' '}
+                        <span className={`es-pill ${c.phase === 'scored' ? '' : c.phase === 'running' || c.phase === 'queued' || c.phase === 'submitting' ? 'run' : 'info'}`}>{c.phase}</span>{' '}
                         {cellLabel(c)}
                       </TableCell>
                       <TableCell className="es-mono">{c.score?.raw_return != null ? signedFrac(c.score.raw_return) : '—'}</TableCell>

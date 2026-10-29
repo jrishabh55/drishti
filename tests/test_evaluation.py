@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from apps.api import clerk_users
@@ -603,3 +603,164 @@ def test_replay_calibration_matches_interval_entry_time_and_direction():
     assert _same_plan(plan, plan)
     for field, value in (("interval","5m"), ("entry_time","09:35"), ("side","sell")):
         assert not _same_plan(plan, {**plan, field:value})
+
+
+# ---------------------------------------------------------------- review fixes: retry, cancel, fairness
+
+def _cells(store, bid):
+    with batches._conn(store) as c:
+        return {(r["ticker"], r["date"]): dict(r) for r in
+                c.execute("SELECT * FROM eval_cells WHERE batch_id=?", (bid,))}
+
+
+def _make_due(store, bid):
+    with batches._conn(store) as c:
+        c.execute("UPDATE eval_cells SET next_attempt_at=? WHERE batch_id=? AND next_attempt_at IS NOT NULL",
+                  ("2000-01-01T00:00:00+00:00", bid))
+
+
+def test_credit_check_outage_keeps_cells_queued_with_backoff_then_submits(job_store, fake_runner, fake_clerk, monkeypatch):
+    fake_clerk["u"] = {"private_metadata": {"activated": True, "credits": 10}}
+    cells = batches.plan_cells(["RELIANCE.NS", "TCS.NS", "INFY.NS"], "2026-01-05", "2026-01-10", 5)
+    bid = batches.create_batch("u", _request(), cells, len(cells), job_store)
+    real_debit = clerk_users.debit_credit
+    debits = []
+    def down(uid):
+        debits.append(uid)
+        raise RuntimeError("clerk down")
+    monkeypatch.setattr(clerk_users, "debit_credit", down)
+    for _ in range(5):  # the UI polls: the outage must not burn through the queue
+        assert batches.pump("u", job_store) == 0
+    assert len(debits) == 1  # one attempt, then the whole user's queue backs off
+    view = batches.batch_view(bid, "u", job_store)
+    assert {c["phase"] for c in view["cells"]} == {"queued"}
+    first = view["cells"][0]
+    assert first["attempts"] == 1 and "credit check unavailable" in first["error"] and first["retry_at"]
+    assert all(c["retry_at"] for c in view["cells"])  # held, not hammered
+    monkeypatch.setattr(clerk_users, "debit_credit", real_debit)
+    _make_due(job_store, bid)
+    assert batches.pump("u", job_store) == 1 and len(fake_runner) == 1
+    assert _cells(job_store, bid)[("RELIANCE.NS", "2026-01-05")]["state"] == "submitted"
+
+
+def test_retryable_refusal_gives_up_after_bounded_attempts(job_store, fake_runner, monkeypatch):
+    cells = batches.plan_cells(["RELIANCE.NS"], "2026-01-05", "2026-01-05", 5)
+    bid = batches.create_batch("anonymous", _request(), cells, 0, job_store)
+    def refuse(req, uid):
+        raise HTTPException(409, "Your ChatGPT helper is not connected")
+    monkeypatch.setattr(batches, "_submit", refuse)
+    for _ in range(batches.MAX_ATTEMPTS):
+        batches.pump("anonymous", job_store)
+        _make_due(job_store, bid)
+    cell = batches.batch_view(bid, "anonymous", job_store)["cells"][0]
+    assert cell["phase"] == "rejected" and cell["error"].startswith(f"gave up after {batches.MAX_ATTEMPTS} attempts")
+
+
+def test_permanent_refusal_rejects_that_cell_and_moves_on(job_store, fake_runner, monkeypatch):
+    cells = batches.plan_cells(["RELIANCE.NS", "TCS.NS"], "2026-01-05", "2026-01-05", 5)
+    bid = batches.create_batch("anonymous", _request(), cells, 0, job_store)
+    real = batches._submit
+    def submit(req, uid):
+        if req.ticker == "RELIANCE.NS":
+            raise HTTPException(400, "analysis_date must be YYYY-MM-DD")
+        return real(req, uid)
+    monkeypatch.setattr(batches, "_submit", submit)
+    assert batches.pump("anonymous", job_store) == 1
+    state = _cells(job_store, bid)
+    assert state[("RELIANCE.NS", "2026-01-05")]["state"] == "rejected"
+    assert state[("RELIANCE.NS", "2026-01-05")]["next_attempt_at"] is None
+    assert state[("TCS.NS", "2026-01-05")]["state"] == "submitted"
+
+
+def test_cancel_during_submission_starts_nothing_further(job_store, fake_runner, monkeypatch):
+    from apps.api.routes.evaluation import router
+
+    cells = batches.plan_cells(["RELIANCE.NS", "TCS.NS", "INFY.NS"], "2026-01-05", "2026-01-05", 5)
+    bid = batches.create_batch("anonymous", _request(), cells, 0, job_store)
+    real = batches._submit
+    results = []
+    def submit(req, uid):
+        # The user presses Stop while this cell (already claimed) is in preflight.
+        results.append(_client(router, {"id": "anonymous"}).post(f"/api/evaluation/batches/{bid}/cancel").json())
+        raise HTTPException(400, {"code": "no_market_data", "message": "vendor hiccup"})
+    monkeypatch.setattr(batches, "_submit", submit)
+    assert batches.pump("anonymous", job_store) == 0
+    assert results[0]["cancel_result"] == {"cleared": 2, "starting": 1}
+    assert [c["phase"] for c in results[0]["cells"]].count("submitting") == 1
+    monkeypatch.setattr(batches, "_submit", real)
+    _make_due(job_store, bid)
+    for _ in range(3):
+        assert batches.pump("anonymous", job_store) == 0
+    assert fake_runner == []
+    assert {r["state"] for r in _cells(job_store, bid).values()} == {"cancelled"}
+
+
+def test_cancel_reports_an_in_flight_cell_that_does_start(job_store, fake_runner, monkeypatch):
+    cells = batches.plan_cells(["RELIANCE.NS", "TCS.NS"], "2026-01-05", "2026-01-05", 5)
+    bid = batches.create_batch("anonymous", _request(), cells, 0, job_store)
+    real = batches._submit
+    seen = []
+    def submit(req, uid):
+        seen.append(batches.cancel_batch(bid, "anonymous", job_store))
+        return real(req, uid)
+    monkeypatch.setattr(batches, "_submit", submit)
+    assert batches.pump("anonymous", job_store) == 1
+    assert seen == [{"cleared": 1, "starting": 1}] and len(fake_runner) == 1
+    _complete(job_store, fake_runner[0][0])
+    assert batches.pump("anonymous", job_store) == 0 and len(fake_runner) == 1
+
+
+def test_claim_left_by_a_dead_process_is_rejected_not_retried(job_store, fake_runner):
+    cells = batches.plan_cells(["RELIANCE.NS"], "2026-01-05", "2026-01-05", 5)
+    bid = batches.create_batch("anonymous", _request(), cells, 0, job_store)
+    with batches._conn(job_store) as c:
+        c.execute("UPDATE eval_cells SET state='submitting', claimed_at='2000-01-01T00:00:00+00:00' WHERE batch_id=?", (bid,))
+    assert batches.pump("anonymous", job_store) == 0 and fake_runner == []
+    cell = batches.batch_view(bid, "anonymous", job_store)["cells"][0]
+    assert cell["phase"] == "rejected" and "interrupted" in cell["error"]
+
+
+def test_old_cells_table_gains_retry_columns(tmp_path):
+    store = reset_store_for_tests(tmp_path / "legacy.sqlite")
+    with store._conn() as c:
+        c.executescript(batches._SCHEMA)  # the first release's table shape
+        c.execute("INSERT INTO eval_batches VALUES ('b','u','t','{}',0,0)")
+        c.execute("INSERT INTO eval_cells(batch_id, seq, ticker, date, state) VALUES ('b',0,'X','2026-01-05','queued')")
+    with batches._conn(store) as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(eval_cells)")}
+        row = c.execute("SELECT attempts, next_attempt_at FROM eval_cells").fetchone()
+    assert set(batches._COLUMNS) <= cols and tuple(row) == (0, None)
+
+
+def test_one_user_cannot_fill_the_score_queue(job_store, fake_runner, monkeypatch):
+    import threading
+    import time
+    gate = threading.Event()
+    monkeypatch.setattr(batches, "score_cell", lambda *a: (gate.wait(5), {"status": "pending", "checked_at": batches._now()})[1])
+
+    def finished_batch(user, tickers):
+        cells = batches.plan_cells(tickers, "2026-01-05", "2026-01-20", 5)
+        bid = batches.create_batch(user, _request(llm_provider="google"), cells, 0, job_store)
+        for t, d in cells:
+            rid = job_store.create_run(ticker=t, analysis_date=d, config={}, user_id=user)
+            _complete(job_store, rid)
+            with batches._conn(job_store) as c:
+                c.execute("UPDATE eval_cells SET state='submitted', run_id=? WHERE batch_id=? AND ticker=? AND date=?",
+                          (rid, bid, t, d))
+        return bid
+
+    a_bids = [finished_batch("a", [f"A{k}{i}.NS" for i in range(6)]) for k in range(3)]
+    b_bid = finished_batch("b", ["RELIANCE.NS"])
+    try:
+        for bid in a_bids:
+            batches.batch_view(bid, "a", job_store, background=True)
+        batches.batch_view(b_bid, "b", job_store, background=True)
+        owners = list(batches._score_jobs.values())
+        assert owners.count("a") == batches.SCORE_JOBS_PER_USER
+        assert owners.count("b") >= 1
+        assert len(owners) <= batches.SCORE_JOBS_TOTAL
+    finally:
+        gate.set()
+        deadline = time.monotonic() + 3
+        while batches._score_jobs and time.monotonic() < deadline:
+            time.sleep(.01)

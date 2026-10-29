@@ -22,7 +22,10 @@ export function signedFrac(x: number | null | undefined, digits = 2): string {
 /** What the user is told about a cell, by phase. Never a guessed outcome. */
 export function cellLabel(c: BatchCell): string {
   switch (c.phase) {
-    case 'queued': return 'waiting its turn'
+    case 'queued': return c.retry_at
+      ? `retrying after ${new Date(c.retry_at).toLocaleTimeString()}: ${c.error ?? 'refused'}`
+      : 'waiting its turn'
+    case 'submitting': return 'starting now (already past the stop point)'
     case 'running': return 'analysing'
     case 'pending': return `pending: holding window not yet closed`
     case 'scored': return `alpha ${signedFrac(c.score?.alpha)} vs ${c.score?.benchmark ?? 'benchmark'}`

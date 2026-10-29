@@ -80,9 +80,11 @@ def get_batch(bid: str, user_id: str = Depends(current_user_id)) -> Dict[str, An
 
 @router.post("/evaluation/batches/{bid}/cancel")
 def cancel_batch(bid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
-    if not batches.cancel_batch(bid, user_id):
+    result = batches.cancel_batch(bid, user_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="batch not found")
-    return batches.batch_view(bid, user_id, background=True)  # type: ignore[return-value]
+    # ``cancel_result.starting``: cells already mid-submission, which will still start.
+    return {**batches.batch_view(bid, user_id, background=True), "cancel_result": result}  # type: ignore[dict-item]
 
 
 @router.get("/evaluation/paper-performance")

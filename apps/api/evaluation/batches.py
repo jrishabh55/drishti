@@ -51,20 +51,33 @@ CREATE TABLE IF NOT EXISTS eval_cells (
     seq        INTEGER NOT NULL,
     ticker     TEXT NOT NULL,
     date       TEXT NOT NULL,
-    state      TEXT NOT NULL,          -- queued | submitted | rejected | cancelled
+    state      TEXT NOT NULL,          -- queued | submitting | submitted | rejected | cancelled
     run_id     TEXT,
     error      TEXT,
     score_json TEXT,
     PRIMARY KEY (batch_id, ticker, date)
 );
 """
+#: Added after the first release; ALTERed onto existing databases.
+_COLUMNS = {"attempts": "INTEGER NOT NULL DEFAULT 0", "next_attempt_at": "TEXT", "claimed_at": "TEXT"}
+#: Failed submissions that may succeed later (outage, disconnected helper/key,
+#: vendor hiccup in preflight) are retried this many times, then rejected.
+MAX_ATTEMPTS = 5
+RETRY_BASE = timedelta(minutes=1)
+RETRY_CAP = timedelta(minutes=30)
+#: A claim older than this belongs to a process that died mid-submit. It is
+#: rejected, not retried: the run may already exist and have been charged.
+STALE_CLAIM = timedelta(minutes=15)
+#: Score jobs queued at once: per user, and overall.
+SCORE_JOBS_PER_USER = 8
+SCORE_JOBS_TOTAL = 64
 
 # ponytail: one process-wide lock around the pump (create_run does preflight I/O
 # inside it); per-user locks if batch volume ever makes this a queue.
 _pump_lock = threading.Lock()
 _schema_ready: set = set()
 _score_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="eval-score")
-_score_jobs: set[tuple[str, str, str, str]] = set()
+_score_jobs: dict[tuple[str, str, str, str], str] = {}  # key -> user_id
 _score_lock = threading.Lock()
 
 
@@ -74,6 +87,10 @@ def _conn(store: JobStore):
     if key not in _schema_ready:
         with store._conn() as c:
             c.executescript(_SCHEMA)
+            have = {r[1] for r in c.execute("PRAGMA table_info(eval_cells)")}
+            for name, decl in _COLUMNS.items():
+                if name not in have:
+                    c.execute(f"ALTER TABLE eval_cells ADD COLUMN {name} {decl}")
         _schema_ready.add(key)
     return store._conn()
 
@@ -150,7 +167,7 @@ def create_batch(user_id: str, base: RunRequest, cells: List[Tuple[str, str]],
     with _conn(store) as c:
         open_batches = c.execute(
             "SELECT COUNT(DISTINCT b.id) FROM eval_batches b JOIN eval_cells c ON c.batch_id=b.id "
-            "WHERE b.user_id=? AND b.cancelled=0 AND c.state='queued'", (user_id,)).fetchone()[0]
+            "WHERE b.user_id=? AND b.cancelled=0 AND c.state IN ('queued','submitting')", (user_id,)).fetchone()[0]
     if open_batches >= MAX_OPEN_BATCHES:
         raise HTTPException(status_code=409, detail={
             "code": "too_many_batches",
@@ -172,15 +189,24 @@ def _batch_row(store: JobStore, bid: str, user_id: str):
         return c.execute("SELECT * FROM eval_batches WHERE id=? AND user_id=?", (bid, user_id)).fetchone()
 
 
-def cancel_batch(bid: str, user_id: str, store: Optional[JobStore] = None) -> bool:
-    """Stop submitting queued cells. Runs already submitted finish normally."""
+def cancel_batch(bid: str, user_id: str, store: Optional[JobStore] = None) -> Optional[Dict[str, int]]:
+    """Stop submitting queued cells. Returns None when the batch isn't the user's.
+
+    One transaction with the pump's claim (which requires ``cancelled=0``), so
+    once this returns no queued cell can start. A cell the pump had already
+    claimed is mid-submission and reported as ``starting``; runs already
+    submitted finish normally.
+    """
     store = store or get_store()
     if _batch_row(store, bid, user_id) is None:
-        return False
+        return None
     with _conn(store) as c:
         c.execute("UPDATE eval_batches SET cancelled=1 WHERE id=?", (bid,))
-        c.execute("UPDATE eval_cells SET state='cancelled' WHERE batch_id=? AND state='queued'", (bid,))
-    return True
+        cleared = c.execute("UPDATE eval_cells SET state='cancelled', next_attempt_at=NULL "
+                            "WHERE batch_id=? AND state='queued'", (bid,)).rowcount
+        starting = c.execute("SELECT COUNT(*) FROM eval_cells WHERE batch_id=? AND state='submitting'",
+                             (bid,)).fetchone()[0]
+    return {"cleared": cleared, "starting": starting}
 
 
 def _submit(request: RunRequest, user_id: str) -> str:
@@ -190,45 +216,100 @@ def _submit(request: RunRequest, user_id: str) -> str:
     return create_run(request, Response(), force=False, skip_preflight=False, user_id=user_id).id
 
 
+def _retryable(exc: HTTPException) -> bool:
+    """Whether a refused submission may succeed later without the user changing it."""
+    code = exc.status_code
+    if code in (409, 429) or code >= 500:
+        return True  # outage, credit check down, helper/key not connected yet
+    # Preflight answers 400 no_market_data for a vendor hiccup too; bounded retries
+    # tell that apart from a ticker that really has no data.
+    return code == 400 and isinstance(exc.detail, dict) and exc.detail.get("code") == "no_market_data"
+
+
+def _user_wide(exc: HTTPException) -> bool:
+    """A failure every cell of this user would hit (not specific to one ticker)."""
+    return not (exc.status_code == 400)
+
+
 def pump(user_id: str, store: Optional[JobStore] = None) -> int:
-    """Submit the next queued cell of each ticker that has no live run. Returns submissions."""
+    """Submit the user's next due queued cell. Returns submissions (0 or 1).
+
+    Permanently refused cells are rejected and the next one tried; a retryable
+    refusal ends the call and backs off
+    (the whole user's queue for an account-wide cause such as a credit-check
+    outage) instead of trying every queued cell in turn.
+    """
     store = store or get_store()
-    submitted = 0
+    now = datetime.now(timezone.utc)
     with _pump_lock:
+        with _conn(store) as c:
+            c.execute(
+                "UPDATE eval_cells SET state='rejected', error=? WHERE state='submitting' AND claimed_at<? "
+                "AND batch_id IN (SELECT id FROM eval_batches WHERE user_id=?)",
+                ("submission was interrupted by a server restart; check your runs before retrying",
+                 (now - STALE_CLAIM).isoformat(), user_id))
         if store.has_active_run_for_user(user_id):
             return 0
         with _conn(store) as c:
             rows = c.execute(
                 "SELECT c.*, b.request_json FROM eval_cells c JOIN eval_batches b ON b.id=c.batch_id "
                 "WHERE b.user_id=? AND b.cancelled=0 AND c.state='queued' "
-                "ORDER BY b.created_at, c.seq", (user_id,)).fetchall()
-        busy: set = set()
+                "AND (c.next_attempt_at IS NULL OR c.next_attempt_at<=?) "
+                "ORDER BY b.created_at, c.seq", (user_id, now.isoformat())).fetchall()
         for row in rows:
             ticker = row["ticker"]
-            if ticker in busy or store.has_active_run_for_ticker(ticker, user_id=user_id):
-                busy.add(ticker)
+            if store.has_active_run_for_ticker(ticker, user_id=user_id):
                 continue
-            busy.add(ticker)
+            where = ("WHERE batch_id=? AND ticker=? AND date=?", (row["batch_id"], ticker, row["date"]))
+            with _conn(store) as c:
+                # The claim: atomic with cancel_batch, so a cancelled batch never starts another cell.
+                claimed = c.execute(
+                    "UPDATE eval_cells SET state='submitting', claimed_at=? " + where[0] +
+                    " AND state='queued' AND EXISTS (SELECT 1 FROM eval_batches b "
+                    "WHERE b.id=eval_cells.batch_id AND b.cancelled=0)",
+                    (now.isoformat(), *where[1])).rowcount
+            if not claimed:
+                continue
             req = RunRequest.model_validate_json(row["request_json"]).model_copy(
                 update={"ticker": ticker, "analysis_date": row["date"]})
-            state, run_id, error = "submitted", None, None
+            update: Dict[str, Any] = {"state": "submitted", "run_id": None, "error": None,
+                                      "next_attempt_at": None}
+            hold_all = None
             try:
-                run_id = _submit(req, user_id)
-                submitted += 1
+                update["run_id"] = _submit(req, user_id)
             except HTTPException as exc:
-                if exc.status_code == 409 and "already queued or running" in str(exc.detail):
-                    continue  # raced a manual run: retry on the next pump
-                state, error = "rejected", _detail_text(exc.detail)
-            except Exception as exc:  # noqa: BLE001 — one bad cell must not stall the rest
+                attempts = row["attempts"] + 1
+                error = _detail_text(exc.detail)
+                if _retryable(exc) and attempts < MAX_ATTEMPTS:
+                    retry_at = (now + min(RETRY_BASE * 2 ** (attempts - 1), RETRY_CAP)).isoformat()
+                    update.update(state="queued", attempts=attempts, error=error, next_attempt_at=retry_at)
+                    if _user_wide(exc):
+                        hold_all = retry_at
+                else:
+                    if _retryable(exc):
+                        error = f"gave up after {attempts} attempts: {error}"
+                    update.update(state="rejected", attempts=attempts, error=error)
+            except Exception as exc:  # noqa: BLE001 — explicit, never silently retried forever
                 logger.exception("batch cell %s %s failed to submit", ticker, row["date"])
-                state, error = "rejected", f"{type(exc).__name__}: {exc}"
+                update.update(state="rejected", error=f"{type(exc).__name__}: {exc}")
             with _conn(store) as c:
-                c.execute("UPDATE eval_cells SET state=?, run_id=?, error=? "
-                          "WHERE batch_id=? AND ticker=? AND date=?",
-                          (state, run_id, error, row["batch_id"], ticker, row["date"]))
-            if state == 'submitted':
-                break  # the runner serializes by user; don't occupy workers waiting on that lock
-    return submitted
+                cols = ", ".join(f"{k}=?" for k in update)
+                c.execute(f"UPDATE eval_cells SET {cols}, claimed_at=NULL " + where[0],
+                          (*update.values(), *where[1]))
+                # Cancelled while this attempt was in flight: don't requeue it.
+                c.execute("UPDATE eval_cells SET state='cancelled', next_attempt_at=NULL " + where[0] +
+                          " AND state='queued' AND EXISTS (SELECT 1 FROM eval_batches b "
+                          "WHERE b.id=eval_cells.batch_id AND b.cancelled=1)", where[1])
+                if hold_all:
+                    c.execute(
+                        "UPDATE eval_cells SET next_attempt_at=? WHERE state='queued' "
+                        "AND (next_attempt_at IS NULL OR next_attempt_at<?) "
+                        "AND batch_id IN (SELECT id FROM eval_batches WHERE user_id=?)",
+                        (hold_all, hold_all, user_id))
+            if update["state"] == "rejected":
+                continue  # specific to this cell and nothing was spent: try the next one
+            return 1 if update["state"] == "submitted" else 0
+    return 0
 
 
 def _detail_text(detail: Any) -> str:
@@ -254,7 +335,8 @@ def score_cell(ticker: str, date: str, holding_days: int) -> Dict[str, Any]:
             "holding_days": days, "resolved": resolved}
 
 
-def _score(store: JobStore, row, rating: Optional[str], holding_days: int, *, background: bool = False) -> Dict[str, Any]:
+def _score(store: JobStore, row, rating: Optional[str], holding_days: int, *, background: bool = False,
+           user_id: str = "") -> Dict[str, Any]:
     from tradingagents.agents.rating import RATING_REVIEW
 
     if rating == RATING_REVIEW:
@@ -268,12 +350,13 @@ def _score(store: JobStore, row, rating: Optional[str], holding_days: int, *, ba
     if background:
         key = (str(store.db_path), row["batch_id"], row["ticker"], row["date"])
         with _score_lock:
-            if key not in _score_jobs and len(_score_jobs) < 64:
-                _score_jobs.add(key)
+            mine = sum(1 for u in _score_jobs.values() if u == user_id)
+            if key not in _score_jobs and mine < SCORE_JOBS_PER_USER and len(_score_jobs) < SCORE_JOBS_TOTAL:
+                _score_jobs[key] = user_id
                 try:
                     _score_pool.submit(_score_job, key, store, dict(row), rating, holding_days)
                 except Exception:
-                    _score_jobs.discard(key)
+                    _score_jobs.pop(key, None)
                     logger.exception("unable to queue evaluation score")
         return cached or {"status": "pending", "reason": "checking real closing prices"}
     try:
@@ -293,7 +376,7 @@ def _score_job(key, store, row, rating, holding_days):
         logger.exception("evaluation score persistence failed")
     finally:
         with _score_lock:
-            _score_jobs.discard(key)
+            _score_jobs.pop(key, None)
 
 
 def summarize(cells: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -312,7 +395,7 @@ def summarize(cells: List[Dict[str, Any]]) -> Dict[str, Any]:
         }
     count = lambda *s: sum(1 for c in cells if c["phase"] in s)  # noqa: E731
     return {"scored": len(scored), "pending": count("pending"),
-            "running": count("queued", "submitted", "running"),
+            "running": count("queued", "submitting", "submitted", "running"),
             "failed": count("failed", "rejected", "cancelled", "interrupted", "error", "unscored"),
             "by_rating": by_rating}
 
@@ -333,7 +416,8 @@ def batch_view(bid: str, user_id: str, store: Optional[JobStore] = None, *, back
         if run is not None and (run.user_id or "anonymous") != user_id:
             run = None  # never surface another user's row
         cell = {"ticker": row["ticker"], "date": row["date"], "run_id": row["run_id"],
-                "error": row["error"], "rating": run.rating if run else None,
+                "error": row["error"], "retry_at": row["next_attempt_at"] if row["state"] == "queued" else None,
+                "attempts": row["attempts"], "rating": run.rating if run else None,
                 "run_status": run.status if run else None, "score": None}
         if row["state"] != "submitted":
             cell["phase"] = row["state"]
@@ -343,7 +427,7 @@ def batch_view(bid: str, user_id: str, store: Optional[JobStore] = None, *, back
             cell["phase"] = run.status if run.status in ("failed", "cancelled", "interrupted") else "running"
             cell["error"] = run.error
         else:
-            cell["score"] = _score(store, row, run.rating, holding, background=background)
+            cell["score"] = _score(store, row, run.rating, holding, background=background, user_id=user_id)
             cell["phase"] = cell["score"]["status"]
         cells.append(cell)
     req = json.loads(b["request_json"])
