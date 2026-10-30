@@ -74,13 +74,13 @@ function ConnectionCard({ channel }: { channel: Channel }) {
     {!status && !error && <p role="status">Loading connection…</p>}
     {channel === 'whatsapp' ? <>
       <p className="text-sm text-[var(--text-3)]">Connect your number through your self-hosted Evolution server. Open WhatsApp → Linked devices → Link a device to scan the QR shown here.</p>
-      <label className="block text-sm">Evolution server URL<Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://evolution.example.com" autoComplete="url" /></label>
-      <label className="block text-sm">Evolution API key<Input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={status?.server_configured ? 'Server key configured; leave blank to use it' : 'Enter API key'} /></label>
+      <label className="grid gap-1.5 text-sm">Evolution server URL<Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://evolution.example.com" autoComplete="url" /></label>
+      <label className="grid gap-1.5 text-sm">Evolution API key<Input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={status?.server_configured ? 'Server key configured; leave blank to use it' : 'Enter API key'} /></label>
       <p className="text-xs text-[var(--text-4)]">The URL must be approved by your administrator. Saved keys stay encrypted and are never shown again.</p>
       <Button disabled={disabled} onClick={save}>Save WhatsApp server</Button>
       {status?.configured && <div className="space-y-3 border-t border-[var(--line-1)] pt-4">
         <h3 className="font-medium">Link your phone</h3>
-        <label className="block text-sm">WhatsApp number with country code<Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="919876543210" inputMode="tel" /></label>
+        <label className="grid gap-1.5 text-sm">WhatsApp number with country code<Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="919876543210" inputMode="tel" /></label>
         <div className="flex flex-wrap gap-2">
           <Button disabled={disabled || !!status.connected} onClick={() => act(() => api.pair(channel,''))}>Generate WhatsApp QR</Button>
           <Button variant="outline" disabled={disabled || !phone || !!status.connected} onClick={() => act(() => api.pair(channel,phone))}>Get WhatsApp pairing code</Button>
@@ -92,9 +92,9 @@ function ConnectionCard({ channel }: { channel: Channel }) {
         {status.connected && <div className="space-y-2">
           <h3 className="font-medium">Verify notification recipient</h3>
           <p className="text-xs text-[var(--text-3)]">Use your own number for WhatsApp self-chat, or another private number you control. Verification confirms where messages go.</p>
-          <label className="block text-sm">WhatsApp recipient<Input value={recipient} onChange={e => setRecipient(e.target.value)} inputMode="tel" placeholder="Number with country code" /></label>
+          <label className="grid gap-1.5 text-sm">WhatsApp recipient<Input value={recipient} onChange={e => setRecipient(e.target.value)} inputMode="tel" placeholder="Number with country code" /></label>
           <Button variant="outline" disabled={disabled || !recipient} onClick={sendCode}>Send verification code</Button>
-          <label className="block text-sm">WhatsApp verification code<Input value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" /></label>
+          <label className="grid gap-1.5 text-sm">WhatsApp verification code<Input value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" /></label>
           <Button disabled={disabled || !code} onClick={() => act(() => api.confirm(channel,code),'Recipient verified. Reply to the LINK message in WhatsApp to enable paper approvals.')}>Verify WhatsApp code</Button>
         </div>}
         {verified && !status.inbound_verified && <p className="text-sm text-[var(--run)]">Reply to the LINK message as a new WhatsApp message to verify incoming replies. If self-chat replies do not reach this server, use another verified number or confirm trades in Drishti.</p>}
@@ -102,14 +102,14 @@ function ConnectionCard({ channel }: { channel: Channel }) {
     </> : <>
       <p className="text-sm text-[var(--text-3)]">Create a bot in Telegram’s BotFather and paste its token here. Then open the connection link and start a private chat. Drishti finds your chat ID automatically.</p>
       <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sm text-[var(--accent)] underline">Open BotFather</a>
-      <label className="block text-sm">Telegram bot token<Input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={status?.configured ? 'Saved; leave blank to keep' : '123456:bot-token'} /></label>
-      <label className="flex items-start gap-2 text-xs text-[var(--text-3)]"><input type="checkbox" checked={replaceHook} onChange={e => setReplaceHook(e.target.checked)} />Replace an existing Telegram webhook. This stops that bot’s integration with its previous app.</label>
+      <label className="grid gap-1.5 text-sm">Telegram bot token<Input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={status?.configured ? 'Saved; leave blank to keep' : '123456:bot-token'} /></label>
+      <label className="flex items-start gap-2 text-xs text-[var(--text-3)]"><input type="checkbox" className="mt-0.5" checked={replaceHook} onChange={e => setReplaceHook(e.target.checked)} />Replace an existing Telegram webhook. This stops that bot’s integration with its previous app.</label>
       <Button disabled={disabled || !key && !status?.configured} onClick={save}>Save Telegram bot</Button>
-      {status?.configured && <div className="space-y-3 border-t border-[var(--line-1)] pt-4">
-        {status.bot_username && <p>Bot: <strong>@{status.bot_username}</strong></p>}
+      {status?.configured && <div className="flex flex-wrap items-center gap-x-2 gap-y-3 border-t border-[var(--line-1)] pt-4">
+        {status.bot_username && <p className="w-full">Bot: <strong>@{status.bot_username}</strong></p>}
         <Button disabled={disabled} onClick={() => act(() => api.pair(channel,''))}>Create Telegram connection link</Button>
-        {status.pair_url?.startsWith('https://t.me/') && <a className="block text-[var(--accent)] underline" href={status.pair_url} target="_blank" rel="noreferrer">Open Telegram to connect</a>}
-        {status.pending_identity && <div className="space-y-2"><p>Telegram account waiting for your confirmation:</p><p className="font-medium">{status.pending_identity}</p><Button disabled={disabled} onClick={() => act(() => api.confirm(channel),'Telegram account verified.')}>Confirm Telegram account</Button></div>}
+        {status.pair_url?.startsWith('https://t.me/') && <a className="w-full text-[var(--accent)] underline" href={status.pair_url} target="_blank" rel="noreferrer">Open Telegram to connect</a>}
+        {status.pending_identity && <div className="w-full space-y-2"><p>Telegram account waiting for your confirmation:</p><p className="font-medium">{status.pending_identity}</p><Button disabled={disabled} onClick={() => act(() => api.confirm(channel),'Telegram account verified.')}>Confirm Telegram account</Button></div>}
         <Button variant="outline" disabled={disabled} onClick={() => act(() => api.refresh(channel))}>Refresh Telegram connection</Button>
       </div>}
     </>}

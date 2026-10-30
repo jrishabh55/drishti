@@ -138,10 +138,10 @@ function PlanPage() {
             {editable && (
               <div className="space-y-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-4">
                 <div className="es-team-label">Adjust the exit plan</div>
-                <label className="block text-xs text-[var(--text-3)]">Stop rule
+                <label className="grid gap-1.5 text-xs text-[var(--text-3)]">Stop rule
                   <Select value={edit.stop_rule ?? 'or_mid'}
                     onValueChange={(v) => setEdit({ ...edit, stop_rule: v as Plan['stop_rule'] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {STOP_RULES.filter((r) => edit.setup === 'orb' || !r.value.startsWith('or_'))
                         .map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
@@ -149,21 +149,21 @@ function PlanPage() {
                   </Select>
                 </label>
                 {rule?.param && (
-                  <label className="block text-xs text-[var(--text-3)]">Stop ({rule.param})
+                  <label className="grid gap-1.5 text-xs text-[var(--text-3)]">Stop ({rule.param})
                     <Input type="number" step="0.1" value={edit.stop_param ?? ''}
                       onChange={(e) => setEdit({ ...edit, stop_param: e.target.value ? Number(e.target.value) : null })} />
                   </label>
                 )}
-                <label className="block text-xs text-[var(--text-3)]">Target rule
+                <label className="grid gap-1.5 text-xs text-[var(--text-3)]">Target rule
                   <Select value={edit.target_rule ?? 'r'} onValueChange={v => setEdit({...edit, ...targetRuleSwitch(v as 'r' | 'price', plan)})}>
-                    <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="r">R multiple</SelectItem><SelectItem value="price">Fixed price ₹</SelectItem></SelectContent>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="r">R multiple</SelectItem><SelectItem value="price">Fixed price ₹</SelectItem></SelectContent>
                   </Select>
                 </label>
-                <label className="block text-xs text-[var(--text-3)]">{edit.target_rule === 'price' ? 'Target price ₹' : 'Target (R multiple)'}
+                <label className="grid gap-1.5 text-xs text-[var(--text-3)]">{edit.target_rule === 'price' ? 'Target price ₹' : 'Target (R multiple)'}
                   <Input type="number" step="0.01" min="0.01" value={edit.target_param ?? 2}
                     onChange={(e) => setEdit({ ...edit, target_param: Number(e.target.value) })} />
                 </label>
-                <label className="block text-xs text-[var(--text-3)]">Flat by (IST)
+                <label className="grid gap-1.5 text-xs text-[var(--text-3)]">Flat by (IST)
                   <Input value={edit.flat_by ?? ''} placeholder="15:15"
                     onChange={(e) => setEdit({ ...edit, flat_by: e.target.value })} />
                 </label>

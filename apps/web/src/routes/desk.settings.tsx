@@ -110,7 +110,7 @@ function SettingsPage() {
             ))}
             <fieldset className="space-y-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-4">
               <legend className="px-1 text-sm font-semibold">Rules</legend>
-              <label className="flex items-center justify-between text-sm">
+              <label className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-[var(--text-2)]">Every entry needs a stop</span>
                 <Switch checked={p.require_stop} onCheckedChange={(v) => setP({ ...p, require_stop: v })} />
               </label>
@@ -132,7 +132,7 @@ function SettingsPage() {
                   ))}
                 </div>
               </label>
-              <label className="block text-sm text-[var(--text-2)]">Blocked symbols (comma separated)
+              <label className="grid gap-1.5 text-sm text-[var(--text-2)]">Blocked symbols (comma separated)
                 <Input value={blocked} onChange={(e) => setBlocked(e.target.value.toUpperCase())} />
               </label>
             </fieldset>
