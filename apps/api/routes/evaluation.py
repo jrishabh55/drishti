@@ -103,6 +103,7 @@ def paper_performance(portfolio_id: str = Query("default", pattern=r"^[A-Za-z0-9
 
 _PF = Query("default", pattern=r"^[A-Za-z0-9_-]{1,64}$", description="all | default | <id>")
 _STRAT = Query(None, pattern=r"^[A-Za-z0-9_-]{1,64}$", description="<id> | manual")
+_VER = Query(None, ge=1, description="a version of strategy_id (needs strategy_id)")
 
 
 def _not_found(fn, *args, **kw):
@@ -112,26 +113,29 @@ def _not_found(fn, *args, **kw):
         return fn(*args, **kw)
     except analytics.NotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/evaluation/trading-performance")
 def trading_performance(mode: Literal["paper", "live"] = "paper", portfolio_id: str = _PF,
-                        strategy_id: Optional[str] = _STRAT,
+                        strategy_id: Optional[str] = _STRAT, strategy_version: Optional[int] = _VER,
                         user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     from apps.api.evaluation import analytics
 
     return _not_found(analytics.trading_performance, user_id, mode=mode,
-                      portfolio_id=portfolio_id, strategy_id=strategy_id)
+                      portfolio_id=portfolio_id, strategy_id=strategy_id,
+                      strategy_version=strategy_version)
 
 
 @router.get("/evaluation/trade-journal.csv")
 def trade_journal_csv(mode: Literal["paper", "live"] = "paper", portfolio_id: str = _PF,
-                      strategy_id: Optional[str] = _STRAT,
+                      strategy_id: Optional[str] = _STRAT, strategy_version: Optional[int] = _VER,
                       user_id: str = Depends(current_user_id)) -> Response:
     from apps.api.evaluation import analytics
 
     rows = _not_found(analytics.journal_rows, user_id, mode=mode, portfolio_id=portfolio_id,
-                      strategy_id=strategy_id)
+                      strategy_id=strategy_id, strategy_version=strategy_version)
     return Response(analytics.to_csv(rows), media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="drishti-{mode}-journal.csv"'})
 

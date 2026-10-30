@@ -9,7 +9,7 @@ is NIFTY 50 daily closes when available, otherwise an explicit reason.
 Charges are the broker-plan estimates the ledgers already store.
 
 Stable entry points (also for other consumers, e.g. mobile summaries):
-``trading_performance(user_id, mode=, portfolio_id=, strategy_id=)``,
+``trading_performance(user_id, mode=, portfolio_id=, strategy_id=, strategy_version=)``,
 ``journal_rows(...)`` / ``to_csv(rows)`` and ``annotate(...)``.
 """
 from __future__ import annotations
@@ -115,17 +115,30 @@ def _live_row(t: Dict[str, Any]) -> Dict[str, Any]:
     return {"trade_id": t["id"], "portfolio_id": "default", "status": t["status"],
             "qty": t.get("filled_qty") or t.get("qty"), "open_qty": open_qty,
             "entry_price": t.get("entry_avg"), "exit_price": t.get("exit_avg") or ex.get("price"),
-            "exit_time": ex.get("time"), "exit_reason": ex.get("reason")}
+            # Live trades record the reason at the top level; exit_fill is {price, time}.
+            "exit_time": ex.get("time"), "exit_reason": t.get("exit_reason") or ex.get("reason")}
+
+
+def _version(v: Any) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def journal_rows(user_id: str, *, mode: str = "paper", portfolio_id: str = "default",
-                 strategy_id: Optional[str] = None, store=None, kite_store=None
-                 ) -> List[Dict[str, Any]]:
+                 strategy_id: Optional[str] = None, strategy_version: Optional[int] = None,
+                 store=None, kite_store=None) -> List[Dict[str, Any]]:
     """The filtered trades of one book, oldest first. Raises NotFound for a
-    portfolio that is not this user's."""
+    portfolio that is not this user's. ``strategy_version`` (a positive int)
+    narrows a ``strategy_id`` filter to that version; ValueError otherwise."""
     from apps.api.desk import portfolios
     from apps.api.desk.store import get_desk_store
 
+    if strategy_version is not None and (
+            strategy_id in (None, MANUAL) or isinstance(strategy_version, bool)
+            or not isinstance(strategy_version, int) or strategy_version < 1):
+        raise ValueError("strategy_version needs a strategy_id and must be a positive integer")
     store = store or get_desk_store()
     names = {p["id"]: p["name"] for p in portfolios.list_for(user_id, store)}
     if portfolio_id != ALL and portfolio_id not in names:
@@ -150,6 +163,8 @@ def journal_rows(user_id: str, *, mode: str = "paper", portfolio_id: str = "defa
         if strategy_id == MANUAL and attr["strategy_id"] is not None:
             continue
         if strategy_id not in (None, MANUAL) and attr["strategy_id"] != strategy_id:
+            continue
+        if strategy_version is not None and _version(attr["strategy_version"]) != strategy_version:
             continue
         row = {"mode": mode, "trade_date": t.get("trade_date"), "symbol": t["symbol"], **shape(t),
                **attr, "attribution": "strategy" if attr["strategy_id"] else MANUAL,
@@ -242,15 +257,15 @@ def _benchmark(rows, capital: Optional[float]) -> Dict[str, Any]:
 
 
 def trading_performance(user_id: str, *, mode: str = "paper", portfolio_id: str = "default",
-                        strategy_id: Optional[str] = None, store=None, kite_store=None
-                        ) -> Dict[str, Any]:
+                        strategy_id: Optional[str] = None, strategy_version: Optional[int] = None,
+                        store=None, kite_store=None) -> Dict[str, Any]:
     from apps.api.desk import portfolios
     from apps.api.desk.profile import load_profile
     from apps.api.desk.store import get_desk_store
 
     store = store or get_desk_store()
     rows = journal_rows(user_id, mode=mode, portfolio_id=portfolio_id, strategy_id=strategy_id,
-                        store=store, kite_store=kite_store)
+                        strategy_version=strategy_version, store=store, kite_store=kite_store)
     pfs = portfolios.list_for(user_id, store)
     # Paper capitals are never summed into one account; live uses the profile's.
     capital = (load_profile(user_id, store).capital if mode == "live" else
@@ -264,7 +279,8 @@ def trading_performance(user_id: str, *, mode: str = "paper", portfolio_id: str 
                               "strategy_name": g[-1]["strategy_name"],
                               "label": g[-1]["strategy_name"] or "Manual/legacy"})
                    for k, g in groups.items()]
-    out = {"mode": mode, "filters": {"portfolio_id": portfolio_id, "strategy_id": strategy_id},
+    out = {"mode": mode, "filters": {"portfolio_id": portfolio_id, "strategy_id": strategy_id,
+                                       "strategy_version": strategy_version},
            "generated_at": _now().isoformat(), "capital": capital,
            "realized": {"pnl_net": realized, "trades": len(closed),
                         "charges": round(sum(r["charges"] or 0 for r in closed), 2),

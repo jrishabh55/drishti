@@ -237,3 +237,60 @@ def test_existing_paper_performance_endpoint_is_unchanged(env):
     assert set(out) == {"portfolio_id", "capital", "equity", "stats", "curve", "days",
                         "comparisons", "calibration", "unmatched"}
     assert out["equity"] == 100_100.0
+
+
+# ---- fix round 1: T3-L1 live exit reason, T3-L2 strategy-version filter
+
+def test_live_journal_exit_reason_is_the_trade_top_level_reason(env):
+    desk, kite, client, *_ = env
+    kite.create_trade("user_a", {"symbol": "HDFC", "status": "closed", "trade_date": "2026-10-28",
+                                 "filled_qty": 5, "entry_avg": 100.0, "exit_avg": 99.0,
+                                 "exit_reason": "stop", "exit_fill": {"price": 99.0, "time": "11:00:00"},
+                                 "pnl_gross": -5.0, "charges": 5.0, "pnl_net": -10.0, "r_net": -1.0})
+    [row] = client.get("/api/evaluation/trading-performance?mode=live").json()["trades"]
+    assert row["exit_reason"] == "stop"
+    csv_rows = list(csv.DictReader(io.StringIO(client.get("/api/evaluation/trade-journal.csv?mode=live").text)))
+    assert csv_rows[0]["exit_reason"] == "stop"
+    paper(desk, "user_a", "SBIN")
+    [p] = client.get("/api/evaluation/trading-performance").json()["trades"]
+    assert p["exit_reason"] == "target"                         # paper: exit_fill.reason
+
+
+def test_strategy_version_filter_python_get_and_csv(env):
+    desk, _, client, user, *_ = env
+    other = {"strategy_id": "s2", "strategy_name": "VWAP", "strategy_version": 2}
+    paper(desk, "user_a", "TCS", pnl=300.0, attribution=STRAT)                         # s1 v2
+    paper(desk, "user_a", "INFY", pnl=-40.0, attribution={**STRAT, "strategy_version": 1})
+    paper(desk, "user_a", "WIPRO", pnl=10.0, attribution=other)                        # s2 v2
+    paper(desk, "user_a", "SBIN", pnl=5.0)                                             # manual
+    paper(desk, "user_b", "HDFC", pnl=999.0, attribution=STRAT)                        # not owned
+
+    rows = analytics.journal_rows("user_a", portfolio_id="all", strategy_id="s1", strategy_version=1)
+    assert [r["symbol"] for r in rows] == ["INFY"]
+    q = "/api/evaluation/trading-performance?mode=paper&portfolio_id=all"
+    v2 = client.get(q + "&strategy_id=s1&strategy_version=2").json()
+    assert [t["symbol"] for t in v2["trades"]] == ["TCS"] and v2["realized"]["pnl_net"] == 300.0
+    assert v2["filters"] == {"portfolio_id": "all", "strategy_id": "s1", "strategy_version": 2}
+    assert [(g["strategy_id"], g["strategy_version"]) for g in v2["by_strategy"]] == [("s1", 2)]
+    assert [t["symbol"] for t in client.get(q + "&strategy_id=s2&strategy_version=2").json()["trades"]] == ["WIPRO"]
+    assert client.get(q + "&strategy_id=s1&strategy_version=9").json()["trades"] == []
+    base = client.get(q + "&strategy_id=s1").json()                   # unversioned: unchanged
+    assert {t["symbol"] for t in base["trades"]} == {"TCS", "INFY"}
+    assert base["filters"]["strategy_version"] is None
+
+    r = client.get("/api/evaluation/trade-journal.csv?portfolio_id=all&strategy_id=s1&strategy_version=1")
+    assert [x["symbol"] for x in csv.DictReader(io.StringIO(r.text))] == ["INFY"]
+
+    for bad in ("&strategy_id=s1&strategy_version=0", "&strategy_id=s1&strategy_version=-1",
+                "&strategy_id=s1&strategy_version=x", "&strategy_version=1",
+                "&strategy_id=manual&strategy_version=1"):
+        assert client.get(q + bad).status_code == 422, bad
+        assert client.get("/api/evaluation/trade-journal.csv?portfolio_id=all" + bad).status_code == 422, bad
+    user["id"] = "user_b"
+    assert [t["symbol"] for t in client.get(q + "&strategy_id=s1&strategy_version=2").json()["trades"]] == ["HDFC"]
+
+
+def test_version_filter_matches_string_stamped_versions(env):
+    desk, *_ = env
+    paper(desk, "user_a", "TCS", attribution={**STRAT, "strategy_version": "3"})
+    assert [r["symbol"] for r in analytics.journal_rows("user_a", strategy_id="s1", strategy_version=3)] == ["TCS"]
