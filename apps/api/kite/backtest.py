@@ -301,7 +301,9 @@ def run(user_id: str, s: Dict[str, Any], body: BacktestBody, now: datetime, prof
     for d in days:
         day = d.isoformat()
         end = spec.local(d, spec.close_min) + timedelta(minutes=1)
-        cands = list(own)
+        # Scanner runs: own symbols + that date's matches; otherwise the
+        # effective list (a body.symbols override replaces the own list).
+        cands = list(own if definition is not None else syms)
         if panel is not None:
             matched = _scanner_matches(definition, panel, universe, d)
             scanner_out["matches"][day] = matched

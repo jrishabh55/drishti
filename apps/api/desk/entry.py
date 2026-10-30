@@ -9,7 +9,9 @@ Setups (long only, like upstream v2):
   level  the first completed bar that closes above a price (e.g. a 20-day high).
 Optional ``min_volume_x``: the trigger bar also needs at least X times the
 average volume of the opening-range bars (the 09:15 bar carries the
-pre-open auction, so 1.0 is already a high bar).
+pre-open auction, so 1.0 is already a high bar) — only those closed by the
+candidate bar's close, so a level signal inside the range never reads later
+bars. A trigger's ``opening_range`` is likewise the range as of the trigger.
 
 A trigger's time is the bar's CLOSE time and its price is that close. Bars
 count only once closed (now ≥ start + 5 min). Entries outside the profile's
@@ -67,12 +69,20 @@ def evaluate(rows: List[Row], now: datetime, *, symbol: str, setup: str = "orb",
             if setup == "orb" else ""))
         return res
     or_bars = [b for b in bars if b["slot"] < n_or]
-    avg_vol = sum(b["v"] for b in or_bars) / len(or_bars) if or_bars else None
-    if or_bars:
-        res["opening_range"] = {"high": round(max(b["h"] for b in or_bars), 2),
-                                "low": round(min(b["l"] for b in or_bars), 2),
-                                "minutes": or_minutes, "bars": len(or_bars), "of": n_or,
-                                "complete": now_min >= or_end and len(or_bars) == n_or}
+
+    def avg_vol_at(slot: int) -> Optional[float]:
+        seen = [b["v"] for b in or_bars if b["slot"] <= slot]
+        return sum(seen) / len(seen) if seen else None
+
+    def opening_range(upto: List[Dict[str, Any]], at_min: int) -> Optional[Dict[str, Any]]:
+        if not upto:
+            return None
+        return {"high": round(max(b["h"] for b in upto), 2),
+                "low": round(min(b["l"] for b in upto), 2),
+                "minutes": or_minutes, "bars": len(upto), "of": n_or,
+                "complete": at_min >= or_end and len(upto) == n_or}
+
+    res["opening_range"] = opening_range(or_bars, now_min)
     if setup == "orb":
         if now_min < or_end:
             res.update(phase="forming", reason=f"{len(or_bars)} of {n_or} range bars closed; the "
@@ -94,7 +104,8 @@ def evaluate(rows: List[Row], now: datetime, *, symbol: str, setup: str = "orb",
         if b["slot"] < first_slot or close_min < before or close_min > cutoff:
             continue
         if b["c"] > lvl:
-            vx = b["v"] / avg_vol if avg_vol else None
+            av = avg_vol_at(b["slot"])
+            vx = b["v"] / av if av else None
             if min_volume_x and (vx is None or vx < min_volume_x):
                 thin.append(b)
                 continue
@@ -107,7 +118,12 @@ def evaluate(rows: List[Row], now: datetime, *, symbol: str, setup: str = "orb",
     what = ("the range high" if setup == "orb" else "the level")
     if trig:
         close_min = spec.bar_close_min(trig["slot"])
-        vx = trig["v"] / avg_vol if avg_vol else None
+        av = avg_vol_at(trig["slot"])
+        vx = trig["v"] / av if av else None
+        # The range as it stood at the signal: a level trigger inside the
+        # range never sees (or derives a stop from) bars after it.
+        res["opening_range"] = opening_range([b for b in or_bars if b["slot"] <= trig["slot"]],
+                                             close_min)
         res.update(status="triggered", phase="open" if now_min < spec.close_min else "after-close",
                    reason=f"the {trig['start']} bar closed above {what}")
         res["trigger"] = {"time": clock24(close_min), "bar_start": trig["start"],
@@ -129,8 +145,9 @@ def evaluate(rows: List[Row], now: datetime, *, symbol: str, setup: str = "orb",
     res["phase"] = "open"
     last_close_min = spec.bar_close_min(last["slot"])
     if last["c"] > lvl and last in thin:
+        av = avg_vol_at(last["slot"])
         res["reason"] = (f"the {last['start']} bar closed above at ₹{last['c']:.2f} but on "
-                         f"{(last['v'] / avg_vol if avg_vol else 0):.2f}x the range's volume, "
+                         f"{(last['v'] / av if av else 0):.2f}x the range's volume, "
                          f"under your {min_volume_x:.2f}x")
     elif last["c"] > lvl and last_close_min < before:
         res["reason"] = (f"the {last['start']} bar closed above at ₹{last['c']:.2f}, but no "

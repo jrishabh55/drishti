@@ -194,6 +194,11 @@ def _scale_out(t: Dict[str, Any], b: Bar, level: float, at_min: int, ev) -> None
     pol = t["exit_policy"]
     if t.get("scaled_out") or not pol.get("scale_out_at_r") or b["h"] < level:
         return
+    if max(b["o"], level) >= t["target"]:
+        # Rising through the bar (or gapping past both at the open), price
+        # reaches the target no later than the scale-out level: the target
+        # exit right after this closes the whole position there.
+        return
     t["scaled_out"] = True
     q = int(t["qty"] * pol["scale_out_pct"] // 100)
     if q <= 0 or q >= t["open_qty"]:

@@ -185,7 +185,7 @@ export interface StrategySignal extends StrategyAttribution {
   date: string
   at: string
   symbol: string
-  status: 'blocked' | 'paper' | 'await_confirm' | 'expired' | 'skipped' | 'sent'
+  status: 'reserved' | 'blocked' | 'paper' | 'await_confirm' | 'expired' | 'skipped' | 'sent'
   source: string
   reason?: string
   ticket_id?: string

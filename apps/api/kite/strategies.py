@@ -23,7 +23,10 @@ bars: delayed data never becomes a live signal. Every scan records
 per-symbol diagnostics in ``last_scan``, separate from the signal list. A
 scan acts only while the stored strategy still has the version, mode and
 state it loaded, so an edit, pause (mode off + ``paused_from``, shared with
-Telegram supervision) or kill since always wins.
+Telegram supervision) or kill since always wins. Under the same user lock
+the daily cap and per-symbol dedupe are counted on the STORED signals and a
+``reserved`` signal is written before any paper/live side effect, so two
+overlapping scans (sweep + manual Scan) never spend one slot twice.
 """
 from __future__ import annotations
 
@@ -313,7 +316,26 @@ def scan(user_id: str, s: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
                 outcomes[sym] = _outcome("blocked", "the strategy changed, paused or was killed "
                                                     "during this scan", **src)
                 break
+            # The daily quota and per-symbol dedupe come from the STORED
+            # signals (another scan may have acted since this one loaded),
+            # and the slot is reserved there before any side effect.
+            spent = {g["id"]: g for g in fresh.get("signals") or [] if g["date"] == today}
+            spent.update({g["id"]: g for g in new})
+            cap = fresh.get("max_signals_per_day") or 1
+            if len(spent) >= cap:
+                outcomes[sym] = _outcome("limit_reached", f"{cap} "
+                                                          "signal(s) a day already used", **src)
+                continue
+            if sym in {g.get("symbol") for g in spent.values()}:
+                outcomes[sym] = _outcome("limit_reached", "already signalled today", **src)
+                continue
+            base["id"] = f"{_local(now):%H%M%S}-{uuid.uuid4().hex[:6]}"
+            # ponytail: a crash after this leaves "reserved" spending the slot all day —
+            # fail closed; a reaper would need to know whether the side effect happened.
+            _persist(user_id, s.get("id"), {"date": today, "at": now.isoformat(),
+                                        **attribution(s), **base, "status": "reserved"})
             sig = _act(user_id, s, sym, base, ev, now)
+            _persist(user_id, s.get("id"), sig)
             new.append(sig)
             outcomes[sym] = _outcome(sig["status"], sig.get("reason", ""), **src)
     diag = {"at": now.isoformat(), "version": version_of(s), "mode": mode,
@@ -386,6 +408,18 @@ def _auto_send(user_id: str, s: Dict[str, Any], tk: Dict[str, Any], base: Dict[s
                        reason=f"Kite refused the entry: {trade['rejected_by_broker']}", **base)
     return _signal(s, now, status="sent", ticket_id=tk["id"], kite_trade_id=trade["id"],
                    order=tk["order"], **base)
+
+
+def _persist(user_id: str, sid: Optional[str], sig: Dict[str, Any]) -> None:
+    """Upsert one signal (by id) on the stored strategy, under the caller's user lock."""
+    if not sid:
+        return
+    store = get_kite_store()
+    fresh = store.get_strategy(sid, user_id)
+    if fresh is None:
+        return
+    sigs = [g for g in fresh.get("signals") or [] if g["id"] != sig["id"]] + [sig]
+    store.put_strategy(user_id, dict(fresh, signals=sigs[-MAX_SIGNALS_KEPT:]))
 
 
 def _save(user_id: str, s: Dict[str, Any], new: List[Dict[str, Any]], changed: bool,
