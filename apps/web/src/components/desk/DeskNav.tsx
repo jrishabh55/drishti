@@ -17,7 +17,7 @@ const TABS = [
 
 export function DeskNav() {
   return (
-    <nav className="flex flex-wrap items-center gap-1 border-b border-[var(--line-1)] pb-2">
+    <nav className="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-[var(--line-1)] pb-2">
       {TABS.map((t) => (
         <Link
           key={t.to}
@@ -29,7 +29,7 @@ export function DeskNav() {
           {t.label}
         </Link>
       ))}
-      <div className="ml-auto"><PortfolioPicker /></div>
+      <div className="flex w-full min-w-0 items-center pt-1 sm:ml-auto sm:w-auto sm:pt-0"><PortfolioPicker /></div>
     </nav>
   )
 }

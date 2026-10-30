@@ -142,7 +142,7 @@ export function Topbar({
         <div className="es-logo-mark">D</div>
         Drishti
       </Link>
-      <nav className="es-nav">
+      <nav className="es-nav" aria-label="Main navigation">
         <Link
           to="/analyse"
           className="es-nav-link no-underline"
@@ -180,6 +180,7 @@ export function Topbar({
         </div>
       )}
       <div className="es-spacer" />
+      <div className="es-topbar-actions">
       {state === 'running' && (
         <span className="es-pill run">
           <span className="es-dot pulse" />
@@ -227,6 +228,7 @@ export function Topbar({
           owns its own layout slot — no fixed-position overlay fighting
           with page buttons. */}
       <UserButton />
+      </div>
     </div>
   )
 }
