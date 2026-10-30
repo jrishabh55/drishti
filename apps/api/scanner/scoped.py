@@ -1,23 +1,45 @@
 """Disposable private scanner snapshots. No writes to ScannerStore or engine caches."""
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pandas as pd
 
 from apps.api.desk.market.session import NSE
 from apps.api.kite import live, sharing
-from apps.api.scanner.engine import ScanEngine
+from apps.api.scanner.engine import ScanEngine, get_engine
 
 COLS = ['symbol', 'ts', 'open', 'high', 'low', 'close', 'volume']
 
 
 class ScopedEngine(ScanEngine):
+    def _resolve_panels(self, timeframes):
+        if self._store.hub is not None:
+            return super()._resolve_panels(timeframes)
+        # Public users share the versioned snapshot published/warmed by ingest.
+        # Filter its small time index, never rebuild/pivot the long bar table or
+        # mutate the cached Panel (legacy run() must keep its original view).
+        cached = get_engine()._resolve_panels(timeframes)
+        panels = {}
+        for tf, panel in cached.items():
+            index = panel.close.index
+            local = index.tz_localize(NSE.tz) if index.tz is None else index.tz_convert(NSE.tz)
+            keep = self._store.completed_index(local, tf)
+            frames = {fld: getattr(panel, fld).loc[keep]
+                      for fld in ('open', 'high', 'low', 'close', 'volume')}
+            panels[tf] = replace(panel, **frames)
+            if tf not in ('1w', '1mo'):
+                close = frames['close']
+                self._store.sources[tf] = dict.fromkeys(close.columns[close.notna().any()], 'delayed:yahoo')
+                self._store.panel_times[tf] = close.index.max().isoformat() if len(close) else None
+        return panels
+
     def _build_panel(self, timeframe):
         panel = super()._build_panel(timeframe)
         if timeframe in ('1w', '1mo'):
             # W/ME labels are the period's last date. Require it to pass.
             for fld in ('open', 'high', 'low', 'close', 'volume'):
                 frame = getattr(panel, fld)
-                frame = frame.loc[[self._store.local(ts.to_pydatetime()) + timedelta(days=1) <= self._store.now for ts in frame.index]]
+                frame = frame.loc[self._store.completed_index(frame.index, timeframe)]
                 setattr(panel, fld, frame)
         return panel
 
@@ -30,6 +52,7 @@ class ScopedStore:
         self.hub = live.get_hub(self.owner) if live.access_valid(user_id, self.owner, now) else None
         self.sources = {}
         self.frames = {}
+        self.panel_times = {}
 
     def instruments_df(self):
         return self.public.instruments_df()
@@ -38,10 +61,12 @@ class ScopedStore:
         return 0  # one disposable engine per immutable snapshot
 
     def latest_ts(self, timeframe):
+        if timeframe in self.panel_times:
+            return self.panel_times[timeframe]
         df = self.frames.get(timeframe)
         if df is None:
             return None
-        return df.ts.max() if len(df) else None
+        return df.ts.max().isoformat() if len(df) else None
 
     def load_bars(self, timeframe, limit=320):
         if timeframe in self.frames:
@@ -49,9 +74,10 @@ class ScopedStore:
         public = self.public.load_bars(timeframe, limit)
         # Drop forming candles from both sources before any condition/indicator.
         if len(public):
-            public = public.loc[public.ts.map(lambda ts: self.complete(pd.Timestamp(ts).to_pydatetime(), timeframe))]
-        daily_latest = (pd.to_datetime(public.ts, format='mixed', utc=True).dt.tz_convert(NSE.tz)
-                        .groupby(public.symbol).max()) if timeframe == '1d' else {}
+            public = public.copy()
+            public['ts'] = self.local_times(public.ts)
+            public = public.loc[self.completed_index(pd.DatetimeIndex(public.ts), timeframe)]
+        daily_latest = public.groupby('symbol').ts.max() if timeframe == '1d' else {}
         private = {}
         if self.hub:
             for sym in self.hub.symbols:
@@ -79,17 +105,35 @@ class ScopedStore:
         self.sources[timeframe] = {s: 'live:kite' if s in private else 'delayed:yahoo'
                                    for s in set(public.symbol) | set(private)}
         frames = [public.loc[~public.symbol.isin(private)]]
-        frames.append(pd.DataFrame([(s, r[0].isoformat(), *r[1:]) for s, rows in private.items() for r in rows], columns=COLS))
+        frames.append(pd.DataFrame([(s, self.local(r[0]), *r[1:]) for s, rows in private.items() for r in rows], columns=COLS))
         frame = pd.concat(frames, ignore_index=True)
         # Normalize mixed public naive / Kite aware timestamps for pivot ordering.
         if len(frame):
-            frame['ts'] = frame.ts.map(lambda ts: self.local(pd.Timestamp(ts).to_pydatetime()).isoformat())
+            frame['ts'] = pd.to_datetime(frame.ts)
         self.frames[timeframe] = frame
         return frame
 
     @staticmethod
     def local(ts):
         return ts.replace(tzinfo=NSE.tz) if ts.tzinfo is None else ts.astimezone(NSE.tz)
+
+    @staticmethod
+    def local_times(values):
+        # Public timestamps are exchange-local when naive. Handle mixed ISO
+        # formats/offsets in vectorized batches without a Python call per bar.
+        aware = values.astype(str).str.contains(r'(?:Z|[+-]\d{2}:?\d{2})$', regex=True)
+        parsed = pd.to_datetime(values, format='mixed', utc=True)
+        parsed = parsed.where(aware, parsed - pd.Timedelta(hours=5, minutes=30))
+        return parsed.dt.tz_convert(NSE.tz)
+
+    def completed_index(self, local, timeframe):
+        if timeframe in ('1w', '1mo'):
+            end = local.normalize() + pd.Timedelta(days=1)
+        elif timeframe == '1d':
+            end = local.normalize() + pd.Timedelta(minutes=NSE.close_min, seconds=2)
+        else:
+            end = local + pd.Timedelta(minutes={'5m': 5, '15m': 15, '1h': 60}[timeframe], seconds=2)
+        return end <= self.now
 
     def complete(self, ts, timeframe):
         ts = self.local(ts)
