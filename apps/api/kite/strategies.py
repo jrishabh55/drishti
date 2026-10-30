@@ -22,7 +22,8 @@ Confirm/auto run on the Default portfolio only and need live (``live:``)
 bars: delayed data never becomes a live signal. Every scan records
 per-symbol diagnostics in ``last_scan``, separate from the signal list. A
 scan acts only while the stored strategy still has the version, mode and
-pause state it loaded, so an edit, pause or kill since always wins.
+state it loaded, so an edit, pause (mode off + ``paused_from``, shared with
+Telegram supervision) or kill since always wins.
 """
 from __future__ import annotations
 
@@ -217,6 +218,19 @@ def expire_signals(user_id: str, s: Dict[str, Any], now: datetime) -> bool:
     return changed
 
 
+def confirmed_rows(rows: list, source: str, now: datetime, spec) -> Tuple[list, Optional[str]]:
+    """A delayed feed's newest cached row for today may be a partial OHLC
+    snapshot that only LOOKS complete by the clock (as in the ORB scan): hold
+    it back until a later row confirms it. Live rows come off the bar grid
+    and are complete once their interval has passed."""
+    if not source.startswith("delayed:") or not rows:
+        return rows, None
+    newest = max(rows, key=lambda r: r[0])
+    if spec.to_local(newest[0]).date() != now.astimezone(spec.tz).date():
+        return rows, None
+    return [r for r in rows if r is not newest], newest[0].isoformat()
+
+
 def _outcome(status: str, reason: str = "", **kw: Any) -> Dict[str, Any]:
     return {"status": status, "reason": reason, **kw}
 
@@ -227,7 +241,7 @@ def scan(user_id: str, s: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
     changed = expire_signals(user_id, s, now)
     new: List[Dict[str, Any]] = []
     mode = s.get("mode")
-    if mode not in ACTIVE_MODES or s.get("paused"):
+    if mode not in ACTIVE_MODES:
         _save(user_id, s, new, changed)
         return new
     interval = s.get("interval") or "5m"
@@ -250,7 +264,8 @@ def scan(user_id: str, s: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
         try:
             series = bars_source.get_session_rows(user_id, sym, interval, now=now)
             sources.add(series.source)
-            ev = entry_mod.evaluate(series.rows, now, symbol=sym, setup=s["setup"],
+            rows, held_back = confirmed_rows(series.rows, series.source, now, spec)
+            ev = entry_mod.evaluate(rows, now, symbol=sym, setup=s["setup"],
                                     or_minutes=s["or_minutes"], level=s.get("level"),
                                     min_volume_x=s.get("min_volume_x"),
                                     no_entries_before=prof.no_entries_before,
@@ -261,6 +276,8 @@ def scan(user_id: str, s: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
             outcomes[sym] = _outcome("no_data", str(exc))
             continue
         src = {"source": series.source, "data_as_of": series.data_as_of}
+        if held_back:
+            src["held_back"] = held_back
         if ev["status"] == "no-data":
             outcomes[sym] = _outcome("no_data", ev["reason"], **src)
             continue
@@ -287,7 +304,7 @@ def scan(user_id: str, s: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
             # strategy is still this version, mode and pause state, and (auto)
             # still opted in: a kill, pause or edit since this scan loaded it wins.
             fresh = store.get_strategy(s["id"], user_id) if s.get("id") else s
-            if not fresh or fresh.get("mode") != mode or fresh.get("paused") \
+            if not fresh or fresh.get("mode") != mode \
                     or version_of(fresh) != version_of(s) \
                     or (mode == "auto" and not opted_in(fresh)) \
                     or execution.control(user_id, now)["killed"]:

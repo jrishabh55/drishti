@@ -450,8 +450,8 @@ def update_strategy(sid: str, body: Dict[str, Any], user_id: str = Depends(curre
         if valid["mode"] != "off":
             _killed_409(user_id)
         doc = dict(valid, id=sid, signals=old.get("signals") or [],
-                   version=strategies.version_of(old) + 1, paused=bool(old.get("paused")),
-                   last_scan=old.get("last_scan"))
+                   version=strategies.version_of(old) + 1, last_scan=old.get("last_scan"),
+                   paused_from=old.get("paused_from") if valid["mode"] == "off" else None)
         return get_kite_store().put_strategy(user_id, doc)
 
 
@@ -473,19 +473,33 @@ def scan_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str
 
 @router.post("/kite/strategies/{sid}/pause")
 def pause_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
-    """Stop acting without losing the mode; not a new version."""
+    """mode → off, remembering ``paused_from`` (the Telegram contract); not a
+    new version. A running scan sees the mode change and stops acting."""
     with execution.user_lock(user_id):
         s = _own_strategy(sid, user_id)
-        return get_kite_store().put_strategy(user_id, dict(s, paused=True))
+        if s.get("mode") == "off":
+            return s
+        return get_kite_store().put_strategy(user_id, dict(s, mode="off", paused_from=s["mode"]))
+
+
+class ResumeBody(BaseModel):
+    mode: Literal["paper", "confirm"] = "paper"
 
 
 @router.post("/kite/strategies/{sid}/resume")
-def resume_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
-    """Resume never arms live trading and never overrides today's kill."""
+def resume_strategy(sid: str, body: Optional[ResumeBody] = None,
+                    user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    """Resume to Paper (Confirm only when asked, Default only). Never Auto,
+    never arms, never overrides today's kill, and clears any auto opt-in."""
+    mode = (body or ResumeBody()).mode
     with execution.user_lock(user_id):
         s = _own_strategy(sid, user_id)
+        if s.get("mode") != "off" or not s.get("paused_from"):
+            raise HTTPException(status_code=409, detail="the strategy isn't paused")
         _killed_409(user_id)
-        return get_kite_store().put_strategy(user_id, dict(s, paused=False))
+        doc = dict(s, mode=mode, paused_from=None, auto_opt_in=None)
+        _valid({k: doc.get(k) for k in strategies.Strategy.model_fields}, user_id)
+        return get_kite_store().put_strategy(user_id, doc)
 
 
 class AutoOptInBody(BaseModel):

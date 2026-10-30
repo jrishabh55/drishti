@@ -233,13 +233,14 @@ export interface Strategy {
   exit_policy: ExitPolicy | null
   version?: number
   paused_reason?: string
-  paused?: boolean
+  /** Set by a pause (app or Telegram): mode is off and resume restores Paper/Confirm, never Auto. */
+  paused_from?: StrategyMode | null
   auto_opt_in?: { version: number; at: string } | null
   last_scan?: StrategyLastScan | null
   signals: StrategySignal[]
 }
 
-type ServerOwned = 'id' | 'signals' | 'version' | 'paused_reason' | 'paused' | 'auto_opt_in' | 'last_scan'
+type ServerOwned = 'id' | 'signals' | 'version' | 'paused_reason' | 'paused_from' | 'auto_opt_in' | 'last_scan'
 export type StrategyInput = Omit<Strategy, ServerOwned>
 
 export interface BacktestRequest {
@@ -347,7 +348,8 @@ export const kite = {
     post<KiteTrade>(`/kite/strategies/${sid}/signals/${sig}/confirm`, { confirm_text }),
   skipSignal: (sid: string, sig: string) => post<StrategySignal>(`/kite/strategies/${sid}/signals/${sig}/skip`),
   pauseStrategy: (id: string) => post<Strategy>(`/kite/strategies/${id}/pause`),
-  resumeStrategy: (id: string) => post<Strategy>(`/kite/strategies/${id}/resume`),
+  resumeStrategy: (id: string, mode: 'paper' | 'confirm' = 'paper') =>
+    post<Strategy>(`/kite/strategies/${id}/resume`, { mode }),
   autoOptIn: (id: string, ack: string) => post<Strategy>(`/kite/strategies/${id}/auto-opt-in`, { ack }),
   autoOptOut: (id: string) => kfetch<Strategy>(`/kite/strategies/${id}/auto-opt-in`, { method: 'DELETE' }),
   backtests: (strategy_id?: string) =>

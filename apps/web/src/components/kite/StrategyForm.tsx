@@ -16,7 +16,7 @@ export const BLANK_STRATEGY: StrategyInput = {
 /** Editable fields only; legacy strategies get the new fields' defaults. */
 export function toInput(s: Strategy): StrategyInput {
   const {
-    id: _id, signals: _sig, version: _v, paused_reason: _p, paused: _pa, auto_opt_in: _a, last_scan: _l, ...rest
+    id: _id, signals: _sig, version: _v, paused_reason: _p, paused_from: _pa, auto_opt_in: _a, last_scan: _l, ...rest
   } = s
   return { ...BLANK_STRATEGY, ...rest }
 }

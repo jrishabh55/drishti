@@ -150,16 +150,21 @@ def test_diagnostics_record_each_symbol_outcome(env):
     assert len(get_kite_store().get_strategy(s["id"], "user_a")["signals"]) == 1
 
 
-def test_delayed_data_never_becomes_a_live_confirm_signal(env):
-    client, _, _, _, clock = env
-
-    def delayed(user_id, symbol, interval, kind):
+def _delayed(rows):
+    def provider(user_id, symbol, interval, kind):
         if kind == "session" and symbol == "SBIN":
-            rows = _breakout_rows()
             return bars_source.BarSeries(symbol, interval, rows, "delayed:yahoo",
                                          rows[-1][0].isoformat())
-    bars_source.register_live_provider(delayed)
-    clock["now"] = ist(9, 36)
+    return provider
+
+
+def test_delayed_data_never_becomes_a_live_confirm_signal(env):
+    client, _, _, _, clock = env
+    rows = session_rows(DAY, [800.0, 801.0, 800.5, 802.5, 803.0],
+                        highs=[801.0, 801.5, 801.0, 803.0, 803.3],
+                        lows=[799.0, 800.0, 800.0, 801.0, 802.6])   # breakout confirmed by a later row
+    bars_source.register_live_provider(_delayed(rows))
+    clock["now"] = ist(9, 41)
     s = _strategy(client, mode="confirm")
     assert client.post(f"/api/kite/strategies/{s['id']}/scan").json()["new"] == []
     out = get_kite_store().get_strategy(s["id"], "user_a")["last_scan"]["outcomes"]["SBIN"]
@@ -167,16 +172,45 @@ def test_delayed_data_never_becomes_a_live_confirm_signal(env):
 
 
 def test_pause_stops_scans_and_resume_never_overrides_kill(env):
+    # Same contract as Telegram supervision: pause = mode off + paused_from,
+    # not a new version; resume restores Paper (Confirm only when asked), never Auto.
     client, desk, _, _, clock = env
     bars_source.register_live_provider(_breakout_provider(_breakout_rows()))
     clock["now"] = ist(9, 36)
     s = _strategy(client, mode="paper")
-    assert client.post(f"/api/kite/strategies/{s['id']}/pause").json()["paused"] is True
+    p = client.post(f"/api/kite/strategies/{s['id']}/pause").json()
+    assert (p["mode"], p["paused_from"], p["version"]) == ("off", "paper", 1)
     assert client.post(f"/api/kite/strategies/{s['id']}/scan").json()["new"] == []
     assert desk.get("/api/desk/paper").json()["trades"] == []
-    assert client.post(f"/api/kite/strategies/{s['id']}/resume").json()["paused"] is False
+    r = client.post(f"/api/kite/strategies/{s['id']}/resume").json()
+    assert (r["mode"], r.get("paused_from")) == ("paper", None)
+    a = _strategy(client, mode="auto")
+    client.post(f"/api/kite/strategies/{a['id']}/auto-opt-in", json={"ack": "AUTO orb"})
+    client.post(f"/api/kite/strategies/{a['id']}/pause")
+    assert client.post(f"/api/kite/strategies/{a['id']}/resume", json={"mode": "auto"}).status_code == 422
+    r = client.post(f"/api/kite/strategies/{a['id']}/resume", json={"mode": "confirm"}).json()
+    assert r["mode"] == "confirm" and not r.get("auto_opt_in")
+    client.post(f"/api/kite/strategies/{s['id']}/pause")
     client.post("/api/kite/kill")
     assert client.post(f"/api/kite/strategies/{s['id']}/resume").status_code == 409
+
+
+def test_newest_delayed_row_is_held_back_until_a_later_row_confirms_it(env):
+    client, desk, _, _, clock = env
+    rows = _breakout_rows()                                          # breakout is the newest row
+    bars_source.register_live_provider(_delayed(rows))
+    clock["now"] = ist(9, 41)
+    s = _strategy(client, mode="paper")
+    assert client.post(f"/api/kite/strategies/{s['id']}/scan").json()["new"] == []
+    out = get_kite_store().get_strategy(s["id"], "user_a")["last_scan"]["outcomes"]["SBIN"]
+    assert out["status"] == "waiting" and out["held_back"] == rows[-1][0].isoformat()
+    bars_source.clear_live_providers_for_tests()
+    more = rows + session_rows(DAY, [800.0, 801.0, 800.5, 802.5, 803.0],
+                               highs=[801.0, 801.5, 801.0, 803.0, 803.3],
+                               lows=[799.0, 800.0, 800.0, 801.0, 802.6])[4:]
+    bars_source.register_live_provider(_delayed(more))
+    new = client.post(f"/api/kite/strategies/{s['id']}/scan").json()["new"]
+    assert new and new[0]["status"] == "paper" and new[0]["source"] == "delayed:yahoo"
 
 
 # ---------------------------------------------------------------- auto mode

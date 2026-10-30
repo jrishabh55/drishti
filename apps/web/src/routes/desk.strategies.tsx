@@ -181,7 +181,7 @@ function StrategiesPage() {
                 <Pill tone={s.mode === 'off' ? 'warn' : s.mode === 'paper' ? 'info' : 'ok'}>
                   {MODES.find((m) => m.value === s.mode)?.label}
                 </Pill>
-                {s.paused && <Pill tone="warn">PAUSED</Pill>}
+                {s.paused_from && s.mode === 'off' && <Pill tone="warn">PAUSED from {s.paused_from}</Pill>}
                 <span className="text-xs text-[var(--text-3)]">
                   v{s.version ?? 1} · {s.interval ?? '5m'} · {portfolios.find((p) => p.id === (s.portfolio_id ?? 'default'))?.name ?? 'Default'}
                   {s.scanner_id ? ` · scanner ${scanners.find((x) => x.id === s.scanner_id)?.name ?? s.scanner_id}` : ''}
@@ -189,12 +189,15 @@ function StrategiesPage() {
                 <span className="es-mono text-[var(--text-3)]">{s.symbols.join(' ')}</span>
                 {s.paused_reason && <span className="text-xs text-[var(--err)]">stopped by {s.paused_reason}</span>}
                 <span className="flex-1" />
-                <Button size="sm" variant="outline" disabled={busy || s.mode === 'off' || !!s.paused}
+                <Button size="sm" variant="outline" disabled={busy || s.mode === 'off'}
                   onClick={() => void run(() => kite.scanStrategy(s.id))}>Scan now</Button>
-                <Button size="sm" variant="outline" disabled={busy}
-                  onClick={() => void run(() => (s.paused ? kite.resumeStrategy(s.id) : kite.pauseStrategy(s.id)))}>
-                  {s.paused ? 'Resume' : 'Pause'}
-                </Button>
+                {s.mode !== 'off' && (
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => kite.pauseStrategy(s.id))}>Pause</Button>
+                )}
+                {s.mode === 'off' && s.paused_from && (
+                  <Button size="sm" variant="outline" disabled={busy} title="Resumes in Paper; never Auto, never arms"
+                    onClick={() => void run(() => kite.resumeStrategy(s.id))}>Resume (Paper)</Button>
+                )}
                 <Button size="sm" variant="outline" onClick={() => setTesting(testing === s.id ? null : s.id)}>Backtest</Button>
                 <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, init: toInput(s) })}>Edit</Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => kite.deleteStrategy(s.id))}>Delete</Button>

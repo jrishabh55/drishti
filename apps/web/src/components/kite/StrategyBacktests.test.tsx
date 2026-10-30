@@ -40,11 +40,11 @@ it('drops blank exit inputs so an empty policy keeps the fixed stop/target', () 
 })
 
 it('gives legacy strategies the new defaults and strips server-owned fields', () => {
-  const legacy = { ...BLANK_STRATEGY, id: 's', signals: [], version: 3, paused: true, auto_opt_in: null, last_scan: null } as Strategy
+  const legacy = { ...BLANK_STRATEGY, id: 's', signals: [], version: 3, paused_from: 'paper', auto_opt_in: null, last_scan: null } as Strategy
   const { portfolio_id, interval, exit_policy, ...rest } = toInput(legacy)
   expect([portfolio_id, interval, exit_policy]).toEqual(['default', '5m', null])
   expect(rest).not.toHaveProperty('version')
-  expect(rest).not.toHaveProperty('paused')
+  expect(rest).not.toHaveProperty('paused_from')
 })
 
 it('live modes hide paper-only exits and save on the Default portfolio', () => {
