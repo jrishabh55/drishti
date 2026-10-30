@@ -7,10 +7,13 @@ The opening range is the high and low of the first ``or_minutes`` of the
 session (15 = the 09:15, 09:20 and 09:25 bars). A *hit* is the first
 COMPLETED bar after the range that CLOSES above the range high — a wick
 above it is not a breakout. A symbol is scanned only when every bar from
-09:15 to the cutoff is present (a gap would hide or invent a breakout).
+09:15 to its evaluation cutoff is present (a gap would hide or invent a
+breakout). Automatic delayed scans use each fresh chart's latest completed
+bar; explicit replays and live scans require the requested cutoff.
 
-Input bars come from the bar seam (scanner store: Yahoo, ~15–20 min
-delayed), so ``as_of`` is honest about what "so far" means.
+Input bars come from the bar seam (scanner store: Yahoo, delayed).
+``as_of`` is the requested exchange-clock cutoff; ``data_as_of`` identifies
+the newest bar actually evaluated.
 """
 from __future__ import annotations
 
@@ -145,6 +148,12 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
     hits: List[Dict[str, Any]] = []
     newest_bar = None
     as_of = cutoff.astimezone(timezone.utc)
+    # Yahoo arrives behind the exchange clock, sometimes by different amounts
+    # per symbol. A complete delayed prefix is usable; an internal hole is not.
+    # Keep explicit replays, live feeds and after-close full sessions strict.
+    rolling_delayed = (source.startswith("delayed:") and at is None and day is None
+                       and cutoff < spec.local(d, spec.close_min))
+    delayed_window = False
     for sym in syms:
         rows = rows_by_symbol.get(sym)
         if not rows:
@@ -152,10 +161,21 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
         counts["with_data"] += 1
         bars, _ = session_bars(rows, spec, as_of)
         bars = [b for b in bars if b["date"] == d.isoformat()]
+        chart_cutoff = cutoff
+        if rolling_delayed and bars:
+            last_start = spec.local(d, spec.open_min + bars[-1]["slot"] * spec.bar_min)
+            # Match ingest's freshness tolerance on the latest received row.
+            # Its OHLC may be a cached partial snapshot: a later row confirms
+            # the preceding bar is complete, whereas wall time alone cannot.
+            if last_start >= cutoff - timedelta(minutes=30):
+                bars = bars[:-1]
+                if len(bars) > n_range:
+                    chart_cutoff = last_start
+                    delayed_window = True
         if bars:
-            stamp = spec.local(d, spec.open_min + max(bar["slot"] for bar in bars) * spec.bar_min)
+            stamp = spec.local(d, spec.open_min + bars[-1]["slot"] * spec.bar_min)
             newest_bar = max(newest_bar, stamp) if newest_bar is not None else stamp
-        if not usable(bars, cutoff, n_range, spec):
+        if not usable(bars, chart_cutoff, n_range, spec):
             counts["unusable"] += 1
             continue
         value = (avg_value_cr or {}).get(sym)
@@ -176,11 +196,20 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
     late = last_entry_min is not None and \
         cutoff.hour * 60 + cutoff.minute > last_entry_min
     notes = []
+    if delayed_window:
+        notes.append("Delayed feed: each chart is evaluated through its latest completed bar. "
+                     "The newest cached bar is held back until a later bar confirms completion; "
+                     "missing bars within that window still exclude a chart.")
     if late and not after_close:
         notes.append(f"It's after {no_entries_after}, your last time for new entries: these "
                      "breakouts are for review, not for entering now.")
     if after_close:
         notes.append("The session is over: this is a replay of today's breakouts.")
+        if (source.startswith("delayed:") and day is None and at is None
+                and counts["unusable"] and (newest_bar is None or newest_bar <
+                                            spec.local(d, spec.close_min - spec.bar_min))):
+            notes.append("Waiting for the delayed feed's final session bars; incomplete charts "
+                         "cannot be included in the full-session replay yet.")
     return {"date": d.isoformat(), "as_of": cutoff.isoformat(), "data_as_of": newest_bar.isoformat() if newest_bar is not None else None, "or_minutes": or_minutes,
             "range": f"09:15–{clock24(spec.open_min + or_minutes)}", "source": source,
             "counts": counts, "hits": hits, "notes": notes,

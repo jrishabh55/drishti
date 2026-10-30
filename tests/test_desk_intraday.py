@@ -45,6 +45,57 @@ def test_orb_scan_finds_close_breakouts_not_wicks_or_gappy_charts():
     assert hit["or_high"] == 102.0 and hit["or_low"] == 100.6 and hit["price"] == 102.5
 
 
+def test_delayed_scan_evaluates_each_contiguous_chart_at_its_available_close():
+    # Wall clock 10:15, latest available bars start at 09:55 / 09:50.
+    # Normal vendor lag must not make either complete prefix unusable.
+    gap = [r for i, r in enumerate(brk_rows()) if i != 5]
+    doc = orb.scan({"BRK": brk_rows(), "SLOW": brk_rows(8), "GAP": gap}, ist(10, 15))
+    assert doc["counts"]["scanned"] == 2
+    assert doc["counts"]["unusable"] == 1
+    assert [h["symbol"] for h in doc["hits"]] == ["BRK", "SLOW"]
+    assert doc["data_as_of"].startswith("2026-10-28T09:50")
+    assert doc["as_of"].startswith("2026-10-28T10:15")
+    assert any("latest completed bar" in n for n in doc["notes"])
+
+
+def test_newest_cached_close_cannot_create_a_delayed_breakout_until_a_later_bar_arrives():
+    # The cached final row could have been fetched while still forming.
+    doc = orb.scan({"BRK": brk_rows(5)}, ist(10, 0))
+    assert doc["counts"]["scanned"] == 1
+    assert doc["hits"] == []
+    assert doc["data_as_of"].startswith("2026-10-28T09:30")
+    # Arrival of the 09:40 bar confirms the 09:35 close, which may now trigger.
+    doc = orb.scan({"BRK": brk_rows(6)}, ist(10, 0))
+    assert doc["hits"][0]["bar_start"] == "09:35"
+    assert doc["data_as_of"].startswith("2026-10-28T09:35")
+
+
+def test_delayed_scan_excludes_stale_and_opening_range_only_charts():
+    doc = orb.scan({"STALE": brk_rows(4), "FRESH": brk_rows()}, ist(10, 15))
+    assert doc["counts"]["scanned"] == 1
+    assert doc["counts"]["unusable"] == 1
+    # The range exists, but there is no completed post-range bar to evaluate.
+    doc = orb.scan({"RANGE": brk_rows(3)}, ist(9, 40))
+    assert doc["counts"]["scanned"] == 0
+    assert doc["counts"]["unusable"] == 1
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"at": "10:15"}, {"day": DAY}, {"source": "live:kite"},
+])
+def test_explicit_replay_and_live_scans_still_require_every_bar_to_cutoff(kwargs):
+    doc = orb.scan({"BRK": brk_rows()}, ist(10, 15), **kwargs)
+    assert doc["counts"]["scanned"] == 0
+    assert doc["counts"]["unusable"] == 1
+
+
+def test_delayed_scan_does_not_treat_partial_after_close_data_as_a_full_session():
+    doc = orb.scan({"BRK": brk_rows()}, ist(15, 40))
+    assert doc["counts"]["scanned"] == 0
+    assert doc["counts"]["unusable"] == 1
+    assert any("final session bars" in note for note in doc["notes"])
+
+
 def test_orb_window_refuses_before_the_first_post_range_bar_and_on_holidays():
     with pytest.raises(orb.ORBError, match="first bar after"):
         orb.scan({"BRK": brk_rows()}, ist(9, 33), or_minutes=15)
@@ -176,3 +227,14 @@ def test_api_orb_entry_and_plan_lifecycle(api):
                                                     "stop_rule": "pct", "stop_param": 1,
                                                     "setup": "level"}).status_code == 200
     assert client.delete(f"/api/desk/plans/{pid}").status_code == 204
+
+
+def test_api_orb_accepts_normal_delayed_feed_without_filling_internal_gaps(api, monkeypatch):
+    client, _ = api
+    monkeypatch.setattr(desk_routes, "_now", lambda: ist(10, 15))
+    response = client.get("/api/desk/orb")
+    assert response.status_code == 200
+    doc = response.json()
+    assert doc["counts"]["scanned"] == 2
+    assert doc["counts"]["unusable"] == 0
+    assert [h["symbol"] for h in doc["hits"]] == ["BRK"]
