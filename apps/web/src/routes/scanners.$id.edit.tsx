@@ -20,7 +20,7 @@ function EditPage() {
   return (
     <div className="min-h-screen">
       <Topbar />
-      <main className="mx-auto w-full max-w-[1800px] space-y-4 px-6 py-4">
+      <main data-guide="guide-scanners" className="mx-auto w-full max-w-[1800px] space-y-4 px-6 py-4">
         <h1 className="text-2xl font-bold">Edit — {scanner.name}</h1>
         <ScannerBuilder initial={scanner} />
       </main>

@@ -4,6 +4,7 @@ import { Moon, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { api } from '../../lib/api'
+import { GuideButton } from '#/guide/GuideProvider'
 
 /** Dark/light switch. The source of truth is the class on <html> (set before
  *  hydration by the init script in __root.tsx); this button just flips it and
@@ -220,6 +221,7 @@ export function Topbar({
         New analysis
       </Link>
       <CreditsPill />
+      <GuideButton />
       <ThemeToggle />
       {/* Sign-out / account menu lives at the end of the topbar so it
           owns its own layout slot — no fixed-position overlay fighting

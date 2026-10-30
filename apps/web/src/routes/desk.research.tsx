@@ -68,7 +68,7 @@ function ResearchPage() {
   return (
     <div className="min-h-screen">
       <Topbar state="idle" />
-      <main className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
+      <main data-guide="guide-research" className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
         <h1 className="text-2xl font-bold">Research</h1>
         <DeskNav />
         <div className="flex flex-wrap items-start gap-3">

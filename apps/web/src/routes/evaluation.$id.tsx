@@ -51,7 +51,7 @@ function BatchPage() {
   return (
     <div className="min-h-screen">
       <Topbar state="idle" />
-      <main className="mx-auto w-full max-w-[1100px] space-y-6 px-6 py-4">
+      <main data-guide="guide-backtests" className="mx-auto w-full max-w-[1100px] space-y-6 px-6 py-4">
         <div className="flex items-center gap-3">
           <Link to="/evaluation" className="text-sm">← Batches</Link>
           <h1 className="text-2xl font-bold">Backtest batch</h1>

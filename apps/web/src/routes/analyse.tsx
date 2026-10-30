@@ -12,5 +12,5 @@ export const Route = createFileRoute('/analyse')({
 
 function AnalysePage() {
   const { ticker } = Route.useSearch()
-  return <FlowLanding initialTicker={ticker} />
+  return <div data-guide="guide-analysis"><FlowLanding initialTicker={ticker} /></div>
 }

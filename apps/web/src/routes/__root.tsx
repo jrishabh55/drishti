@@ -4,11 +4,13 @@ import {
   Show,
   SignIn,
   UserButton,
+  useUser,
 } from '@clerk/tanstack-react-start'
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 
 import { api, isNotActivated } from '../lib/api'
+import { GuideProvider } from '../guide/GuideProvider'
 import appCss from '../styles.css?url'
 
 /* Vite exposes any env var prefixed with VITE_* to the browser bundle.
@@ -93,13 +95,18 @@ function RootDocument({ children }: { children: React.ReactNode }) {
                 Topbar now — it owns the layout slot, no fixed-position
                 overlay fighting with page buttons. See
                 apps/web/src/components/shared/Topbar.tsx. */}
-            <ActivationGate>{children}</ActivationGate>
+            <ActivationGate><GuidedProduct>{children}</GuidedProduct></ActivationGate>
           </Show>
         </ClerkProvider>
         <Scripts />
       </body>
     </html>
   )
+}
+
+function GuidedProduct({ children }: { children: React.ReactNode }) {
+  const { user } = useUser()
+  return user ? <GuideProvider userId={user.id}>{children}</GuideProvider> : <>{children}</>
 }
 
 /** Full-page pulsing wordmark shown while Clerk hydrates and while the

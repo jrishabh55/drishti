@@ -74,7 +74,7 @@ function AlertsPage() {
   return (
     <div className="min-h-screen">
       <Topbar state="idle" />
-      <main className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
+      <main data-guide="guide-alerts" className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
         <h1 className="text-2xl font-bold">Alerts</h1>
         <DeskNav />
         <div className="flex flex-wrap items-end gap-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-3">

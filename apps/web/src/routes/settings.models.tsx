@@ -9,7 +9,7 @@ function ModelConnections() {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => { jsonFetch<{providers:{provider:string;label:string}[];administrator_providers:{provider:string;label:string}[]}>('/keys/providers')
     .then(d => setProviders([...d.providers, ...d.administrator_providers])).catch(e => setError(String(e))) }, [])
-  return <><Topbar /><main className="mx-auto max-w-4xl space-y-5 p-6">
+  return <><Topbar /><main data-guide="guide-models" className="mx-auto max-w-4xl space-y-5 p-6">
     <h1 className="text-2xl font-semibold">Model connections</h1>
     <p className="text-sm text-[var(--text-3)]">Add personal provider keys, then select the quick and deep model providers in Advanced analysis settings. OpenAI credits, Gemini keys and the ChatGPT helper remain available in the analysis form.</p>
     {error && <p role="alert">{error}</p>}

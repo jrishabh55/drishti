@@ -104,7 +104,7 @@ function PlanPage() {
   return (
     <div className="min-h-screen">
       <Topbar state="idle" />
-      <main className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
+      <main data-guide="guide-plans" className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold">{plan.symbol}</h1>
           <span className="es-pill">{plan.setup === 'orb' ? `${plan.or_minutes}-min ORB` : 'level'} · {plan.date}{plan.entry_time ? ` ${plan.entry_time}` : ''}</span>

@@ -1,0 +1,614 @@
+{
+  "version": "2026-10-30.1",
+  "features": [
+    {
+      "id": "orientation",
+      "title": "Start here",
+      "route": "/",
+      "summary": "Paper money, analysis credits and your first workflow.",
+      "body": "Paper capital is simulated trading money. Analysis credits are separate and may pay for model analysis. Start with Limits, research a symbol, create a plan, check sizing, then deliberately confirm a paper ticket. Paper results do not prove live execution quality.",
+      "keywords": [
+        "paper",
+        "capital",
+        "credits",
+        "beginner",
+        "start",
+        "help"
+      ],
+      "faqs": [
+        {
+          "question": "Does paper money pay for analysis?",
+          "answer": "No. Paper capital funds simulated positions in the ledger. Analysis credits are a separate balance for supported analysis runs."
+        }
+      ],
+      "chapter": "orientation",
+      "steps": [
+        {
+          "route": "/desk/paper",
+          "anchor": "guide-paper",
+          "title": "Start here",
+          "body": "Paper capital is simulated trading money. Analysis credits are separate and may pay for model analysis. Start with Limits, research a symbol, create a plan, check sizing, then deliberately confirm a paper ticket. Paper results do not prove live execution quality.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "models",
+      "title": "Models & connections",
+      "route": "/settings/models",
+      "summary": "Choose models and connect a personal provider.",
+      "body": "Add personal API keys in Model connections; keys are encrypted on the server. Select quick and deep providers in the analysis form. OpenAI analysis may use credits; Gemini and other personal providers use your own credentials. The ChatGPT helper is a separate connection. The guide never fills or submits a key for you.",
+      "keywords": [
+        "model",
+        "connection",
+        "api",
+        "key",
+        "provider",
+        "gemini",
+        "openai",
+        "helper",
+        "credit"
+      ],
+      "faqs": [
+        {
+          "question": "Can I ask AI questions without a personal key?",
+          "answer": "Built-in guide search works without a key. Optional AI help requires a supported personal provider and your explicit opt-in. It does not use analysis credits."
+        }
+      ],
+      "chapter": "models",
+      "steps": [
+        {
+          "route": "/settings/models",
+          "anchor": "guide-models",
+          "title": "Models & connections",
+          "body": "Add personal API keys in Model connections; keys are encrypted on the server. Select quick and deep providers in the analysis form. OpenAI analysis may use credits; Gemini and other personal providers use your own credentials. The ChatGPT helper is a separate connection. The guide never fills or submits a key for you.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "analysis",
+      "title": "Run & read an analysis",
+      "route": "/analyse",
+      "summary": "Choose a symbol and date, then inspect the reasoning.",
+      "body": "Select a company or ticker, analysis date, analysts and research depth. Review model choices and potential usage before pressing Run yourself. Follow progress and inspect the completed report and sources. A failed or interrupted run is not a completed recommendation. Paid analysis is optional for the paper-trade learning path.",
+      "keywords": [
+        "analysis",
+        "analyst",
+        "report",
+        "debate",
+        "run",
+        "depth",
+        "date",
+        "export"
+      ],
+      "faqs": [
+        {
+          "question": "Will the tour run an analysis for me?",
+          "answer": "No. The tour explains the form and report. You decide whether to press Run and spend any applicable credits or provider tokens."
+        }
+      ],
+      "chapter": "analysis",
+      "steps": [
+        {
+          "route": "/analyse",
+          "anchor": "guide-analysis",
+          "title": "Run & read an analysis",
+          "body": "Select a company or ticker, analysis date, analysts and research depth. Review model choices and potential usage before pressing Run yourself. Follow progress and inspect the completed report and sources. A failed or interrupted run is not a completed recommendation. Paid analysis is optional for the paper-trade learning path.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "reports",
+      "title": "Read an analysis report",
+      "route": "/runs/$id",
+      "summary": "Follow progress and inspect a completed report.",
+      "body": "A run shows analyst reports, the research debate and the resulting decision. Check the selected date, data sources and status. Cancel and export are available where shown. A running, failed or interrupted job is different from a completed report. Visit Analysis to start a run deliberately if your account has none.",
+      "keywords": [
+        "run",
+        "report",
+        "progress",
+        "debate",
+        "cancel",
+        "export",
+        "failed",
+        "interrupted"
+      ],
+      "faqs": [
+        {
+          "question": "Why is there no report to open?",
+          "answer": "A new account may not have analysis runs. Start from Analysis if you choose to run one. The guide will not create or charge for a run automatically."
+        }
+      ],
+      "chapter": "reports",
+      "steps": [
+        {
+          "route": "/analyse",
+          "anchor": "guide-analysis",
+          "title": "Read an analysis report",
+          "body": "A run shows analyst reports, the research debate and the resulting decision. Check the selected date, data sources and status. Cancel and export are available where shown. A running, failed or interrupted job is different from a completed report. Visit Analysis to start a run deliberately if your account has none.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "scanners",
+      "title": "Scanners",
+      "route": "/scanners",
+      "summary": "Find candidates with rules you can inspect.",
+      "body": "Create or edit a scanner, choose its rules and inspect results with their dates and data timestamps. A scanner match is a research candidate, not a guaranteed trade. Missing bars can prevent a match calculation. Add a relevant candidate to your research or watchlist deliberately.",
+      "keywords": [
+        "scanner",
+        "scan",
+        "rules",
+        "create",
+        "edit",
+        "result",
+        "criteria"
+      ],
+      "faqs": [
+        {
+          "question": "Does a scanner match open a position?",
+          "answer": "No. You still need to review the idea, make a plan, pass risk checks and deliberately confirm a ticket."
+        }
+      ],
+      "chapter": "scanners",
+      "steps": [
+        {
+          "route": "/scanners",
+          "anchor": "guide-scanners",
+          "title": "Scanners",
+          "body": "Create or edit a scanner, choose its rules and inspect results with their dates and data timestamps. A scanner match is a research candidate, not a guaranteed trade. Missing bars can prevent a match calculation. Add a relevant candidate to your research or watchlist deliberately.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "research",
+      "title": "Research",
+      "route": "/desk/research",
+      "summary": "Read company context before making a plan.",
+      "body": "Research brings together watchlist news, deals and company results where available. Inspect dates and source information. News and disclosures explain context; they do not establish an entry or fill. Empty results can mean no matching disclosures or unavailable data.",
+      "keywords": [
+        "research",
+        "company",
+        "news",
+        "deals",
+        "result",
+        "financial",
+        "disclosures"
+      ],
+      "faqs": [
+        {
+          "question": "Does no news mean a symbol is safe?",
+          "answer": "No. An empty panel can reflect unavailable or absent source data. It does not establish the risk or quality of a trade."
+        }
+      ],
+      "chapter": "research",
+      "steps": [
+        {
+          "route": "/desk/research",
+          "anchor": "guide-research",
+          "title": "Research",
+          "body": "Research brings together watchlist news, deals and company results where available. Inspect dates and source information. News and disclosures explain context; they do not establish an entry or fill. Empty results can mean no matching disclosures or unavailable data.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "today",
+      "title": "Today & watchlist",
+      "route": "/desk",
+      "summary": "Search a symbol and follow the entry timer.",
+      "body": "Use company or NSE symbol search to add an instrument to your watchlist. Opening-range cards and entry timers depend on market hours and available bars. Read NO-DATA or waiting reasons before proceeding. Analyse opens the analysis workflow; it does not confirm a trade. Refresh can fetch the latest available state.",
+      "keywords": [
+        "today",
+        "watchlist",
+        "symbol",
+        "search",
+        "reliance",
+        "opening",
+        "range",
+        "orb",
+        "entry",
+        "timer",
+        "no",
+        "data",
+        "bars"
+      ],
+      "faqs": [
+        {
+          "question": "Why do I see NO-DATA?",
+          "answer": "The selected date may have no opening-range bars yet, the market may be closed, or the feed may be delayed or incomplete. Read the symbol reason; the app cannot calculate that setup without usable bars."
+        }
+      ],
+      "chapter": "today",
+      "steps": [
+        {
+          "route": "/desk",
+          "anchor": "guide-today",
+          "title": "Today & watchlist",
+          "body": "Use company or NSE symbol search to add an instrument to your watchlist. Opening-range cards and entry timers depend on market hours and available bars. Read NO-DATA or waiting reasons before proceeding. Analyse opens the analysis workflow; it does not confirm a trade. Refresh can fetch the latest available state.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "plans",
+      "title": "Plans & exits",
+      "route": "/desk/plans",
+      "summary": "Define entry, stop, target and exit time.",
+      "body": "Create a draft plan from a symbol and entry, or from a triggered entry timer. Review the entry, stop rule, target rule and flat-by time. Save edits before sizing a ticket. A plan describes an intended trade; creating it does not place an order. An intraday replay needs an entry time, which may be absent for a manually created plan.",
+      "keywords": [
+        "plan",
+        "entry",
+        "stop",
+        "target",
+        "exit",
+        "flat",
+        "time",
+        "draft",
+        "save"
+      ],
+      "faqs": [
+        {
+          "question": "Why is Time Machine unavailable on my plan?",
+          "answer": "Intraday replay needs the entry bar time and enough historical session windows. A manual plan without an entry time cannot run that intraday replay."
+        }
+      ],
+      "chapter": "plans",
+      "steps": [
+        {
+          "route": "/desk/plans",
+          "anchor": "guide-plans",
+          "title": "Plans & exits",
+          "body": "Create a draft plan from a symbol and entry, or from a triggered entry timer. Review the entry, stop rule, target rule and flat-by time. Save edits before sizing a ticket. A plan describes an intended trade; creating it does not place an order. An intraday replay needs an entry time, which may be absent for a manually created plan.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "timemachine",
+      "title": "Time Machine",
+      "route": "/desk/plans/$id",
+      "summary": "Explore a plan using historical bars and simulated paths.",
+      "body": "Time Machine compares a plan with historical outcomes and simulated paths. Intraday mode needs at least 20 complete prior session windows and the entry bar time. Swing mode uses daily bars and has different history requirements. Insufficient data is reported honestly. Simulated odds are not predictions and a stop is not a guarantee.",
+      "keywords": [
+        "time",
+        "machine",
+        "replay",
+        "history",
+        "session",
+        "twenty",
+        "20",
+        "insufficient",
+        "no",
+        "data",
+        "simulation",
+        "swing"
+      ],
+      "faqs": [
+        {
+          "question": "What does only 0 full sessions mean?",
+          "answer": "No qualifying complete prior session windows were found for that symbol and date. Intraday Time Machine needs at least 20. Check symbol, date and history availability; do not interpret the missing result as a successful test."
+        }
+      ],
+      "chapter": "timemachine",
+      "steps": [
+        {
+          "route": "/desk/plans",
+          "anchor": "guide-plans",
+          "title": "Time Machine",
+          "body": "Time Machine compares a plan with historical outcomes and simulated paths. Intraday mode needs at least 20 complete prior session windows and the entry bar time. Swing mode uses daily bars and has different history requirements. Insufficient data is reported honestly. Simulated odds are not predictions and a stop is not a guarantee.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "sizing",
+      "title": "Sizing & risk checks",
+      "route": "/desk/plans/$id",
+      "summary": "Size the trade within your configured limits.",
+      "body": "Use the sizing and risk check control on a saved plan to create a reviewable ticket. Inspect quantity, per-share risk, total risk and failed checks. Limits include daily loss, per-trade risk, order value, trade count, concentration and required stops. A blocked ticket needs a corrected plan or deliberate limit review, not a bypass.",
+      "keywords": [
+        "size",
+        "sizing",
+        "risk",
+        "ticket",
+        "quantity",
+        "limit",
+        "blocked",
+        "check"
+      ],
+      "faqs": [
+        {
+          "question": "Does creating a ticket confirm a trade?",
+          "answer": "No. Review the ticket and confirm it deliberately. The guide never confirms tickets or overrides failed risk checks."
+        }
+      ],
+      "chapter": "sizing",
+      "steps": [
+        {
+          "route": "/desk/plans",
+          "anchor": "guide-plans",
+          "title": "Sizing & risk checks",
+          "body": "Use the sizing and risk check control on a saved plan to create a reviewable ticket. Inspect quantity, per-share risk, total risk and failed checks. Limits include daily loss, per-trade risk, order value, trade count, concentration and required stops. A blocked ticket needs a corrected plan or deliberate limit review, not a bypass.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "messages",
+      "title": "Telegram & messages",
+      "route": "/desk/messages",
+      "summary": "Get updates and approve paper proposals from Telegram.",
+      "body": "Configure a Telegram bot, link your chat and verify the connection using the Messages screen. Enable desired updates and paper approvals. A paper proposal has Approve paper trade, Reject and Status controls plus a plan link. Approval is subject to expiry and fresh risk checks; it does not place a live broker order. WhatsApp is optional and requires separate setup.",
+      "keywords": [
+        "telegram",
+        "bot",
+        "message",
+        "approval",
+        "reject",
+        "status",
+        "link",
+        "chat",
+        "alert",
+        "expired"
+      ],
+      "faqs": [
+        {
+          "question": "Does Telegram approval buy shares in my broker account?",
+          "answer": "No. Approve paper trade applies to a paper proposal. A valid approval creates the simulated trading workflow after risk checks; live broker orders are separate and explicitly guarded."
+        }
+      ],
+      "chapter": "messages",
+      "steps": [
+        {
+          "route": "/desk/messages",
+          "anchor": "guide-messages",
+          "title": "Telegram & messages",
+          "body": "Configure a Telegram bot, link your chat and verify the connection using the Messages screen. Enable desired updates and paper approvals. A paper proposal has Approve paper trade, Reject and Status controls plus a plan link. Approval is subject to expiry and fresh risk checks; it does not place a live broker order. WhatsApp is optional and requires separate setup.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "paper",
+      "title": "Paper ledger",
+      "route": "/desk/paper",
+      "summary": "Practice with simulated capital and review positions.",
+      "body": "Paper capital funds simulated trades and is separate from analysis credits. Free cash is currently available simulated cash. A confirmed ticket waits for an eligible entry bar; data and price conditions determine fills. Review open and closed trades, exits, charges and net P&L. Do not treat paper fills as proof of live execution quality.",
+      "keywords": [
+        "paper",
+        "capital",
+        "cash",
+        "money",
+        "ledger",
+        "trades",
+        "balance",
+        "analysis",
+        "credits",
+        "simulated",
+        "fill",
+        "pnl",
+        "charges"
+      ],
+      "faqs": [
+        {
+          "question": "Does my paper balance pay for analysis?",
+          "answer": "No. Paper capital funds simulated trades. Analysis credits are a separate balance used by supported paid analysis runs. Changing one does not add to the other."
+        }
+      ],
+      "chapter": "paper",
+      "steps": [
+        {
+          "route": "/desk/paper",
+          "anchor": "guide-paper",
+          "title": "Paper ledger",
+          "body": "Paper capital funds simulated trades and is separate from analysis credits. Free cash is currently available simulated cash. A confirmed ticket waits for an eligible entry bar; data and price conditions determine fills. Review open and closed trades, exits, charges and net P&L. Do not treat paper fills as proof of live execution quality.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "performance",
+      "title": "Performance",
+      "route": "/desk/performance",
+      "summary": "Review paper outcomes and compare expectations.",
+      "body": "Review paper results by day and expected versus observed outcomes. Check charges, losses and sample size as well as gains. A new account has no trading history; zeros and empty charts are expected until simulated trades progress. Delayed data and execution assumptions limit conclusions about live performance.",
+      "keywords": [
+        "performance",
+        "results",
+        "daily",
+        "expected",
+        "actual",
+        "statistics",
+        "win",
+        "loss",
+        "pnl"
+      ],
+      "faqs": [
+        {
+          "question": "Why is performance empty?",
+          "answer": "You may not have completed any paper trades. Check the ledger for waiting or open entries. The guide never invents a history to fill this screen."
+        }
+      ],
+      "chapter": "performance",
+      "steps": [
+        {
+          "route": "/desk/performance",
+          "anchor": "guide-performance",
+          "title": "Performance",
+          "body": "Review paper results by day and expected versus observed outcomes. Check charges, losses and sample size as well as gains. A new account has no trading history; zeros and empty charts are expected until simulated trades progress. Delayed data and execution assumptions limit conclusions about live performance.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "alerts",
+      "title": "Alerts",
+      "route": "/desk/alerts",
+      "summary": "Create and review rule-based updates.",
+      "body": "Create an alert rule, inspect its trigger conditions and read triggered events. Marking events seen changes their read status, not your positions. Message delivery needs a verified channel and enabled preferences. No alert guarantees a price or an immediately executable entry.",
+      "keywords": [
+        "alert",
+        "notification",
+        "rule",
+        "trigger",
+        "seen",
+        "delivery"
+      ],
+      "faqs": [
+        {
+          "question": "Why did I not get a Telegram update?",
+          "answer": "Check that Telegram is verified, updates are enabled, and the relevant alert actually triggered. A provider accepting a message is not proof you read or received it."
+        }
+      ],
+      "chapter": "alerts",
+      "steps": [
+        {
+          "route": "/desk/alerts",
+          "anchor": "guide-alerts",
+          "title": "Alerts",
+          "body": "Create an alert rule, inspect its trigger conditions and read triggered events. Marking events seen changes their read status, not your positions. Message delivery needs a verified channel and enabled preferences. No alert guarantees a price or an immediately executable entry.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "limits",
+      "title": "Limits & settings",
+      "route": "/desk/settings",
+      "summary": "Set the boundaries used in position sizing and risk checks.",
+      "body": "Review paper capital, per-trade loss, daily loss, maximum order value, position concentration, trade/order counts and time restrictions. Stops are required for entries. Saving changes is your action. Increasing a limit does not make a setup safer or remove market and data risk.",
+      "keywords": [
+        "limit",
+        "setting",
+        "capital",
+        "stop",
+        "risk",
+        "loss",
+        "daily",
+        "order",
+        "position",
+        "refresh"
+      ],
+      "faqs": [
+        {
+          "question": "Should I raise limits to pass a failed check?",
+          "answer": "The guide explains the failed rule; it cannot choose your risk tolerance. Inspect and correct the plan or review the limit deliberately instead of treating a failure as a technical obstacle."
+        }
+      ],
+      "chapter": "limits",
+      "steps": [
+        {
+          "route": "/desk/settings",
+          "anchor": "guide-limits",
+          "title": "Limits & settings",
+          "body": "Review paper capital, per-trade loss, daily loss, maximum order value, position concentration, trade/order counts and time restrictions. Stops are required for entries. Saving changes is your action. Increasing a limit does not make a setup safer or remove market and data risk.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "backtests",
+      "title": "Backtests",
+      "route": "/evaluation",
+      "summary": "Inspect evaluation setups and historical results.",
+      "body": "Create an evaluation using available configuration, then inspect its status and results. Running evaluations is a deliberate action and can consume analysis resources. Historical results depend on available data and chosen assumptions. They are not predictions or a guarantee that an approach works live.",
+      "keywords": [
+        "backtest",
+        "evaluation",
+        "batch",
+        "historical",
+        "result",
+        "experiment"
+      ],
+      "faqs": [
+        {
+          "question": "Will a tour start a backtest?",
+          "answer": "No. The guide explains configuration and result pages. You choose whether to execute an evaluation and incur applicable usage."
+        }
+      ],
+      "chapter": "backtests",
+      "steps": [
+        {
+          "route": "/evaluation",
+          "anchor": "guide-backtests",
+          "title": "Backtests",
+          "body": "Create an evaluation using available configuration, then inspect its status and results. Running evaluations is a deliberate action and can consume analysis resources. Historical results depend on available data and chosen assumptions. They are not predictions or a guarantee that an approach works live.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "broker",
+      "title": "Zerodha connection",
+      "route": "/desk/connection",
+      "summary": "Understand broker setup and connection status.",
+      "body": "Broker connection uses your own Kite application and explicit credential setup. Keys are stored encrypted; daily login is separate from arming or confirming an order. Connected broker data may differ from delayed public data. This deployment keeps live order execution disabled until explicitly configured otherwise.",
+      "keywords": [
+        "zerodha",
+        "broker",
+        "kite",
+        "login",
+        "connection",
+        "credential",
+        "live",
+        "data"
+      ],
+      "faqs": [
+        {
+          "question": "Does connecting Zerodha enable orders?",
+          "answer": "No. Connection, live execution enablement, daily arming and per-order confirmation are separate gates. The guide cannot enable or exercise those gates."
+        }
+      ],
+      "chapter": "broker",
+      "steps": [
+        {
+          "route": "/desk/connection",
+          "anchor": "guide-broker",
+          "title": "Zerodha connection",
+          "body": "Broker connection uses your own Kite application and explicit credential setup. Keys are stored encrypted; daily login is separate from arming or confirming an order. Connected broker data may differ from delayed public data. This deployment keeps live order execution disabled until explicitly configured otherwise.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    },
+    {
+      "id": "live",
+      "title": "Strategies & live controls",
+      "route": "/desk/strategies",
+      "summary": "Learn the guarded controls without placing an order.",
+      "body": "Inspect Off, Paper and Confirm modes, connection/data status, daily arming and the kill switch. Live orders require server enablement, daily arming and explicit order confirmation. Current production live execution is disabled. Paper mode is simulated. The tour never arms a broker, confirms an order or changes these controls.",
+      "keywords": [
+        "live",
+        "strategy",
+        "arm",
+        "disarm",
+        "kill",
+        "switch",
+        "confirm",
+        "off",
+        "paper",
+        "order"
+      ],
+      "faqs": [
+        {
+          "question": "Can the guide arm live trading for me?",
+          "answer": "No. The guide has no action tools. Live execution remains subject to its separate safeguards and server configuration."
+        }
+      ],
+      "chapter": "live",
+      "steps": [
+        {
+          "route": "/desk/strategies",
+          "anchor": "guide-live",
+          "title": "Strategies & live controls",
+          "body": "Inspect Off, Paper and Confirm modes, connection/data status, daily arming and the kill switch. Live orders require server enablement, daily arming and explicit order confirmation. Current production live execution is disabled. Paper mode is simulated. The tour never arms a broker, confirms an order or changes these controls.",
+          "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
+        }
+      ]
+    }
+  ]
+}

@@ -80,7 +80,7 @@ export function BatchesPage() {
   return (
     <div className="min-h-screen">
       <Topbar state="idle" />
-      <main className="mx-auto w-full max-w-[1100px] space-y-6 px-6 py-4">
+      <main data-guide="guide-backtests" className="mx-auto w-full max-w-[1100px] space-y-6 px-6 py-4">
         <div>
           <h1 className="text-2xl font-bold">Backtest batches</h1>
           <p className="text-sm text-[var(--text-3)]">
