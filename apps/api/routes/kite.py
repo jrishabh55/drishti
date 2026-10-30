@@ -28,6 +28,7 @@ keeps the callback behind normal auth and binds it to the same user.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
@@ -216,7 +217,25 @@ async def live_start(body: LiveBody, user_id: str = Depends(current_user_id)) ->
         from apps.api.scanner.store import get_scanner_store
         syms, notes = pick_universe(get_scanner_store().instruments_df(), body.universe)
     try:
-        await live.start(user_id, syms, transport=_transport, connect=_connect, now=_now())
+        now = _now()
+        if body.universe:
+            # Membership metadata may lag Kite's current instrument list. Only
+            # universe selections tolerate unknown members; explicit custom
+            # symbols retain start()'s strict, actionable validation.
+            client = auth.client_for(user_id, now, _transport)
+            table = await asyncio.to_thread(rest.nse_instruments, client, now.astimezone(live.IST).date())
+            selected = sorted({bars_mod.nse_symbol(s) for s in syms})
+            unknown = [s for s in selected if s not in table]
+            syms = [s for s in selected if s in table]
+            if unknown:
+                notes.append(f"Skipped symbols unavailable as NSE equities on Kite: {', '.join(unknown)}.")
+            if len(syms) > live.MAX_SYMBOLS:
+                notes.append(f"Stream capped at {live.MAX_SYMBOLS} symbols; skipped beyond limit: "
+                             f"{', '.join(syms[live.MAX_SYMBOLS:])}.")
+                syms = syms[:live.MAX_SYMBOLS]
+            if not syms:
+                raise ValueError("No NSE equities from this universe are available on Kite.")
+        await live.start(user_id, syms, transport=_transport, connect=_connect, now=now)
     except auth.KiteAuthError as exc:
         raise _auth_http(exc) from exc
     except rest.KiteError as exc:

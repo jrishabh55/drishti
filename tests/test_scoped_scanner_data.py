@@ -190,6 +190,7 @@ def test_connection_can_subscribe_scanner_universe_without_typing_symbols(env, t
     async def start(user_id, symbols, **kwargs):
         chosen.extend(symbols)
     monkeypatch.setattr(live, 'start', start)
+    monkeypatch.setattr(live.rest, 'nse_instruments', lambda *a: {s: {'token': i} for i, s in enumerate(want)})
     response = client.post('/api/kite/live/start', json={'universe': universe})
     assert response.status_code == 200, response.text
     assert chosen == want

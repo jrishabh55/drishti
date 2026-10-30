@@ -8,15 +8,27 @@ owner's stream. Data access never delegates broker credentials or order authorit
 The application accepts at most **500 unique symbols per stream**, covering the
 217-stock F&O snapshot and NIFTY500. This application bound is below Kite's
 [3,000 instruments per WebSocket connection](https://kite.trade/docs/connect/v3/websocket/).
-Missing instruments and larger selections fail explicitly; selections are never
-silently truncated. Universe membership comes from the existing scanner metadata.
+Custom selections reject missing instruments and selections above the limit.
+Universe membership comes from the existing scanner metadata: unknown Kite
+members are skipped before limiting the selection to the first 500 sorted valid
+symbols. The response's `selection_notes` lists every skipped name, including
+symbols beyond the limit, and discloses membership fallbacks. An empty valid
+selection fails without replacing the existing stream.
 
 Starting a stream returns before history bootstrap completes. Current-session
 minute history goes first, with the existing bounded retry schedule. Then each
 symbol receives at most two scanner-history calls: 730 calendar days of daily
 candles and ten calendar days of five-minute candles, retaining up to 320 actual
 candles per series in the owner's hub. No synthetic candles fill holes. The
-historical request gate spaces starts by 350ms per owner, including failures and
+bootstrap retains only candles already closed at the historical request's end
+(including the two-second completion guard); a forming snapshot never becomes a
+completed candle when the clock advances. Daily history requires the same live,
+fresh-tick, backfilled-session readiness as private intraday data and cannot
+replace a newer completed public daily close. A fresh quote remains separate.
+Unconnected users and users without a private hub reuse the published, warmed
+public panel snapshot with completion filtering on the time index. This leaves
+legacy engine snapshots intact and keeps unpublished ingest writes out of scans.
+The historical request gate spaces starts by 350ms per owner, including failures and
 shared readers, below Kite's documented
 [three historical calls per second](https://kite.trade/docs/connect/v3/exceptions/).
 All of these calls are read-only. At 500 symbols the initial 1,500 requests need
