@@ -36,7 +36,7 @@ Interface: implement the shared strategy/attribution/exit contracts in the spec.
 - [x] Write and observe failing portfolio/version/freshness/exit/backtest/auto-gate tests.
 - [x] Extend existing runtime and paper engine; add opt-in auto path through existing execution authority, never bypass gates.
 - [x] Add deterministic bounded backtests and strategy controls/UI. No LLM-generated trades without explicit saved rule review.
-- [ ] Pass focused tests and commit owned files; independent task review and corrections.
+- [x] Pass focused tests and commit owned files; independent task review and corrections.
 
 ### Task 3: Analytics and journal (Claude Code worker)
 Files: apps/api/evaluation/performance.py and new analytics modules, apps/api/routes/evaluation.py, apps/web/src/routes/desk.performance.tsx and lib/evaluation-api.ts, new journal UI/routes, tests. Do not edit strategy implementation files; consume attribution fields defined in spec and preserve absent legacy metadata.
@@ -44,7 +44,7 @@ Interface: additive GET /api/evaluation/trading-performance?portfolio_id=all|def
 - [x] Write and observe failing ownership/filtering/attribution/mark/CSV tests.
 - [x] Implement strategy/version/portfolio results, realized vs open P&L, cross-paper overview, benchmark availability, annotations and export.
 - [x] Extend performance UI without losing existing statistics/calibration; pass focused tests and commit owned files.
-- [ ] Independent task review and corrections.
+- [x] Independent task review and corrections.
 
 ### Task 4: Mobile supervision (next ready worker)
 Files: apps/api/messaging/ and routes/messaging.py, apps/web/src/routes/desk.messages.tsx and its API types, tests. New helpers may read strategy records but must coordinate updates through existing strategy lock/routing.
@@ -61,11 +61,11 @@ Interface: create an OFF strategy draft from owned completed analysis levels or 
 - [x] Update Guide through catalog sync; run scoped tests and build.
 
 ### Task 6: Integrated review and release
-- [ ] Integrate worker commits, resolve contracts/conflicts, accept task reviews and fix material findings.
-- [ ] Independent whole-branch review with no unresolved blockers.
-- [ ] Full pytest, frontend tests, typecheck, Node build, catalog/whitespace checks.
+- [x] Integrate worker commits, resolve contracts/conflicts, accept task reviews and fix material findings.
+- [x] Independent whole-branch review with no unresolved blockers.
+- [x] Full pytest, frontend tests, typecheck, Node build, catalog/whitespace checks.
 - [ ] Preserve volume/encryption/media, verify live-orders0, push and deploy existing Dokploy app.
 - [ ] Authenticated browser QA of scanner source/readiness, strategy draft/portfolio/backtests, analytics and Telegram controls without sending/trading.
 - [ ] Record exact implemented outcomes and user-dependent Kite login/full-session trial; release every worker.
 
-Review checkpoint: data/mobile/workflow original findings and root follow-ups independently verified. Engine F1–F4 and analytics FWR-4 correction/review remains before release. Evidence is in the coordinator SDD artifact directory; controlled tests do not replace a connected full NSE session.
+Review checkpoint: data/mobile/workflow and root follow-ups independently verified. Engine F1–F4 and analytics/backtest FWR-4 corrections independently verified through26174d1, with benchmark copybb84ecb reviewed. Final2650Python+103subtests,94web,typecheck,Nodebuild,catalog/whitespace checks pass. Controlled tests do not replace a connected full NSE session. Release verification follows below.
