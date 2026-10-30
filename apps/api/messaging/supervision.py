@@ -200,7 +200,7 @@ def _apply(uid, t, channel):
     if target == 'confirm' and (s.get('portfolio_id') or 'default') != 'default':
         return 'Confirm mode needs the Default portfolio. Nothing changed.'
     s['mode'] = target
-    for k in ('paused_from', 'paused_at', 'paused_via'):
+    for k in ('paused_from', 'paused_at', 'paused_via', 'paused_reason'):
         s.pop(k, None)
     ks.put_strategy(uid, s)
     if target == 'paper':
