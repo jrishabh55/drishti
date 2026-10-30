@@ -296,7 +296,12 @@ def _breakout_rows():
 def test_strategy_validation_and_isolation(env):
     client, _, user, _, _ = env
     assert client.post("/api/kite/strategies", json={"name": "x", "symbols": ["SBIN"],
-                                                     "mode": "auto"}).status_code == 422
+                                                     "mode": "yolo"}).status_code == 422
+    # Auto mode exists (spec) but creating it never carries the separate opt-in.
+    auto = client.post("/api/kite/strategies", json={"name": "x", "symbols": ["SBIN"],
+                                                     "mode": "auto"}).json()
+    assert auto["mode"] == "auto" and not auto.get("auto_opt_in")
+    client.delete(f"/api/kite/strategies/{auto['id']}")
     assert client.post("/api/kite/strategies", json={"name": "x", "symbols": ["bad sym"]}
                        ).status_code == 422
     s = client.post("/api/kite/strategies", json={"name": "x", "symbols": ["sbin.ns"]}).json()

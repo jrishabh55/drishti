@@ -18,6 +18,8 @@ Routes (all under /api, all Clerk-authed, all per user):
   GET    /kite/performance
   GET|POST /kite/strategies  PUT|DELETE /kite/strategies/{id}
   POST   /kite/strategies/{id}/scan
+  POST   /kite/strategies/{id}/pause|resume
+  POST|DELETE /kite/strategies/{id}/auto-opt-in   (typed "AUTO <name>")
   POST   /kite/strategies/{id}/signals/{sig}/confirm|skip
 
 Kite's redirect URL must point at the web app's ``/desk/connection`` page
@@ -390,13 +392,29 @@ def performance(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- strategies
 
-def _valid(body: Dict[str, Any]) -> Dict[str, Any]:
+def _valid(body: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from apps.api.desk import portfolios as pf_mod
+
     try:
-        return strategies.Strategy.model_validate(body).model_dump()
+        doc = strategies.Strategy.model_validate(body).doc()
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=[
             {"loc": list(e.get("loc", ())), "msg": e.get("msg", "")} for e in exc.errors()[:5]]
         ) from exc
+    if pf_mod.get(user_id, doc["portfolio_id"]) is None:
+        raise HTTPException(status_code=422, detail="portfolio not found")
+    if doc["scanner_id"]:
+        from apps.api.scanner.store import get_scanner_store
+
+        if not strategies.scanner_ok(get_scanner_store().get_scanner(doc["scanner_id"]), user_id):
+            raise HTTPException(status_code=422, detail="scanner not found")
+    return doc
+
+
+def _killed_409(user_id: str) -> None:
+    if execution.control(user_id, _now())["killed"]:
+        raise HTTPException(status_code=409, detail="the kill switch was used today; "
+                                                    "strategies stay off until tomorrow")
 
 
 def _own_strategy(sid: str, user_id: str) -> Dict[str, Any]:
@@ -414,25 +432,26 @@ def list_strategies(user_id: str = Depends(current_user_id)) -> List[Dict[str, A
 @router.post("/kite/strategies", status_code=201)
 def create_strategy(body: Dict[str, Any], user_id: str = Depends(current_user_id)
                     ) -> Dict[str, Any]:
-    doc = dict(_valid(body), signals=[])
+    """Modes default to off; auto never sends until its separate opt-in."""
+    doc = dict(_valid(body, user_id), signals=[], version=1)
     with execution.user_lock(user_id):
-        if doc["mode"] != "off" and execution.control(user_id, _now())["killed"]:
-            raise HTTPException(status_code=409, detail="the kill switch was used today; "
-                                                        "strategies stay off until tomorrow")
+        if doc["mode"] != "off":
+            _killed_409(user_id)
         return get_kite_store().put_strategy(user_id, doc)
 
 
 @router.put("/kite/strategies/{sid}")
 def update_strategy(sid: str, body: Dict[str, Any], user_id: str = Depends(current_user_id)
                     ) -> Dict[str, Any]:
-    valid = _valid(body)
+    """Every edit is a new version; it drops any auto opt-in."""
+    valid = _valid(body, user_id)
     with execution.user_lock(user_id):
         old = _own_strategy(sid, user_id)
-        if valid["mode"] != "off" and execution.control(user_id, _now())["killed"]:
-            raise HTTPException(status_code=409, detail="the kill switch was used today; "
-                                                        "strategies stay off until tomorrow")
+        if valid["mode"] != "off":
+            _killed_409(user_id)
         doc = dict(valid, id=sid, signals=old.get("signals") or [],
-                   version=int(old.get("version") or 1) + 1)
+                   version=strategies.version_of(old) + 1, paused=bool(old.get("paused")),
+                   last_scan=old.get("last_scan"))
         return get_kite_store().put_strategy(user_id, doc)
 
 
@@ -450,6 +469,52 @@ def scan_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str
     s = _own_strategy(sid, user_id)
     new = strategies.scan(user_id, s, _now())
     return {"new": new, "strategy": _own_strategy(sid, user_id)}
+
+
+@router.post("/kite/strategies/{sid}/pause")
+def pause_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    """Stop acting without losing the mode; not a new version."""
+    with execution.user_lock(user_id):
+        s = _own_strategy(sid, user_id)
+        return get_kite_store().put_strategy(user_id, dict(s, paused=True))
+
+
+@router.post("/kite/strategies/{sid}/resume")
+def resume_strategy(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    """Resume never arms live trading and never overrides today's kill."""
+    with execution.user_lock(user_id):
+        s = _own_strategy(sid, user_id)
+        _killed_409(user_id)
+        return get_kite_store().put_strategy(user_id, dict(s, paused=False))
+
+
+class AutoOptInBody(BaseModel):
+    ack: str = Field(max_length=120)
+
+
+@router.post("/kite/strategies/{sid}/auto-opt-in")
+def auto_opt_in(sid: str, body: AutoOptInBody, user_id: str = Depends(current_user_id)
+                ) -> Dict[str, Any]:
+    """The separate, typed opt-in for unattended live sends of THIS version.
+    It authorizes nothing else: every send still needs today's arm, the
+    owner binding, the server's live-order switch and a passing risk check."""
+    with execution.user_lock(user_id):
+        s = _own_strategy(sid, user_id)
+        if s.get("mode") != "auto":
+            raise HTTPException(status_code=409, detail="switch the strategy to auto mode first")
+        _killed_409(user_id)
+        want = f"AUTO {s['name']}"
+        if body.ack.strip() != want:
+            raise HTTPException(status_code=422, detail=f'type exactly "{want}" to opt in')
+        return get_kite_store().put_strategy(user_id, dict(s, auto_opt_in={
+            "version": strategies.version_of(s), "at": _now().isoformat()}))
+
+
+@router.delete("/kite/strategies/{sid}/auto-opt-in")
+def auto_opt_out(sid: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    with execution.user_lock(user_id):
+        s = _own_strategy(sid, user_id)
+        return get_kite_store().put_strategy(user_id, dict(s, auto_opt_in=None))
 
 
 def _own_signal(s: Dict[str, Any], sig_id: str) -> Dict[str, Any]:

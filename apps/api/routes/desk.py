@@ -413,8 +413,15 @@ def list_plans(user_id: str = Depends(current_user_id)) -> List[Dict[str, Any]]:
 
 @router.post("/desk/plans", status_code=201)
 def create_plan(body: PlanBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    return _create_plan(body, user_id)
+
+
+def _create_plan(body: PlanBody, user_id: str,
+                 stamp: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """``stamp``: server-side strategy attribution (never accepted from a request)."""
     plan = _plan_or_422(body, user_id)
     plan["request"] = body.model_dump()
+    plan.update(stamp or {})
     return get_desk_store().create_plan(user_id, plan)
 
 
@@ -610,6 +617,14 @@ def list_tickets(portfolio_id: Optional[str] = Query(None, pattern=pf_mod.ID_PAT
 
 @router.post("/desk/tickets", status_code=201)
 def create_ticket(body: SizeBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    return _create_ticket(body, user_id)
+
+
+def _create_ticket(body: SizeBody, user_id: str,
+                   stamp: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """``stamp``: server-side strategy attribution/exit policy, copied onto the
+    ticket and its order (outside the fingerprint) so paper and live trades
+    carry it."""
     from apps.api.desk import sizing, ticket
 
     plan = _own_plan(body.plan_id, user_id)
@@ -618,9 +633,12 @@ def create_ticket(body: SizeBody, user_id: str = Depends(current_user_id)) -> Di
     order = sizing.order_from(s, plan_id=plan["id"])
     if order and pid != pf_mod.DEFAULT:
         order["portfolio_id"] = pid      # part of the fingerprint
+    if order and stamp:
+        order.update(stamp)
     verdict = _risk_bound([order], user_id, pid) if order else None
     doc = ticket.build(plan=plan, sizing=s, order=order, verdict=verdict)
     doc["portfolio_id"] = pid
+    doc.update({k: v for k, v in (stamp or {}).items() if k != "exit_policy"})
     return get_desk_store().create_ticket(user_id, doc)
 
 

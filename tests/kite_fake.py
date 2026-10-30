@@ -41,6 +41,9 @@ class FakeKite:
         #: order types whose new orders Kite accepts but hides from GET /orders
         #: until ``reveal()`` — a lagging order book
         self.hidden_types: set = set()
+        #: GET /user/margins/equity payload; None = the endpoint is down
+        self.funds: Optional[Dict[str, Any]] = {
+            "enabled": True, "net": 1e7, "available": {"live_balance": 1e7, "cash": 1e7}}
         self._hidden: set = set()
 
     # ------------------------------------------------------------ transport
@@ -117,6 +120,11 @@ class FakeKite:
                                         "error_type": "OrderException"})
             o["status"] = "CANCELLED"
             return self._ok({"order_id": o["order_id"]})
+        if path == "/user/margins/equity":
+            if self.funds is None:
+                return 503, json.dumps({"status": "error", "message": "margins unavailable",
+                                        "error_type": "NetworkException"})
+            return self._ok(self.funds)
         if path == "/orders":
             return self._ok([o for k, o in self.orders.items() if k not in self._hidden])
         if path == "/portfolio/positions":

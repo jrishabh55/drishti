@@ -2,15 +2,17 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
 import { Card, Pill, tradeTone } from '#/components/kite/KiteBits'
+import { StrategyBacktests } from '#/components/kite/StrategyBacktests'
 import { BLANK_STRATEGY, MODES, StrategyForm, toInput } from '#/components/kite/StrategyForm'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { api } from '#/lib/api'
 import { inr, rMult } from '#/lib/desk-format'
-import type { Ticket } from '#/lib/desk-types'
+import type { Portfolio, Ticket } from '#/lib/desk-types'
+import type { ScannerSummary } from '#/lib/scanner-types'
 import {
-  confirmWords, kite, kiteError,
+  autoWords, confirmWords, kite, kiteError,
   type KitePerformance, type KiteStatus, type KiteTrade, type Strategy, type StrategyInput,
 } from '#/lib/kite-api'
 
@@ -31,6 +33,9 @@ function StrategiesPage() {
   const [typed, setTyped] = useState<Record<string, string>>({})
   const [ack, setAck] = useState('')
   const [killArmed, setKillArmed] = useState(false)
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([])
+  const [scanners, setScanners] = useState<ScannerSummary[]>([])
+  const [testing, setTesting] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,6 +47,12 @@ function StrategiesPage() {
     } catch (e) {
       setError(kiteError(e))
     }
+  }, [])
+
+  useEffect(() => {
+    // Form choices only; a failure leaves the Default portfolio / no scanner.
+    api.desk.portfolios().then(setPortfolios, () => {})
+    api.listScanners().then(setScanners, () => {})
   }, [])
 
   useEffect(() => {
@@ -124,6 +135,9 @@ function StrategiesPage() {
                 <span className="text-[var(--text-3)]">stop {t.stop} · target {t.target} · flat by {t.flat_by}</span>
                 <Pill tone={tradeTone(t.status)}>{t.status.replaceAll('_', ' ')}{t.exit_reason ? ` · ${t.exit_reason}` : ''}</Pill>
                 {t.pnl_net != null && <span className="es-mono">{inr(t.pnl_net)} · {rMult(t.r_net)}</span>}
+                <span className="text-xs text-[var(--text-3)]">
+                  {t.strategy_id ? `${t.strategy_name} v${t.strategy_version}` : 'Manual/legacy'}
+                </span>
               </summary>
               {t.attention && <p className="mt-1 text-[var(--err)]">{t.attention}</p>}
               {t.closed_note && <p className="mt-1 text-[var(--run)]">{t.closed_note}</p>}
@@ -148,9 +162,10 @@ function StrategiesPage() {
           )}
         </Card>
 
-        <Card title="Strategies" hint="Bounded: up to 20 symbols, a few signals a day, Off / Paper / Confirm. Signals use LIVE bars when you're streaming, otherwise DELAYED, and say which.">
+        <Card title="Strategies" hint="Bounded: up to 20 symbols, a few signals a day, Off / Paper / Confirm / Auto. Signals use LIVE bars when you're streaming, otherwise DELAYED, and say which; delayed data never sends a live order.">
           {editing ? (
             <StrategyForm initial={editing.init} busy={busy} onCancel={() => setEditing(null)}
+              portfolios={portfolios} scanners={scanners}
               onSave={(body) => void run(async () => {
                 if (editing.id) await kite.updateStrategy(editing.id, body)
                 else await kite.createStrategy(body)
@@ -166,14 +181,60 @@ function StrategiesPage() {
                 <Pill tone={s.mode === 'off' ? 'warn' : s.mode === 'paper' ? 'info' : 'ok'}>
                   {MODES.find((m) => m.value === s.mode)?.label}
                 </Pill>
+                {s.paused && <Pill tone="warn">PAUSED</Pill>}
+                <span className="text-xs text-[var(--text-3)]">
+                  v{s.version ?? 1} · {s.interval ?? '5m'} · {portfolios.find((p) => p.id === (s.portfolio_id ?? 'default'))?.name ?? 'Default'}
+                  {s.scanner_id ? ` · scanner ${scanners.find((x) => x.id === s.scanner_id)?.name ?? s.scanner_id}` : ''}
+                </span>
                 <span className="es-mono text-[var(--text-3)]">{s.symbols.join(' ')}</span>
                 {s.paused_reason && <span className="text-xs text-[var(--err)]">stopped by {s.paused_reason}</span>}
                 <span className="flex-1" />
-                <Button size="sm" variant="outline" disabled={busy || s.mode === 'off'}
+                <Button size="sm" variant="outline" disabled={busy || s.mode === 'off' || !!s.paused}
                   onClick={() => void run(() => kite.scanStrategy(s.id))}>Scan now</Button>
+                <Button size="sm" variant="outline" disabled={busy}
+                  onClick={() => void run(() => (s.paused ? kite.resumeStrategy(s.id) : kite.pauseStrategy(s.id)))}>
+                  {s.paused ? 'Resume' : 'Pause'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setTesting(testing === s.id ? null : s.id)}>Backtest</Button>
                 <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, init: toInput(s) })}>Edit</Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => kite.deleteStrategy(s.id))}>Delete</Button>
               </div>
+              {s.mode === 'auto' && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {s.auto_opt_in?.version === (s.version ?? 1) ? (
+                    <>
+                      <Pill tone="run">AUTO opted in for v{s.auto_opt_in.version}</Pill>
+                      <span className="text-[var(--text-3)]">Still needs today's arm and every live gate.</span>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => kite.autoOptOut(s.id))}>Opt out</Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[var(--text-3)]">Auto sends nothing until you opt this version in:</span>
+                      <Input className="h-7 w-48 es-mono" placeholder={autoWords(s.name)} value={typed[`auto:${s.id}`] ?? ''}
+                        onChange={(e) => setTyped({ ...typed, [`auto:${s.id}`]: e.target.value })} />
+                      <Button size="sm" disabled={busy || typed[`auto:${s.id}`] !== autoWords(s.name)}
+                        onClick={() => void run(() => kite.autoOptIn(s.id, typed[`auto:${s.id}`]))}>Opt in</Button>
+                    </>
+                  )}
+                </div>
+              )}
+              {s.last_scan && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-[var(--text-3)]">
+                    Last scan {s.last_scan.at.slice(11, 16)} UTC · v{s.last_scan.version} · {s.last_scan.source ?? 'no data source'}
+                    {s.last_scan.scanner?.error ? ` · scanner: ${s.last_scan.scanner.error}` : ''}
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {Object.entries(s.last_scan.outcomes).map(([sym, o]) => (
+                      <li key={sym}><span className="es-mono">{sym}</span> <Pill tone={
+                        o.status === 'paper' || o.status === 'sent' ? 'ok' : o.status === 'blocked' ? 'err'
+                          : o.status === 'stale' || o.status === 'no_data' ? 'warn' : 'info'}>{o.status.replace('_', ' ')}</Pill>
+                      {' '}<span className="text-[var(--text-3)]">{o.reason}</span></li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {testing === s.id && <StrategyBacktests strategy={s} />}
               {s.signals.slice().reverse().slice(0, 8).map((g) => {
                 const words = g.order ? confirmWords(g.order.qty, g.symbol) : ''
                 const key = `${s.id}:${g.id}`

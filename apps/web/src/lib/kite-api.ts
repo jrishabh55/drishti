@@ -135,7 +135,7 @@ export interface KiteLeg {
   message?: string | null
 }
 
-export interface KiteTrade {
+export interface KiteTrade extends StrategyAttribution {
   id: string
   ticket_id: string | null
   source: string
@@ -162,9 +162,25 @@ export interface KiteTrade {
   events: { at: string; what: string }[]
 }
 
-export type StrategyMode = 'off' | 'paper' | 'confirm'
+export type StrategyMode = 'off' | 'paper' | 'confirm' | 'auto'
 
-export interface StrategySignal {
+/** Server-stamped on plans, tickets, orders, paper/live trades and backtests. */
+export interface StrategyAttribution {
+  strategy_id?: string
+  strategy_name?: string
+  strategy_version?: number
+}
+
+/** Absent or empty: the legacy full-position fixed stop/target. All in R of the initial risk. */
+export interface ExitPolicy {
+  breakeven_after_r?: number
+  trail_after_r?: number
+  trail_distance_r?: number
+  scale_out_at_r?: number
+  scale_out_pct?: number
+}
+
+export interface StrategySignal extends StrategyAttribution {
   id: string
   date: string
   at: string
@@ -173,8 +189,24 @@ export interface StrategySignal {
   source: string
   reason?: string
   ticket_id?: string
+  kite_trade_id?: string
   expires_at?: string
+  interval?: '1m' | '5m'
+  portfolio_id?: string
   order?: { qty: number; symbol: string; price?: number; stop: number; target: number }
+}
+
+export type ScanOutcomeStatus =
+  'waiting' | 'stale' | 'no_data' | 'blocked' | 'paper' | 'await_confirm' | 'sent' | 'limit_reached'
+
+export interface StrategyLastScan {
+  at: string
+  version: number
+  mode: StrategyMode
+  interval: '1m' | '5m'
+  source: string | null
+  outcomes: Record<string, { status: ScanOutcomeStatus; reason: string; source?: string; data_as_of?: string | null }>
+  scanner: { id: string; matches: number; error: string | null; truncated?: number; data_as_of?: string } | null
 }
 
 export interface Strategy {
@@ -185,18 +217,87 @@ export interface Strategy {
   setup: 'orb' | 'level'
   level: number | null
   or_minutes: number
-  stop_rule: 'or_mid' | 'or_low' | 'pct' | 'atr'
+  stop_rule: 'or_mid' | 'or_low' | 'pct' | 'atr' | 'price'
   stop_param: number | null
   target_r: number
+  /** 'price' keeps a research target as an absolute price (target_param). */
+  target_rule: 'r' | 'price'
+  target_param: number | null
   order_type: 'LIMIT' | 'MARKET'
   max_signals_per_day: number
   confirm_ttl_s: number
+  portfolio_id: string
+  interval: '1m' | '5m'
+  scanner_id: string | null
+  min_volume_x: number | null
+  exit_policy: ExitPolicy | null
   version?: number
   paused_reason?: string
+  paused?: boolean
+  auto_opt_in?: { version: number; at: string } | null
+  last_scan?: StrategyLastScan | null
   signals: StrategySignal[]
 }
 
-export type StrategyInput = Omit<Strategy, 'id' | 'signals' | 'version' | 'paused_reason'>
+type ServerOwned = 'id' | 'signals' | 'version' | 'paused_reason' | 'paused' | 'auto_opt_in' | 'last_scan'
+export type StrategyInput = Omit<Strategy, ServerOwned>
+
+export interface BacktestRequest {
+  strategy_id: string
+  start_date: string
+  end_date: string
+  split_date?: string | null
+  symbols?: string[] | null
+}
+
+export interface BacktestStats {
+  trades: number
+  wins?: number
+  losses?: number
+  win_rate?: number
+  avg_r_net?: number
+  pnl_net?: number
+  charges?: number
+  profit_factor?: number | null
+  max_drawdown?: number
+}
+
+export interface BacktestTrade extends StrategyAttribution {
+  symbol: string
+  trade_date: string
+  signal_time: string
+  qty: number
+  status: string
+  split: 'train' | 'test' | null
+  entry_fill: { time: string; price: number } | null
+  exit_fill: { time: string; price: number; reason: string } | null
+  pnl_net?: number
+  r_net?: number | null
+  charges?: number
+}
+
+export type CoverageDay = 'complete' | 'incomplete' | 'no_data'
+
+export interface BacktestSummary extends StrategyAttribution {
+  id: string
+  created_at: string
+  strategy_id: string
+  config: BacktestRequest & { symbols: string[]; interval: '1m' | '5m' }
+  summary: { all: BacktestStats; train?: BacktestStats; test?: BacktestStats }
+  costs: { charges: number; estimated: boolean }
+  sources: Record<string, string>
+  generated_at: string
+}
+
+export interface Backtest extends BacktestSummary {
+  strategy_snapshot: Record<string, unknown> & { version: number }
+  profile_snapshot: Record<string, unknown>
+  coverage: Record<string, { status: 'ok' | 'partial' | 'insufficient_history'; days: Record<string, CoverageDay>; error?: string }>
+  trades: BacktestTrade[]
+  skipped: { date: string; symbol: string; reason: string; signal_time?: string }[]
+  disclaimer: string
+  assumptions: string[]
+}
 
 export interface KitePerformance {
   trades: number
@@ -245,7 +346,18 @@ export const kite = {
   confirmSignal: (sid: string, sig: string, confirm_text: string) =>
     post<KiteTrade>(`/kite/strategies/${sid}/signals/${sig}/confirm`, { confirm_text }),
   skipSignal: (sid: string, sig: string) => post<StrategySignal>(`/kite/strategies/${sid}/signals/${sig}/skip`),
+  pauseStrategy: (id: string) => post<Strategy>(`/kite/strategies/${id}/pause`),
+  resumeStrategy: (id: string) => post<Strategy>(`/kite/strategies/${id}/resume`),
+  autoOptIn: (id: string, ack: string) => post<Strategy>(`/kite/strategies/${id}/auto-opt-in`, { ack }),
+  autoOptOut: (id: string) => kfetch<Strategy>(`/kite/strategies/${id}/auto-opt-in`, { method: 'DELETE' }),
+  backtests: (strategy_id?: string) =>
+    kfetch<BacktestSummary[]>(`/kite/strategy-backtests${strategy_id ? `?strategy_id=${encodeURIComponent(strategy_id)}` : ''}`),
+  backtest: (id: string) => kfetch<Backtest>(`/kite/strategy-backtests/${encodeURIComponent(id)}`),
+  runBacktest: (body: BacktestRequest) => post<Backtest>('/kite/strategy-backtests', body),
 }
+
+/** Words the server requires typed to opt a strategy version into unattended live sends. */
+export const autoWords = (name: string) => `AUTO ${name}`
 
 /** Words the server requires typed to send a live order. */
 export const confirmWords = (qty: number, symbol: string) => `BUY ${qty} ${symbol}`

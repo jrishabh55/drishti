@@ -59,6 +59,7 @@ Guarantees this CANNOT give, and what happens instead:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 from datetime import datetime
@@ -459,7 +460,8 @@ def new_trade(user_id: str, ticket: Dict[str, Any], now: datetime,
             "planned_entry": plan.get("entry"), "max_loss": plan.get("max_loss"),
             "flat_by": plan.get("flat_by") or profile.flat_by, "product": "MIS",
             "trade_date": _today(now), "sent_at": now.isoformat(), "status": "entry_sent",
-            "filled_qty": 0, "held_qty": 0, "legs": {}, "events": []}
+            "filled_qty": 0, "held_qty": 0, "legs": {}, "events": [],
+            **{k: o[k] for k in paper.ATTRIBUTION if o.get(k) is not None}}
 
 def daily_loss_reasons(user_id: str, now: datetime, profile: DeskProfile,
                        new_max_loss: float) -> List[str]:
@@ -525,6 +527,7 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
                 auth.mark_revoked(user_id)
             raise ExecRefused([f"couldn't read your positions from Kite ({exc}); nothing was "
                                "sent"]) from exc
+        check_funds(client, doc, profile, user_id)
         # The kill switch records itself without this lock (so it is never stuck
         # behind a slow send): re-read it after the broker reads above, as the
         # last thing before anything is persisted or sent.
@@ -557,6 +560,37 @@ def send_entry(user_id: str, ticket: Dict[str, Any], now: datetime, profile: Des
                 auth.mark_revoked(user_id)
         store.update_trade(user_id, t)
         return t
+
+
+def check_funds(client: rest.KiteClient, doc: Dict[str, Any], profile: DeskProfile,
+                user_id: str) -> None:
+    """Real broker funds, read fresh before any entry is placed: the equity
+    segment must be enabled and its finite current balance must cover the
+    full notional (no MIS leverage assumed) plus the profile's cash buffer.
+    Paper capital never stands in; the approved quantity is never resized."""
+    try:
+        m = client.margins_equity()
+    except rest.KiteError as exc:
+        if exc.token_error:
+            auth.mark_revoked(user_id)
+        raise ExecRefused([f"couldn't read your Kite funds ({exc}); nothing was sent"]) from exc
+    try:
+        live = float((m.get("available") or {}).get("live_balance"))
+        net = float(m.get("net"))
+    except (TypeError, ValueError):
+        live = net = float("nan")
+    if m.get("enabled") is not True or not (math.isfinite(live) and math.isfinite(net)):
+        raise ExecRefused(["Kite didn't report usable equity funds (segment disabled or balance "
+                           "missing); nothing was sent"])
+    balance = min(live, net)
+    price = max(float(doc.get("limit") or 0), float(doc.get("planned_entry") or 0))
+    need = doc["qty"] * price
+    usable = balance * (1 - profile.cash_buffer_pct / 100)
+    if price <= 0 or need > usable:
+        raise ExecRefused([f"insufficient Kite funds: this order needs ₹{need:,.0f} in full, "
+                           f"₹{usable:,.0f} is available after your {profile.cash_buffer_pct:g}% "
+                           "cash buffer; nothing was sent"])
+    doc["funds_checked"] = {"live_balance": live, "net": net, "required": round(need, 2)}
 
 
 def _on_tick(price: float, tick: float) -> bool:
@@ -982,8 +1016,9 @@ def kill(user_id: str, now: datetime, transport: Optional[rest.Transport] = None
     with user_lock(user_id):
         store = get_kite_store()
         for s in store.list_strategies(user_id):
-            if s.get("mode") != "off":
-                store.put_strategy(user_id, dict(s, mode="off", paused_reason="kill switch"))
+            if s.get("mode") != "off" or s.get("auto_opt_in"):
+                store.put_strategy(user_id, dict(s, mode="off", paused_reason="kill switch",
+                                                 auto_opt_in=None))
         trades = store.list_trades(user_id, open_only=True)
         for t in trades:
             if _killable(t):

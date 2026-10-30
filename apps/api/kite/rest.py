@@ -128,6 +128,11 @@ class KiteClient:
     def positions(self) -> Dict[str, Any]:
         return self._call("GET", "/portfolio/positions") or {}
 
+    def margins_equity(self) -> Dict[str, Any]:
+        """The equity segment's funds; ``available.live_balance`` is the
+        current available balance (Kite Connect v3 /user/margins)."""
+        return self._call("GET", "/user/margins/equity") or {}
+
 
 # ---------------------------------------------------------------- instruments
 

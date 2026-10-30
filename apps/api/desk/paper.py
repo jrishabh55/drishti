@@ -20,6 +20,11 @@ conservative and bar-based (we never see ticks):
   ending at flat-by.
 * Charges come from market/charges.py with the user's broker plan, so the
   ledger shows gross and net P&L and R.
+* An optional strategy ``exit_policy`` (breakeven / trailing stop / one
+  scale-out, all in R of the INITIAL risk) only acts on completed bars: a
+  stop moved by a bar protects from the NEXT bar on, the stop still beats the
+  scale-out and target inside a bar, and processed bars are never replayed.
+  Without a policy the fixed stop/target semantics above are unchanged.
 """
 from __future__ import annotations
 
@@ -30,6 +35,10 @@ from typing import Any, Dict, List, Optional, Sequence
 from apps.api.desk.bars import Bar
 from apps.api.desk.market import charges as charges_mod, ticks
 from apps.api.desk.market.session import NSE, SessionSpec, clock24, parse_clock
+
+
+#: Strategy attribution stamped on plans, tickets, orders and trades.
+ATTRIBUTION = ("strategy_id", "strategy_name", "strategy_version")
 
 
 def interval_of(trade_or_plan: Dict[str, Any]) -> str:
@@ -45,7 +54,8 @@ def new_trade(order: Dict[str, Any], *, ticket_id: str, placed_at: datetime,
               profile, spec: SessionSpec = NSE) -> Dict[str, Any]:
     plan = order.get("plan") or {}
     local = placed_at.astimezone(spec.tz)
-    return {
+    extra = {k: order[k] for k in ATTRIBUTION + ("exit_policy",) if order.get(k) is not None}
+    return {**extra,
         "ticket_id": ticket_id, "symbol": order["symbol"], "side": "buy", "qty": order["qty"],
         "interval": interval_of(plan),
         "order_type": order["order_type"], "limit": order.get("price"),
@@ -88,6 +98,7 @@ def advance(trade: Dict[str, Any], bars: Sequence[Bar], now: datetime, profile,
     flat_min = parse_clock(t["flat_by"])
     deadline = parse_clock(t["entry_deadline"])
     tick = ticks.tick_size(t.get("limit") or t.get("planned_entry") or t["stop"])
+    policy = t.get("exit_policy") or None
 
     def ev(b_min: int, what: str) -> None:
         t["events"].append({"at": clock24(b_min), "what": what})
@@ -120,6 +131,9 @@ def advance(trade: Dict[str, Any], bars: Sequence[Bar], now: datetime, profile,
             t["entry_fill"] = {"time": clock24(start_min), "price": fill}
             t["status"] = "open"
             t["mae"] = t["mfe"] = 0.0
+            if policy:
+                t.update(initial_stop=t["stop"], open_qty=t["qty"], bars_through=start_min,
+                         exit_legs=[])
             ev(start_min, f"bought {t['qty']} at ₹{fill:.2f}")
             # The fill bar can stop us out (conservative), never hit the target.
             if b["l"] <= t["stop"]:
@@ -128,20 +142,28 @@ def advance(trade: Dict[str, Any], bars: Sequence[Bar], now: datetime, profile,
             continue
         if t["status"] != "open":
             break
+        if policy and start_min <= t.get("bars_through", -1):
+            continue
         entry = t["entry_fill"]["price"]
-        risk = entry - t["stop"]
+        risk = entry - t.get("initial_stop", t["stop"])
         if risk > 0:
             t["mae"] = round(min(t.get("mae", 0.0), (b["l"] - entry) / risk), 2)
             t["mfe"] = round(max(t.get("mfe", 0.0), (b["h"] - entry) / risk), 2)
         if b["l"] <= t["stop"]:
-            _exit(t, min(b["o"], t["stop"]), start_min, "stop", ev)
+            _exit(t, min(b["o"], t["stop"]), start_min, t.get("stop_kind", "stop"), ev)
             break
+        if policy and risk > 0:
+            _scale_out(t, b, entry + (policy.get("scale_out_at_r") or 0) * risk, start_min, ev)
         if b["h"] >= t["target"]:
             _exit(t, max(b["o"], t["target"]), start_min, "target", ev)
             break
         if close_min >= flat_min:
             _exit(t, b["c"], close_min, "flat_by", ev)
             break
+        if policy:
+            if risk > 0:
+                _move_stop(t, b, entry, risk, start_min, ev)
+            t["bars_through"] = start_min
     if t["status"] == "pending" and day_over:
         t["status"] = "cancelled"
         ev(spec.close_min, "session over without a fill: cancelled")
@@ -157,17 +179,57 @@ def _exit(t: Dict[str, Any], price: float, at_min: int, reason: str, ev) -> None
     price = ticks.round_to_tick(price)
     t["exit_fill"] = {"time": clock24(at_min), "price": price, "reason": reason}
     t["status"] = "closed"
+    if "open_qty" in t:
+        t["exit_legs"] = (t.get("exit_legs") or []) + [
+            {"time": clock24(at_min), "price": price, "qty": t["open_qty"], "reason": reason}]
+        t["open_qty"] = 0
     words = {"stop": "stopped out", "target": "target hit", "flat_by": "flat by",
-             "session_end": "closed at the session end", "manual": "closed by you"}
+             "session_end": "closed at the session end", "manual": "closed by you",
+             "breakeven": "stopped at breakeven", "trail": "trailing stop hit"}
     ev(at_min, f"{words.get(reason, reason)} at ₹{price:.2f}")
+
+
+def _scale_out(t: Dict[str, Any], b: Bar, level: float, at_min: int, ev) -> None:
+    """One partial exit at ``scale_out_at_r`` (once). Called after the stop check."""
+    pol = t["exit_policy"]
+    if t.get("scaled_out") or not pol.get("scale_out_at_r") or b["h"] < level:
+        return
+    t["scaled_out"] = True
+    q = int(t["qty"] * pol["scale_out_pct"] // 100)
+    if q <= 0 or q >= t["open_qty"]:
+        ev(at_min, f"scale-out of {pol['scale_out_pct']:g}% rounds to {q} shares: skipped")
+        return
+    price = ticks.round_to_tick(max(b["o"], level))
+    t["open_qty"] -= q
+    t["exit_legs"].append({"time": clock24(at_min), "price": price, "qty": q,
+                           "reason": "scale_out"})
+    ev(at_min, f"scaled out {q} at ₹{price:.2f}")
+
+
+def _move_stop(t: Dict[str, Any], b: Bar, entry: float, risk: float, at_min: int, ev) -> None:
+    """After a COMPLETED bar: raise the stop for the next bar (never lower it)."""
+    pol = t["exit_policy"]
+    hw = t["high_water"] = max(t.get("high_water", entry), b["h"])
+    new, kind = t["stop"], t.get("stop_kind", "stop")
+    if pol.get("breakeven_after_r") and hw >= entry + pol["breakeven_after_r"] * risk             and entry > new:
+        new, kind = entry, "breakeven"
+    if pol.get("trail_after_r") and hw >= entry + pol["trail_after_r"] * risk:
+        trail = ticks.round_to_tick(hw - pol["trail_distance_r"] * risk)
+        if trail > new:
+            new, kind = trail, "trail"
+    if new > t["stop"]:
+        t["stop"], t["stop_kind"] = new, kind
+        ev(at_min, f"stop raised to ₹{new:.2f} ({kind})")
 
 
 def _settle(t: Dict[str, Any], profile) -> None:
     entry, exit_p, q = t["entry_fill"]["price"], t["exit_fill"]["price"], t["qty"]
-    gross = round((exit_p - entry) * q, 2)
-    c = charges_mod.round_trip_cost(entry, exit_p, q, t.get("product", "MIS"),
-                                    profile.brokerage())
-    risk = (entry - t["stop"]) * q
+    legs = t.get("exit_legs") or [{"price": exit_p, "qty": q}]
+    gross = round(sum((x["price"] - entry) * x["qty"] for x in legs), 2)
+    # ponytail: one round trip per leg — an estimate, like every paper charge.
+    c = sum(charges_mod.round_trip_cost(entry, x["price"], x["qty"], t.get("product", "MIS"),
+                                        profile.brokerage()) for x in legs)
+    risk = (entry - t.get("initial_stop", t["stop"])) * q
     t["pnl_gross"] = gross
     t["charges"] = round(c, 2)
     t["pnl_net"] = round(gross - c, 2)

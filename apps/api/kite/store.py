@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS kite_strategies (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_kite_strategies_user ON kite_strategies (user_id, created_at);
+CREATE TABLE IF NOT EXISTS kite_strategy_backtests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    strategy_id TEXT NOT NULL,
+    doc TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kite_backtests_user ON kite_strategy_backtests (user_id, created_at);
 CREATE TABLE IF NOT EXISTS kite_data_grants (
     owner_id TEXT NOT NULL,
     recipient_id TEXT NOT NULL,
@@ -276,6 +284,31 @@ class KiteStore:
         with self._conn() as c:
             rows = c.execute("SELECT user_id, doc FROM kite_strategies").fetchall()
         return sorted({r["user_id"] for r in rows if json.loads(r["doc"]).get("mode") != "off"})
+
+
+    # ------------------------------------------------------------ backtests (insert-only)
+    def create_backtest(self, user_id: str, doc: Dict[str, Any]) -> Dict[str, Any]:
+        doc = dict(doc, id=uuid.uuid4().hex, created_at=now_iso())
+        with self._conn() as c:
+            c.execute("INSERT INTO kite_strategy_backtests (id, user_id, strategy_id, doc, "
+                      "created_at) VALUES (?,?,?,?,?)",
+                      (doc["id"], user_id, doc["strategy_id"], json.dumps(doc), doc["created_at"]))
+        return doc
+
+    def get_backtest(self, bid: str, user_id: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as c:
+            row = c.execute("SELECT doc FROM kite_strategy_backtests WHERE id=? AND user_id=?",
+                            (bid, user_id)).fetchone()
+        return json.loads(row["doc"]) if row else None
+
+    def list_backtests(self, user_id: str, strategy_id: Optional[str] = None,
+                       limit: int = 50) -> List[Dict[str, Any]]:
+        q, args = "SELECT doc FROM kite_strategy_backtests WHERE user_id=?", [user_id]
+        if strategy_id:
+            q, args = q + " AND strategy_id=?", args + [strategy_id]
+        with self._conn() as c:
+            return [json.loads(r["doc"]) for r in c.execute(
+                q + " ORDER BY created_at DESC LIMIT ?", (*args, limit))]
 
 
 _store: Optional[KiteStore] = None

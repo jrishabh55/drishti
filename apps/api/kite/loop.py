@@ -2,7 +2,7 @@
 
 Every ``KITE_LOOP_SECONDS`` while NSE is open (plus the 15 minutes after the
 close so flat-by exits settle): reconcile every user's open trades against
-Kite's order book, then scan paper/confirm strategies once a minute. Order
+Kite's order book, then scan paper/confirm/auto strategies once a minute. Order
 postbacks from a user's ticker trigger an immediate reconcile as well; this
 loop is the polling fallback. Disable with KITE_LOOP=0.
 """
