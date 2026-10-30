@@ -18,7 +18,7 @@ describe('guide content', () => {
     }
   })
   it('starts the paper tour on a useful screen rather than the redirect-only home', () => {
-    expect(tourSteps('first-paper')[0].route).toBe('/desk/paper')
+    expect(tourSteps('first-paper')[0]).toMatchObject({ route: '/desk/start', anchor: 'guide-trading-workflow' })
   })
   it('uses specific feature routes and handles dynamic objects without inventing ids', () => {
     expect(featureForRoute('/desk/plans/abc?tab=test')?.id).toBe('plans')

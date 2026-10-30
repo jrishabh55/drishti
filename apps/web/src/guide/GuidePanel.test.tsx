@@ -7,7 +7,7 @@ vi.mock('@tanstack/react-router', () => ({ useRouterState: ({ select }: { select
 afterEach(() => { cleanup(); localStorage.clear(); router.path = '/desk/paper'; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 function App({ user = 'alice' }: { user?: string }) {
-  return <GuideProvider userId={user}><GuideButton /><main><h1 data-guide="guide-paper">Paper ledger</h1><button onClick={() => { throw Error('must not click') }}>Confirm trade</button></main></GuideProvider>
+  return <GuideProvider userId={user}><GuideButton /><main><h1 data-guide="guide-paper">Paper ledger</h1><section data-guide="guide-trading-workflow"><h2>Trading workflow</h2></section><button onClick={() => { throw Error('must not click') }}>Confirm trade</button></main></GuideProvider>
 }
 describe('contextual guide', () => {
   it('explains a reset after the lesson catalog changes', () => {
@@ -24,6 +24,7 @@ describe('contextual guide', () => {
     router.path = '/desk/paper'
   })
   it.each([true, false])('reveals the page while retaining the tour highlight (mobile=%s)', mobile => {
+    router.path = '/desk/start'
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 100, height: 30, x: 0, y: 100, top: 100, left: 0, right: 100, bottom: 130, toJSON() {} })
     render(<App />)
@@ -35,7 +36,7 @@ describe('contextual guide', () => {
     fireEvent.click(showPage)
     expect(screen.getByRole('button', { name: 'Resume guide' })).toBeTruthy()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Resume guide' }))
-    expect(screen.getByRole('heading', { name: 'Paper ledger' }).hasAttribute('data-guide-highlight')).toBe(true)
+    expect(screen.getByRole('heading', { name: 'Trading workflow' }).parentElement?.hasAttribute('data-guide-highlight')).toBe(true)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.queryByRole('complementary', { name: 'Drishti Guide' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Resume guide' }))
@@ -67,7 +68,7 @@ describe('contextual guide', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))
     fireEvent.click(screen.getByRole('tab', { name: 'Tours' }))
     fireEvent.click(screen.getByRole('button', { name: 'Start first paper trade tour' }))
-    expect(router.navigate).toHaveBeenCalledWith({ to: '/desk/paper' })
+    expect(router.navigate).toHaveBeenCalledWith({ to: '/desk/start' })
     fireEvent.click(screen.getByRole('button', { name: 'Next step' }))
     expect(router.navigate).toHaveBeenLastCalledWith({ to: '/desk/settings' })
     expect(screen.getByText(/target is not visible/i)).toBeTruthy()

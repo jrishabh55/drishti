@@ -174,22 +174,24 @@ def scanner_ok(scanner: Optional[Dict[str, Any]], user_id: str) -> bool:
     return bool(scanner) and (scanner.get("prebuilt") or scanner.get("user_id") == user_id)
 
 
-def candidates(user_id: str, s: Dict[str, Any]) -> Tuple[List[str], Optional[Dict[str, Any]]]:
+def candidates(user_id: str, s: Dict[str, Any], *, now: Optional[datetime] = None) -> Tuple[List[str], Optional[Dict[str, Any]]]:
     """The strategy's own symbols, then its scanner's matches, at most 20."""
     syms = list(s.get("symbols") or [])
     if not s.get("scanner_id"):
         return syms[:MAX_SYMBOLS], None
     info: Dict[str, Any] = {"id": s["scanner_id"], "matches": 0, "error": None}
     try:
-        from apps.api.scanner.engine import get_engine
+        from apps.api.scanner.engine import run_for_user
         from apps.api.scanner.schema import parse_definition
         from apps.api.scanner.store import get_scanner_store
 
         sc = get_scanner_store().get_scanner(s["scanner_id"])
         if not scanner_ok(sc, user_id):
             raise ValueError("the scanner was deleted or isn't yours")
-        res = get_engine().run(parse_definition(sc["definition"]))
+        res = run_for_user(user_id, parse_definition(sc["definition"]), now=now)
         info["data_as_of"] = res.get("data_as_of")
+        info["source"] = res.get("source")
+        info["coverage"] = res.get("coverage")
         found = [m["symbol"] for m in res.get("matches") or []]
         info["matches"] = len(found)
         for sym in found:
@@ -250,7 +252,7 @@ def scan(user_id: str, s: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
     todays = [g for g in s.get("signals") or [] if g["date"] == today]
     done = {g["symbol"] for g in todays}
     prof = load_profile(user_id)
-    syms, scanner_info = candidates(user_id, s)
+    syms, scanner_info = candidates(user_id, s, now=now)
     outcomes: Dict[str, Dict[str, Any]] = {}
     sources = set()
     for sym in syms:
