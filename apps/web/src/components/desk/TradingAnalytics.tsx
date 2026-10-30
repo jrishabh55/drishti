@@ -84,15 +84,17 @@ export function TradingAnalytics() {
   const [mode, setMode] = useState<BookMode>('paper')
   const [portfolioId, setPortfolioId] = useState<string>(pf?.selectedId ?? 'default')
   const [strategyId, setStrategyId] = useState<string | null>(null)
+  const [version, setVersion] = useState<number | null>(null)
   const [data, setData] = useState<TradingPerformance | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [strategies, setStrategies] = useState<Record<string, string>>({})
+  const [versions, setVersions] = useState<Record<string, number[]>>({})
   const [editing, setEditing] = useState<JournalRow | null>(null)
   const [tick, setTick] = useState(0)
 
   // Live trades belong to the Default account only.
-  const filters: AnalyticsFilters = { mode, portfolio_id: mode === 'live' ? 'default' : portfolioId, strategy_id: strategyId }
-  const key = `${filters.mode}|${filters.portfolio_id}|${filters.strategy_id ?? ''}`
+  const filters: AnalyticsFilters = { mode, portfolio_id: mode === 'live' ? 'default' : portfolioId, strategy_id: strategyId, strategy_version: version }
+  const key = `${filters.mode}|${filters.portfolio_id}|${filters.strategy_id ?? ''}|${filters.strategy_version ?? ''}`
 
   useEffect(() => {
     let live = true
@@ -104,6 +106,15 @@ export function TradingAnalytics() {
       setStrategies((s) => {
         const next = { ...s }
         for (const g of d.by_strategy) if (g.strategy_id) next[g.strategy_id] = g.strategy_name ?? g.strategy_id
+        return next
+      })
+      setVersions((s) => {
+        const next = { ...s }
+        for (const g of d.by_strategy) {
+          if (!g.strategy_id || g.strategy_version == null) continue
+          const v = Number(g.strategy_version)
+          if (v > 0 && !(next[g.strategy_id] ?? []).includes(v)) next[g.strategy_id] = [...(next[g.strategy_id] ?? []), v].sort((a, b) => a - b)
+        }
         return next
       })
     }, (e) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
@@ -130,7 +141,7 @@ export function TradingAnalytics() {
               <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={strategyId ?? ANY} onValueChange={(v) => setStrategyId(v === ANY ? null : v)}>
+        <Select value={strategyId ?? ANY} onValueChange={(v) => { setStrategyId(v === ANY ? null : v); setVersion(null) }}>
           <SelectTrigger aria-label="Strategy" className="w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={ANY}>All strategies</SelectItem>
@@ -138,6 +149,15 @@ export function TradingAnalytics() {
             {Object.entries(strategies).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
           </SelectContent>
         </Select>
+        {strategyId && strategyId !== 'manual' && (
+          <Select value={version == null ? ANY : String(version)} onValueChange={(v) => setVersion(v === ANY ? null : Number(v))}>
+            <SelectTrigger aria-label="Strategy version" className="w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY}>All versions</SelectItem>
+              {(versions[strategyId] ?? []).map((v) => <SelectItem key={v} value={String(v)}>v{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href={evaluationApi.tradeJournalCsvUrl(filters)} download>
           Export CSV
         </a>

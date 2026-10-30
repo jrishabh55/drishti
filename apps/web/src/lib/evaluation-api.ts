@@ -130,6 +130,8 @@ export interface AnalyticsFilters {
   portfolio_id: string
   /** A strategy id, or 'manual' for unattributed (legacy/manual) trades. */
   strategy_id?: string | null
+  /** A positive version of strategy_id; ignored for 'manual' or no strategy. */
+  strategy_version?: number | null
 }
 
 export interface Attribution { strategy_id: string | null; strategy_name: string | null; strategy_version: number | null }
@@ -194,7 +196,7 @@ export interface BookGroup {
 
 export interface TradingPerformance {
   mode: BookMode
-  filters: { portfolio_id: string; strategy_id: string | null }
+  filters: { portfolio_id: string; strategy_id: string | null; strategy_version?: number | null }
   generated_at: string
   /** Null when no single account applies (e.g. all paper portfolios). */
   capital: number | null

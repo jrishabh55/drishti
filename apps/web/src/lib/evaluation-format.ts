@@ -40,6 +40,8 @@ export function cellLabel(c: BatchCell): string {
 export function analyticsQuery(f: AnalyticsFilters): string {
   const q = new URLSearchParams({ mode: f.mode, portfolio_id: f.portfolio_id })
   if (f.strategy_id) q.set('strategy_id', f.strategy_id)
+  if (f.strategy_id && f.strategy_id !== 'manual' && f.strategy_version && f.strategy_version > 0)
+    q.set('strategy_version', String(f.strategy_version))
   return q.toString()
 }
 

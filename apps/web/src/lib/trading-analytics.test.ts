@@ -8,6 +8,18 @@ describe('trading analytics format', () => {
       .toBe('mode=live&portfolio_id=default&strategy_id=manual')
   })
 
+  it('adds a strategy version only for a real strategy and a positive version', () => {
+    expect(analyticsQuery({ mode: 'paper', portfolio_id: 'all', strategy_id: 's1', strategy_version: 2 }))
+      .toBe('mode=paper&portfolio_id=all&strategy_id=s1&strategy_version=2')
+    expect(analyticsQuery({ mode: 'paper', portfolio_id: 'all', strategy_id: 'manual', strategy_version: 2 }))
+      .toBe('mode=paper&portfolio_id=all&strategy_id=manual')
+    expect(analyticsQuery({ mode: 'paper', portfolio_id: 'all', strategy_version: 2 })).toBe('mode=paper&portfolio_id=all')
+    expect(analyticsQuery({ mode: 'paper', portfolio_id: 'all', strategy_id: 's1', strategy_version: 0 }))
+      .toBe('mode=paper&portfolio_id=all&strategy_id=s1')
+    expect(analyticsQuery({ mode: 'paper', portfolio_id: 'all', strategy_id: 's1', strategy_version: null }))
+      .toBe('mode=paper&portfolio_id=all&strategy_id=s1')
+  })
+
   it('never invents attribution for legacy rows', () => {
     expect(strategyLabel({ strategy_id: null, strategy_name: null, strategy_version: null })).toBe('Manual/legacy')
     expect(strategyLabel({ strategy_id: 's1', strategy_name: 'ORB 15', strategy_version: 2 })).toBe('ORB 15 v2')
