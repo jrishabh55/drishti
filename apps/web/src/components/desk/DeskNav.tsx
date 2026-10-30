@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { PortfolioPicker } from './Portfolios'
 
 const TABS = [
+  { to: '/desk/start', label: 'Start here', exact: false },
   { to: '/desk', label: 'Today', exact: true },
   { to: '/desk/research', label: 'Research', exact: false },
   { to: '/desk/plans', label: 'Plans', exact: false },

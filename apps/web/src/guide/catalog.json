@@ -1,12 +1,12 @@
 {
-  "version": "2026-10-30.3",
+  "version": "2026-10-30.4",
   "features": [
     {
       "id": "orientation",
       "title": "Start here",
-      "route": "/",
+      "route": "/desk/start",
       "summary": "Paper money, analysis credits and your first workflow.",
-      "body": "Paper capital is simulated trading money. Analysis credits are separate and may pay for model analysis. Start with Limits, research a symbol, create a plan, check sizing, then deliberately confirm a paper ticket. Paper results do not prove live execution quality.",
+      "body": "Use Trade Desk’s Start here page to check market-data and background-processing readiness. From a completed NSE analysis or scanner match, open Draft strategy, review the dated source, paper portfolio, candle interval, entry, stop, target and limits, then save Off. Run a historical strategy test and explicitly enable Paper when ready. Review its scan diagnostics, ledger and attributed performance. Paper capital is simulated money; paid analysis credits are separate.",
       "keywords": [
         "paper",
         "capital",
@@ -19,15 +19,19 @@
         {
           "question": "Does paper money pay for analysis?",
           "answer": "No. Paper capital funds simulated positions in the ledger. Analysis credits are a separate balance for supported analysis runs."
+        },
+        {
+          "question": "Will saving a strategy draft start trading?",
+          "answer": "No. A draft is saved Off. Review it in Strategies, choose its portfolio and rules, and deliberately enable Paper. Live trading has separate gates and stays disabled in this deployment."
         }
       ],
       "chapter": "orientation",
       "steps": [
         {
-          "route": "/desk/paper",
-          "anchor": "guide-paper",
+          "route": "/desk/start",
+          "anchor": "guide-trading-workflow",
           "title": "Start here",
-          "body": "Paper capital is simulated trading money. Analysis credits are separate and may pay for model analysis. Start with Limits, research a symbol, create a plan, check sizing, then deliberately confirm a paper ticket. Paper results do not prove live execution quality.",
+          "body": "Use Trade Desk’s Start here page to check market-data and background-processing readiness. From a completed NSE analysis or scanner match, open Draft strategy, review the dated source, paper portfolio, candle interval, entry, stop, target and limits, then save Off. Run a historical strategy test and explicitly enable Paper when ready. Review its scan diagnostics, ledger and attributed performance. Paper capital is simulated money; paid analysis credits are separate.",
           "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
         }
       ]
@@ -424,7 +428,7 @@
       "title": "Performance",
       "route": "/desk/performance",
       "summary": "Review paper outcomes and compare expectations.",
-      "body": "Review paper results by day and expected versus observed outcomes. Check charges, losses and sample size as well as gains. A new account has no trading history; zeros and empty charts are expected until simulated trades progress. Delayed data and execution assumptions limit conclusions about live performance. Results follow the portfolio selected in Trade Desk, so you can compare separate experiments without combining their cash or trades.",
+      "body": "Review the selected paper portfolio’s net results, equity/drawdown and replay comparisons. The trading analytics section also filters by paper or live mode, portfolio and strategy/version, shows realized results separately from fresh marked open P&L, and provides journal notes, tags and CSV export. Stale or missing marks are excluded and counted. Charges are estimated unless an actual broker reconciliation is supplied; benchmarks show unavailable rather than invented returns. Paper and live money are never combined as earnings.",
       "keywords": [
         "performance",
         "results",
@@ -440,6 +444,10 @@
         {
           "question": "Why is performance empty?",
           "answer": "You may not have completed any paper trades. Check the ledger for waiting or open entries. The guide never invents a history to fill this screen."
+        },
+        {
+          "question": "Why is open P&L missing or different from realized profit?",
+          "answer": "Open P&L uses a fresh available market mark and is gross before exit costs. Stale or unavailable marks are excluded. Realized results require a closed trade and include estimated charges. Select the correct paper/live mode, portfolio and strategy version."
         }
       ],
       "chapter": "performance",
@@ -524,7 +532,7 @@
       "title": "Backtests",
       "route": "/evaluation",
       "summary": "Inspect evaluation setups and historical results.",
-      "body": "Create an evaluation using available configuration, then inspect its status and results. Running evaluations is a deliberate action and can consume analysis resources. Historical results depend on available data and chosen assumptions. They are not predictions or a guarantee that an approach works live.",
+      "body": "There are three different tests. Time Machine replays a particular plan and simulates outcomes. A saved strategy’s historical test replays its rules with available candles, costs and coverage; inspect its frozen version and any separate test-period results from Strategies. The Backtests page runs bounded AI-analysis batches and can consume analysis resources after you confirm the quote. Historical results and simulations are not predictions or evidence that a strategy will profit live.",
       "keywords": [
         "backtest",
         "evaluation",
@@ -545,7 +553,7 @@
           "route": "/evaluation",
           "anchor": "guide-backtests",
           "title": "Backtests",
-          "body": "Create an evaluation using available configuration, then inspect its status and results. Running evaluations is a deliberate action and can consume analysis resources. Historical results depend on available data and chosen assumptions. They are not predictions or a guarantee that an approach works live.",
+          "body": "There are three different tests. Time Machine replays a particular plan and simulates outcomes. A saved strategy’s historical test replays its rules with available candles, costs and coverage; inspect its frozen version and any separate test-period results from Strategies. The Backtests page runs bounded AI-analysis batches and can consume analysis resources after you confirm the quote. Historical results and simulations are not predictions or evidence that a strategy will profit live.",
           "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
         }
       ]
@@ -582,6 +590,10 @@
         {
           "question": "Does a shared connection have separate provider limits?",
           "answer": "No. Shared quotes and history requests use the connection owner’s Kite API quota. Keep simultaneous requests modest; if the feed is unavailable, the desk falls back to labeled delayed data."
+        },
+        {
+          "question": "Does Kite make every scanner live immediately?",
+          "answer": "After daily login, start the selected connection’s universe stream and wait for history backfill. General scanners and opening-range scans use scoped Kite candles where ready; source coverage shows the live and delayed portions. A missing, expired or revoked connection falls back only where permitted and is labelled. Completed-candle conditions still wait for candle close; fundamentals and closed daily history are not tick data."
         }
       ],
       "chapter": "broker",

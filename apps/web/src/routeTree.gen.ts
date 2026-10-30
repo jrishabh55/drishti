@@ -19,6 +19,7 @@ import { Route as ScannersNewRouteImport } from './routes/scanners.new'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as EvaluationIdRouteImport } from './routes/evaluation.$id'
 import { Route as DeskStrategiesRouteImport } from './routes/desk.strategies'
+import { Route as DeskStartRouteImport } from './routes/desk.start'
 import { Route as DeskSettingsRouteImport } from './routes/desk.settings'
 import { Route as DeskResearchRouteImport } from './routes/desk.research'
 import { Route as DeskPerformanceRouteImport } from './routes/desk.performance'
@@ -79,6 +80,11 @@ const EvaluationIdRoute = EvaluationIdRouteImport.update({
 const DeskStrategiesRoute = DeskStrategiesRouteImport.update({
   id: '/desk/strategies',
   path: '/desk/strategies',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeskStartRoute = DeskStartRouteImport.update({
+  id: '/desk/start',
+  path: '/desk/start',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeskSettingsRoute = DeskSettingsRouteImport.update({
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/research': typeof DeskResearchRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/desk/start': typeof DeskStartRoute
   '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/research': typeof DeskResearchRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/desk/start': typeof DeskStartRoute
   '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
@@ -195,6 +203,7 @@ export interface FileRoutesById {
   '/desk/performance': typeof DeskPerformanceRoute
   '/desk/research': typeof DeskResearchRoute
   '/desk/settings': typeof DeskSettingsRoute
+  '/desk/start': typeof DeskStartRoute
   '/desk/strategies': typeof DeskStrategiesRoute
   '/evaluation/$id': typeof EvaluationIdRoute
   '/runs/$id': typeof RunsIdRoute
@@ -220,6 +229,7 @@ export interface FileRouteTypes {
     | '/desk/performance'
     | '/desk/research'
     | '/desk/settings'
+    | '/desk/start'
     | '/desk/strategies'
     | '/evaluation/$id'
     | '/runs/$id'
@@ -243,6 +253,7 @@ export interface FileRouteTypes {
     | '/desk/performance'
     | '/desk/research'
     | '/desk/settings'
+    | '/desk/start'
     | '/desk/strategies'
     | '/evaluation/$id'
     | '/runs/$id'
@@ -266,6 +277,7 @@ export interface FileRouteTypes {
     | '/desk/performance'
     | '/desk/research'
     | '/desk/settings'
+    | '/desk/start'
     | '/desk/strategies'
     | '/evaluation/$id'
     | '/runs/$id'
@@ -290,6 +302,7 @@ export interface RootRouteChildren {
   DeskPerformanceRoute: typeof DeskPerformanceRoute
   DeskResearchRoute: typeof DeskResearchRoute
   DeskSettingsRoute: typeof DeskSettingsRoute
+  DeskStartRoute: typeof DeskStartRoute
   DeskStrategiesRoute: typeof DeskStrategiesRoute
   EvaluationIdRoute: typeof EvaluationIdRoute
   RunsIdRoute: typeof RunsIdRoute
@@ -373,6 +386,13 @@ declare module '@tanstack/react-router' {
       path: '/desk/strategies'
       fullPath: '/desk/strategies'
       preLoaderRoute: typeof DeskStrategiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/desk/start': {
+      id: '/desk/start'
+      path: '/desk/start'
+      fullPath: '/desk/start'
+      preLoaderRoute: typeof DeskStartRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desk/settings': {
@@ -466,6 +486,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeskPerformanceRoute: DeskPerformanceRoute,
   DeskResearchRoute: DeskResearchRoute,
   DeskSettingsRoute: DeskSettingsRoute,
+  DeskStartRoute: DeskStartRoute,
   DeskStrategiesRoute: DeskStrategiesRoute,
   EvaluationIdRoute: EvaluationIdRoute,
   RunsIdRoute: RunsIdRoute,

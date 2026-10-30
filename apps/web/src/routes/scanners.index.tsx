@@ -5,6 +5,7 @@ import {
   blankFilter, FilterPanel, filterFromNl, filterFromScanner, type ActiveFilter,
 } from '#/components/scanner/FilterPanel'
 import { ResultsTable } from '#/components/scanner/ResultsTable'
+import { StrategyDraftButton } from '#/components/desk/StrategyDraftButton'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
 import {
@@ -106,6 +107,11 @@ function ScannersPage() {
   )
   const allMine = useMemo(() => items.filter((s) => !s.prebuilt), [items])
   const trimmedQuery = query.trim()
+  const draftOrigin = filter?.origin
+  const draftScannerId = filter?.json === filter?.originalJson
+    ? draftOrigin?.kind === 'mine' ? draftOrigin.id
+      : draftOrigin?.kind === 'prebuilt' ? items.find(s => s.prebuilt && s.name === draftOrigin.name)?.id : undefined
+    : undefined
 
   async function selectScanner(s: ScannerSummary) {
     setPickerOpen(false); setPickerQuery(''); setError(null)
@@ -294,6 +300,7 @@ function ScannersPage() {
                   {result.label} ({result.data.matches.length})
                 </h2>
               </div>
+              {draftScannerId && !previewing && <StrategyDraftButton source={{ scanner_id: draftScannerId }} label="Draft scanner strategy" />}
               {previewing && (
                 <span className="es-pill run">
                   <span className="es-dot pulse" />

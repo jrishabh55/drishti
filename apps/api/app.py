@@ -102,6 +102,7 @@ def create_app() -> FastAPI:
             feeds.register_facts_provider(datasets.nse_facts)
         if os.environ.get("DESK_LOOP", "1") != "0":
             desk_task = asyncio.create_task(desk_loop(), name="desk-loop")
+        app.state.trading_loops = {"paper": desk_task, "strategies": kite_task, "scanner": scanner_task, "messages": messaging_task}
         logger.info("webapp ready")
         try:
             yield
@@ -180,12 +181,16 @@ def create_app() -> FastAPI:
     app.include_router(evaluation_router, prefix="/api")
     from apps.api.routes.kite import router as kite_router
     app.include_router(kite_router, prefix="/api")
+    from apps.api.routes.strategy_backtests import router as strategy_backtests_router
+    app.include_router(strategy_backtests_router, prefix="/api")
     from apps.api.routes.desk_research import router as desk_research_router
     app.include_router(desk_research_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(scanners_router, prefix="/api")
     app.include_router(desk_router, prefix="/api")
+    from apps.api.routes.strategy_workflow import router as strategy_workflow_router
+    app.include_router(strategy_workflow_router, prefix="/api")
     # No prefix: these two routes deliberately live on different roots. The
     # websocket is public under /api/relay/ws, while the shim sits on /internal
     # so the frontend's /api/* catch-all proxy does not expose it.

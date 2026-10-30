@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { StrategyDraftButton } from '#/components/desk/StrategyDraftButton'
 import { ReplayOdds } from '#/components/desk/ReplayOdds'
 import { api } from '#/lib/api'
 import { ratingTooltip } from '#/lib/rating'
@@ -392,6 +393,10 @@ export function LevelsPanel({ runId }: { runId: string }) {
                 {size.basis}
               </div>
             </div>
+          )}
+
+          {levels && data?.viable && data.ticker.toUpperCase().endsWith('.NS') && (
+            <div className="py-4"><StrategyDraftButton source={{ run_id: runId }} label="Draft a strategy from these levels" /></div>
           )}
 
           {/* Time Machine (swing mode): replay this exact entry/stop/target

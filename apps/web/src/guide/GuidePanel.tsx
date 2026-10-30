@@ -28,6 +28,6 @@ export function GuidePanel() {
       </>}
       {tab === 'ask' && <GuideAsk />}
     </div>
-    <footer className="drishti-guide-footer">Operational help · no automatic trades</footer>
+    <footer className="drishti-guide-footer">Operational help · trade controls stay in Trade Desk</footer>
   </>
 }

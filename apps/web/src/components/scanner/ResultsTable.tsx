@@ -1,3 +1,4 @@
+import { StrategyDraftButton } from '#/components/desk/StrategyDraftButton'
 import { Link } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '#/components/ui/dialog'
@@ -112,6 +113,7 @@ export function ResultsTable({ result }: { result: ScanResult }) {
                     className="text-xs font-medium text-primary underline-offset-2 hover:underline">
                     Analyse →
                   </Link>
+                  <div className="mt-1"><StrategyDraftButton source={{ symbols: [m.symbol] }} /></div>
                 </TableCell>
               </TableRow>
             ))}
