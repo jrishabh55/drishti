@@ -693,6 +693,11 @@ body {
 .es-report li { margin: 0 0 4px; }
 .es-report strong { color: var(--text-1); font-weight: 600; }
 .es-report a { color: var(--accent-hi); text-decoration: underline; text-underline-offset: 2px; }
+.es-report-table { max-width: 100%; overflow-x: auto; margin: 12px 0 16px; }
+.es-report table { width: 100%; border-collapse: collapse; }
+.es-report th,
+.es-report td { padding: 8px 12px; border-bottom: 1px solid var(--line-1); text-align: left; vertical-align: top; }
+.es-report th { color: var(--text-1); font-weight: 600; }
 .es-report code {
   font-family: var(--font-mono); font-size: 12px;
   padding: 1px 5px; border-radius: 4px;

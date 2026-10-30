@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ratingTooltip } from '#/lib/rating'
 import { StreamingMarkdown } from './StreamingMarkdown'
+import { reportMarkdownComponents } from './reportMarkdown'
 
 export interface ReportBodyProps {
   markdown?: string | null
@@ -74,7 +75,7 @@ export function ReportBody({
       {streaming ? (
         <StreamingMarkdown content={body} live={live} />
       ) : (
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={reportMarkdownComponents}>{body}</ReactMarkdown>
       )}
     </div>
   )

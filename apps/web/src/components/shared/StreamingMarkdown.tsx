@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { reportMarkdownComponents } from './reportMarkdown'
 
 /* webapp1's `analyst.report` events typically carry the full report in one
    shot (LangGraph emits the whole node output when the node finishes — agents
@@ -74,7 +75,7 @@ export function StreamingMarkdown({
 
   return (
     <>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayed}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={reportMarkdownComponents}>{displayed}</ReactMarkdown>
       {showCursor && <span className="streaming-cursor" aria-hidden="true" />}
     </>
   )
