@@ -171,7 +171,7 @@ export function FlowAdvanced({
               }}
             />
             <button
-              className="es-btn primary col-span-2 mx-1 sm:ml-0 sm:mr-1.5"
+              className="es-btn primary shrink-0 whitespace-nowrap col-span-2 mx-1 sm:ml-0 sm:mr-1.5"
               style={{ height: 44, padding: '0 22px', fontSize: 14 }}
               onClick={onStart}
               disabled={submitting || blocked || form.analysts.length === 0}
@@ -462,11 +462,11 @@ export function FlowAdvanced({
             </span>
           </div>
           <div style={{ flex: 1 }} />
-          <button className="es-btn" onClick={onClose}>
+          <button className="es-btn shrink-0 whitespace-nowrap" onClick={onClose}>
             Back
           </button>
           <button
-            className="es-btn primary"
+            className="es-btn primary shrink-0 whitespace-nowrap"
             style={{ height: 38, padding: '0 22px' }}
             onClick={onStart}
             disabled={submitting || blocked || form.analysts.length === 0}

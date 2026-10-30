@@ -186,7 +186,7 @@ export function FilterPanel({ filter, onChange, onClear, onSaved, onResult, prev
         <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-3 rounded-lg border border-[var(--line-1)] bg-card px-3 py-1.5 shadow-[var(--shadow-1)]">
           <div className="flex min-w-0 max-w-full items-center gap-2">
             <span className="size-2 shrink-0 rounded-full bg-primary" />
-            <span className="break-words text-sm font-semibold">{title}</span>
+            <span className="min-w-0 break-words text-sm font-semibold">{title}</span>
           </div>
           <div className="h-4 w-px shrink-0 bg-border" />
           <div className="flex min-w-0 basis-full items-center gap-1.5 overflow-x-auto sm:basis-0 sm:flex-1">

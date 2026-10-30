@@ -488,7 +488,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
                   }}
                 />
                 <button
-                  className="es-btn primary col-span-2 mx-1 sm:ml-0 sm:mr-1.5"
+                  className="es-btn primary shrink-0 whitespace-nowrap col-span-2 mx-1 sm:ml-0 sm:mr-1.5"
                   style={{
                     height: 50,
                     padding: '0 24px',
