@@ -7,14 +7,17 @@
   GET  /evaluation/batches/{id}           cells, scores, per-rating summary
   POST /evaluation/batches/{id}/cancel    stop submitting queued cells
   GET  /evaluation/paper-performance      equity, drawdown, days, replay vs actual
+  GET  /evaluation/trading-performance    one book (paper|live): strategy/portfolio results
+  GET  /evaluation/trade-journal.csv      the same filtered trades as CSV
+  PUT  /evaluation/trade-journal/{mode}/{trade_id}   note + tags on an owned trade
   GET  /runs/{run_id}/report.html         standalone, script-free report page
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.auth import current_user_id
 from apps.api.evaluation import batches
@@ -96,6 +99,65 @@ def paper_performance(portfolio_id: str = Query("default", pattern=r"^[A-Za-z0-9
     if portfolios.get(user_id, portfolio_id) is None:
         raise HTTPException(status_code=404, detail="portfolio not found")
     return performance(user_id, portfolio_id=portfolio_id)
+
+
+_PF = Query("default", pattern=r"^[A-Za-z0-9_-]{1,64}$", description="all | default | <id>")
+_STRAT = Query(None, pattern=r"^[A-Za-z0-9_-]{1,64}$", description="<id> | manual")
+
+
+def _not_found(fn, *args, **kw):
+    from apps.api.evaluation import analytics
+
+    try:
+        return fn(*args, **kw)
+    except analytics.NotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/evaluation/trading-performance")
+def trading_performance(mode: Literal["paper", "live"] = "paper", portfolio_id: str = _PF,
+                        strategy_id: Optional[str] = _STRAT,
+                        user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    from apps.api.evaluation import analytics
+
+    return _not_found(analytics.trading_performance, user_id, mode=mode,
+                      portfolio_id=portfolio_id, strategy_id=strategy_id)
+
+
+@router.get("/evaluation/trade-journal.csv")
+def trade_journal_csv(mode: Literal["paper", "live"] = "paper", portfolio_id: str = _PF,
+                      strategy_id: Optional[str] = _STRAT,
+                      user_id: str = Depends(current_user_id)) -> Response:
+    from apps.api.evaluation import analytics
+
+    rows = _not_found(analytics.journal_rows, user_id, mode=mode, portfolio_id=portfolio_id,
+                      strategy_id=strategy_id)
+    return Response(analytics.to_csv(rows), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="drishti-{mode}-journal.csv"'})
+
+
+class AnnotationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    note: str = Field("", max_length=2000)
+    tags: List[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, v: List[str]) -> List[str]:
+        out = list(dict.fromkeys(t.strip() for t in v if t.strip()))
+        if any(len(t) > 32 for t in out):
+            raise ValueError("a tag is at most 32 characters")
+        return out
+
+
+@router.put("/evaluation/trade-journal/{mode}/{trade_id}")
+def annotate_trade(mode: Literal["paper", "live"], trade_id: str, body: AnnotationBody,
+                   user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    from apps.api.evaluation import analytics
+
+    doc = _not_found(analytics.annotate, user_id, mode, trade_id, body.note.strip(), body.tags)
+    return doc or {"note": "", "tags": [], "updated_at": None}
 
 
 @router.get("/runs/{run_id}/report.html")
