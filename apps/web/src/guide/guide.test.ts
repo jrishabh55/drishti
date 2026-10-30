@@ -4,6 +4,10 @@ import { readProgress, writeProgress, emptyProgress } from './state'
 import { readFileSync, readdirSync } from 'node:fs'
 
 describe('guide content', () => {
+  it('targets the real replay and sizing controls when a plan is open', () => {
+    expect(tourSteps('timemachine')[0]).toMatchObject({ route: '/desk/plans/$id', anchor: 'guide-time-machine' })
+    expect(tourSteps('sizing')[0]).toMatchObject({ route: '/desk/plans/$id', anchor: 'guide-size-ticket' })
+  })
   it('keeps every lesson destination and anchor connected to an actual screen', () => {
     const routes = new URL('../routes/', import.meta.url)
     const source = readdirSync(routes).filter(n => n.endsWith('.tsx')).map(n => readFileSync(new URL(n, routes), 'utf8')).join('\n')

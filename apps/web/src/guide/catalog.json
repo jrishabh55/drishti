@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-30.1",
+  "version": "2026-10-30.2",
   "features": [
     {
       "id": "orientation",
@@ -37,7 +37,7 @@
       "title": "Models & connections",
       "route": "/settings/models",
       "summary": "Choose models and connect a personal provider.",
-      "body": "Add personal API keys in Model connections; keys are encrypted on the server. Select quick and deep providers in the analysis form. OpenAI analysis may use credits; Gemini and other personal providers use your own credentials. The ChatGPT helper is a separate connection. The guide never fills or submits a key for you.",
+      "body": "Add extra provider keys in Model connections; Gemini key setup is in the Analysis form. Keys are encrypted on the server. Select quick and deep providers in the analysis form. OpenAI analysis may use credits; Gemini and other personal providers use your own credentials. The ChatGPT helper is a separate connection. The guide never fills or submits a key for you.",
       "keywords": [
         "model",
         "connection",
@@ -124,8 +124,8 @@
       "chapter": "reports",
       "steps": [
         {
-          "route": "/analyse",
-          "anchor": "guide-analysis",
+          "route": "/runs/$id",
+          "anchor": "guide-report",
           "title": "Read an analysis report",
           "body": "A run shows analyst reports, the research debate and the resulting decision. Check the selected date, data sources and status. Cancel and export are available where shown. A running, failed or interrupted job is different from a completed report. Visit Analysis to start a run deliberately if your account has none.",
           "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
@@ -297,8 +297,8 @@
       "chapter": "timemachine",
       "steps": [
         {
-          "route": "/desk/plans",
-          "anchor": "guide-plans",
+          "route": "/desk/plans/$id",
+          "anchor": "guide-time-machine",
           "title": "Time Machine",
           "body": "Time Machine compares a plan with historical outcomes and simulated paths. Intraday mode needs at least 20 complete prior session windows and the entry bar time. Swing mode uses daily bars and has different history requirements. Insufficient data is reported honestly. Simulated odds are not predictions and a stop is not a guarantee.",
           "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."
@@ -330,8 +330,8 @@
       "chapter": "sizing",
       "steps": [
         {
-          "route": "/desk/plans",
-          "anchor": "guide-plans",
+          "route": "/desk/plans/$id",
+          "anchor": "guide-size-ticket",
           "title": "Sizing & risk checks",
           "body": "Use the sizing and risk check control on a saved plan to create a reviewable ticket. Inspect quantity, per-share risk, total risk and failed checks. Limits include daily loss, per-trade risk, order value, trade count, concentration and required stops. A blocked ticket needs a corrected plan or deliberate limit review, not a bypass.",
           "fallback": "This control appears once its prerequisites are available. Read the page state, or skip this step and return later."

@@ -180,7 +180,7 @@ function PlanPage() {
           </section>
 
           <section className="space-y-6">
-            <div className="space-y-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-4">
+            <div data-guide="guide-time-machine" className="space-y-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-4">
               <h2 className="text-lg font-semibold">Time Machine</h2>
               {tmRequest ? <ReplayOdds request={tmRequest} /> : (
                 <p className="text-sm text-[var(--text-3)]">
@@ -199,7 +199,7 @@ function PlanPage() {
                       onClick={() => setOrderType(t)}>{t.toLowerCase()}</button>
                   ))}
                 </div>
-                <Button size="sm" onClick={makeTicket} disabled={busy}>Make a ticket</Button>
+                <Button data-guide="guide-size-ticket" size="sm" onClick={makeTicket} disabled={busy}>Make a ticket</Button>
               </div>
               <p className="text-xs text-[var(--text-4)]">
                 Sizes the trade to your limits, then runs every risk check. Nothing is placed until

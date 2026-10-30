@@ -13,7 +13,7 @@ export const Route = createFileRoute('/runs/$id')({
   loader: async ({ params }) => {
     return { initial: await api.getRun(params.id) }
   },
-  component: RunPage,
+  component: () => <div data-guide="guide-report"><RunPage /></div>,
 })
 
 function RunPage() {
