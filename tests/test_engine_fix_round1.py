@@ -172,3 +172,47 @@ def test_non_scanner_symbols_override_is_the_daily_candidate_list(acct):
     res = _run(bc, s, day, symbols=["TCS"])
     assert res["config"]["symbols"] == ["TCS"] and res["coverage"]["TCS"]["status"] == "ok"
     assert [t["symbol"] for t in res["trades"]] == ["TCS"]
+
+
+# ---------------------------------------------------------------- correction 5: replay drawdown
+
+def _scaled_then_closed(profile):
+    from apps.api.desk.market.session import NSE
+    t = {"symbol": "SBIN", "side": "buy", "status": "open", "trade_date": "2026-10-30", "qty": 10,
+         "open_qty": 6, "stop": 99.0, "initial_stop": 99.0, "target": 120.0, "product": "MIS",
+         "interval": "5m", "events": [], "entry_fill": {"time": "09:30", "price": 100.0},
+         "exit_legs": [{"time": "10:00", "price": 110.0, "qty": 4, "reason": "scale_out"}]}
+    from datetime import date
+    return paper.close_now(t, 95.0, NSE.local(date(2026, 10, 30), 11 * 60), profile)
+
+
+def test_replay_stats_drawdown_walks_each_exit_leg():
+    from apps.api.desk.profile import DeskProfile
+
+    prof = DeskProfile()
+    a = _scaled_then_closed(prof)
+    b = {"status": "closed", "trade_date": "2026-10-30", "qty": 1, "pnl_net": -30.0,
+         "charges": 0.0, "r_net": -1.0, "exit_fill": {"time": "10:30", "price": 1.0,
+                                                     "reason": "stop"}}
+    assert a["pnl_net"] == 8.93
+    legacy = paper.stats([a, b])
+    assert legacy["max_drawdown"] == 30.0 and legacy["drawdown_basis"] == "closed trades"
+    legged = paper.stats([a, b], prof)
+    assert legged["max_drawdown"] == 60.62 and legged["drawdown_basis"] == "exit legs"
+    # Everything else (counts, totals) is identical: realized counted once.
+    drop = lambda d: {k: v for k, v in d.items() if k not in ("max_drawdown", "drawdown_basis")}  # noqa: E731
+    assert drop(legacy) == drop(legged) and legged["pnl_net"] == round(8.93 - 30, 2)
+
+
+def test_backtest_summary_uses_exit_leg_drawdown(acct):
+    from apps.api.desk.profile import load_profile
+
+    bc, desk, s, day, _ = acct
+    store = get_kite_store()
+    store.put_strategy("user_a", dict(store.get_strategy(s["id"], "user_a"),
+                                      exit_policy={"scale_out_at_r": 0.5, "scale_out_pct": 50}))
+    res = _run(bc, s, day)
+    assert any(len(t.get("exit_legs") or []) == 2 for t in res["trades"])
+    summ = res["summary"]["all"]
+    assert summ["drawdown_basis"] == "exit legs"
+    assert summ["max_drawdown"] == paper.stats(res["trades"], load_profile("user_a"))["max_drawdown"]

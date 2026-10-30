@@ -14,7 +14,7 @@ function Stats({ s }: { s?: BacktestStats }) {
   return (
     <span className="es-mono">
       {s.trades} trades · win {Math.round((s.win_rate ?? 0) * 100)}% · avg {rMult(s.avg_r_net)} · net {inr(s.pnl_net)}
-      {' '}· max DD {inr(s.max_drawdown)}
+      {' '}· max DD {inr(s.max_drawdown)}{s.drawdown_basis ? ` (by ${s.drawdown_basis})` : ''}
     </span>
   )
 }

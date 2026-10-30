@@ -261,6 +261,8 @@ export interface BacktestStats {
   charges?: number
   profit_factor?: number | null
   max_drawdown?: number
+  /** "exit legs": partial exits step the curve at their own times; "closed trades": one step per trade. */
+  drawdown_basis?: 'exit legs' | 'closed trades'
 }
 
 export interface BacktestTrade extends StrategyAttribution {

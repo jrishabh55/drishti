@@ -324,8 +324,11 @@ def close_now(trade: Dict[str, Any], price: float, now: datetime, profile,
     return t
 
 
-def stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Ledger summary over closed trades (net figures)."""
+def stats(trades: List[Dict[str, Any]], profile=None) -> Dict[str, Any]:
+    """Ledger summary over closed trades (net figures). With ``profile`` the
+    drawdown walks each booked exit leg at its own time (realized_events), so
+    a scale-out's peak isn't hidden inside its trade's final net; without it
+    (legacy callers) each closed trade is one step at its exit."""
     closed = [t for t in trades if t.get("status") == "closed" and t.get("r_net") is not None]
     if not closed:
         return {"trades": 0}
@@ -333,9 +336,14 @@ def stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     losses = [t for t in closed if t["pnl_net"] <= 0]
     gross_win = sum(t["pnl_net"] for t in wins)
     gross_loss = -sum(t["pnl_net"] for t in losses)
+    if profile is None:
+        steps = [(t["trade_date"], t["exit_fill"]["time"], t["pnl_net"]) for t in closed]
+    else:
+        steps = [(t["trade_date"], e["time"], e["pnl_net"])
+                 for t in closed for e in realized_events(t, profile)]
     equity, peak, dd = 0.0, 0.0, 0.0
-    for t in sorted(closed, key=lambda x: (x["trade_date"], x["exit_fill"]["time"])):
-        equity += t["pnl_net"]
+    for _, _, v in sorted(steps, key=lambda x: x[:2]):
+        equity += v
         peak = max(peak, equity)
         dd = max(dd, peak - equity)
     return {
@@ -346,4 +354,5 @@ def stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "charges": round(sum(t["charges"] for t in closed), 2),
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else None,
         "max_drawdown": round(dd, 2),
+        "drawdown_basis": "closed trades" if profile is None else "exit legs",
     }

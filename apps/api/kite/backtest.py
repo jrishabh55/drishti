@@ -361,15 +361,16 @@ def run(user_id: str, s: Dict[str, Any], body: BacktestBody, now: datetime, prof
         "sources": sources, "coverage": coverage, "trades": trades, "skipped": skipped,
         "risk": {"engine": "desk risk.check", "market_facts": "unavailable",
                  "warnings": sorted(warnings)},
-        "summary": {"all": paper.stats(trades)},
+        "summary": {"all": paper.stats(trades, profile)},
         "costs": {"charges": round(sum(t.get("charges") or 0 for t in trades), 2),
                   "estimated": True},
         "generated_at": now.isoformat(), "disclaimer": DISCLAIMER,
         "assumptions": ASSUMPTIONS + ([SCANNER_ASSUMPTION] if scanner_out else []),
     }
     if split:
-        out["summary"]["train"] = paper.stats([t for t in trades if t["split"] == "train"])
-        out["summary"]["test"] = paper.stats([t for t in trades if t["split"] == "test"])
+        out["summary"]["train"] = paper.stats([t for t in trades if t["split"] == "train"],
+                                              profile)
+        out["summary"]["test"] = paper.stats([t for t in trades if t["split"] == "test"], profile)
     return out
 
 
