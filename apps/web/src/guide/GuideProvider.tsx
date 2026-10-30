@@ -42,6 +42,7 @@ function GuideSession({ children, userId }: { children: ReactNode; userId: strin
   const [retry, setRetry] = useState(0)
   const returnFocus = useRef<HTMLElement | null>(null)
   const panel = useRef<HTMLDivElement>(null)
+  const resume = useRef<HTMLButtonElement>(null)
   const steps = progress.tourId ? tourSteps(progress.tourId) : []
   const step = steps[progress.stepIndex]
   const navigate = (route: string) => {
@@ -84,7 +85,10 @@ function GuideSession({ children, userId }: { children: ReactNode; userId: strin
     document.addEventListener('keydown', key)
     return () => document.removeEventListener('keydown', key)
   }, [open])
-  useEffect(() => { if (open && !mobile && !peek) panel.current?.focus() }, [open, mobile, peek])
+  useEffect(() => {
+    if (open && peek) resume.current?.focus()
+    else if (open && !mobile) panel.current?.focus()
+  }, [open, mobile, peek])
   useEffect(() => {
     setTargetVisible(false)
     if (!open || !step) return
@@ -116,7 +120,7 @@ function GuideSession({ children, userId }: { children: ReactNode; userId: strin
   return <Context.Provider value={value}>
     <div className={`drishti-guide-layout${open && !mobile && !peek ? ' drishti-guide-expanded' : ''}`}><div className="drishti-guide-workspace">{children}</div></div>
     {!open && <button type="button" className="drishti-guide-launch" aria-label="Show guide" onClick={openGuide}><CircleHelp size={18} />Guide</button>}
-    {open && peek && <aside className="drishti-guide-peek" aria-label="Tour step"><span>{step?.title ?? 'Drishti Guide'}</span><Button size="sm" onClick={openGuide} aria-label="Resume guide">Resume guide</Button><Button size="sm" variant="ghost" onClick={closeGuide} aria-label="Close guide">×</Button></aside>}
-    {mobile ? <Dialog open={open && !peek} onOpenChange={next => next ? openGuide() : closeGuide()}><DialogContent className="drishti-guide-mobile" showCloseButton={false} onCloseAutoFocus={e => { e.preventDefault(); returnFocus.current?.focus({ preventScroll: true }) }}><DialogTitle className="sr-only">Drishti Guide</DialogTitle><DialogDescription className="sr-only">Tours, screen help and operational questions.</DialogDescription><GuidePanel /></DialogContent></Dialog> : open && !peek && <div ref={panel} tabIndex={-1} className="drishti-guide-dock" role="complementary" aria-label="Drishti Guide"><GuidePanel /></div>}
+    {open && peek && <aside className="drishti-guide-peek" aria-label="Tour step"><span>{step?.title ?? 'Drishti Guide'}</span><Button ref={resume} size="sm" onClick={openGuide} aria-label="Resume guide">Resume guide</Button><Button size="sm" variant="ghost" onClick={closeGuide} aria-label="Close guide">×</Button></aside>}
+    {mobile ? <Dialog open={open && !peek} onOpenChange={next => next ? openGuide() : closeGuide()}><DialogContent className="drishti-guide-mobile" showCloseButton={false} onCloseAutoFocus={e => { e.preventDefault(); (peek ? resume.current : returnFocus.current)?.focus({ preventScroll: true }) }}><DialogTitle className="sr-only">Drishti Guide</DialogTitle><DialogDescription className="sr-only">Tours, screen help and operational questions.</DialogDescription><GuidePanel /></DialogContent></Dialog> : open && !peek && <div ref={panel} tabIndex={-1} className="drishti-guide-dock" role="complementary" aria-label="Drishti Guide"><GuidePanel /></div>}
   </Context.Provider>
 }
