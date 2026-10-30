@@ -144,7 +144,19 @@ async def _bootstrap_history(hub: Hub, client, table, clock) -> None:
                                                   (now - timedelta(days=days)).astimezone(IST), now.astimezone(IST))
                 if auth.load_session(hub.user_id, clock()) is None:
                     return
-                rows = _rows(candles)[-320:]
+                # The request's end bounds what the provider observed. A
+                # forming row must never become a closed candle merely because
+                # this one-shot snapshot is read later (or HTTP crossed close).
+                rows = []
+                for row in _rows(candles):
+                    ts = row[0]
+                    local = ts.replace(tzinfo=IST) if ts.tzinfo is None else ts.astimezone(IST)
+                    end = (datetime.combine(local.date(), time(NSE_SPEC.close_min // 60,
+                                                               NSE_SPEC.close_min % 60), IST)
+                           if interval == '1d' else local + timedelta(minutes=5))
+                    if end + timedelta(seconds=2) <= now:
+                        rows.append(row)
+                rows = rows[-320:]
                 hub.history.setdefault(interval, {})[sym] = rows
                 if not rows:
                     hub.history_errors[key] = "No historical candles available"
