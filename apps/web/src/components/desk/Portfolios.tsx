@@ -124,10 +124,10 @@ export function PortfolioPicker() {
   if (!ctx) return null
   const { portfolios, selectedId, select, ready } = ctx
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
       <span className="text-[var(--text-4)]">Paper portfolio</span>
       <Select value={selectedId} onValueChange={select} disabled={!ready}>
-        <SelectTrigger size="sm" aria-label="Paper portfolio" className="min-w-[180px]">
+        <SelectTrigger size="sm" aria-label="Paper portfolio" className="max-w-full min-w-[min(180px,100%)]">
           <SelectValue placeholder="Default" />
         </SelectTrigger>
         <SelectContent>
