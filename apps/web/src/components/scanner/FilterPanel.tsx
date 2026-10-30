@@ -124,6 +124,11 @@ function safeCanonicalJson(filter: ActiveFilter): string | null {
   }
 }
 
+/** Shared saved-definition check for titles and strategy drafting. */
+export function filterUnchanged(filter: ActiveFilter | null): boolean {
+  return Boolean(filter && safeCanonicalJson(filter) === filter.originalJson)
+}
+
 export function FilterPanel({ filter, onChange, onClear, onSaved, onResult, previewing = false }: {
   filter: ActiveFilter
   onChange: (f: ActiveFilter) => void
@@ -140,7 +145,7 @@ export function FilterPanel({ filter, onChange, onClear, onSaved, onResult, prev
 
   const { origin } = filter
   const isPrebuiltEdited = origin.kind === 'prebuilt' &&
-    safeCanonicalJson(filter) !== filter.originalJson
+    !filterUnchanged(filter)
   const title = origin.kind === 'mine' || origin.kind === 'blank'
     ? (origin.kind === 'mine' ? origin.name : 'Unsaved filter')
     : origin.kind === 'prebuilt'

@@ -2,7 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  blankFilter, FilterPanel, filterFromNl, filterFromScanner, type ActiveFilter,
+  blankFilter, FilterPanel, filterFromNl, filterFromScanner, filterUnchanged, type ActiveFilter,
 } from '#/components/scanner/FilterPanel'
 import { ResultsTable } from '#/components/scanner/ResultsTable'
 import { StrategyDraftButton } from '#/components/desk/StrategyDraftButton'
@@ -108,7 +108,7 @@ function ScannersPage() {
   const allMine = useMemo(() => items.filter((s) => !s.prebuilt), [items])
   const trimmedQuery = query.trim()
   const draftOrigin = filter?.origin
-  const draftScannerId = filter?.json === filter?.originalJson
+  const draftScannerId = filterUnchanged(filter)
     ? draftOrigin?.kind === 'mine' ? draftOrigin.id
       : draftOrigin?.kind === 'prebuilt' ? items.find(s => s.prebuilt && s.name === draftOrigin.name)?.id : undefined
     : undefined
