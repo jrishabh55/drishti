@@ -91,7 +91,7 @@ export function DeskSymbolSearch({ onAdd, actionLabel = 'Add', busyLabel = 'Addi
         {error && <p role="alert" className="mt-1 text-xs text-[var(--err)]">{error}</p>}
       </div>
       <Button variant="outline" onClick={add} disabled={!selected || adding}>{adding ? busyLabel : actionLabel}</Button>
-      {selected && <a className="es-btn sm no-underline" href={`/analyse?ticker=${encodeURIComponent(`${selected}.NS`)}`}>Analyse</a>}
+      {selected && <a className="es-btn no-underline" href={`/analyse?ticker=${encodeURIComponent(`${selected}.NS`)}`}>Analyse</a>}
     </div>
   )
 }

@@ -126,7 +126,7 @@ export function GeminiSetup({
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <input
           className="fld-input"
-          style={{ flex: '1 1 180px', minWidth: 0 }}
+          style={{ flex: '1 1 180px', minWidth: 0, height: 32, paddingBlock: 4 }}
           type="password"
           placeholder="AIza… Gemini API key"
           value={key}
@@ -134,7 +134,7 @@ export function GeminiSetup({
           spellCheck={false}
         />
         <button
-          className="es-btn sm"
+          className="es-btn"
           onClick={() => void save()}
           disabled={busy || !key.trim()}
         >
