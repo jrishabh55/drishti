@@ -175,7 +175,7 @@ export function TradingAnalytics() {
             <Tile label="Max drawdown" value={data.stats.max_drawdown != null ? inr(data.stats.max_drawdown, true) : '—'}
               sub={data.stats.profit_factor != null ? `profit factor ${data.stats.profit_factor.toFixed(2)}` : undefined} />
             <Tile label={`vs ${b?.name ?? 'benchmark'}`} value={b?.available ? signedPct(b.return_pct) : 'unavailable'}
-              sub={b?.available ? `${b.start} → ${b.end}${b.book_return_pct != null ? ` · book ${signedPct(b.book_return_pct)}` : ''}` : b?.reason ?? undefined} />
+              sub={b?.available ? `${b.start} → ${b.end}${b.book_return_pct != null ? ` · closed trades ${signedPct(b.book_return_pct)}` : ''}` : b?.reason ?? undefined} />
           </div>
           <p className="text-xs text-[var(--text-4)]">{data.charges_note}</p>
 
