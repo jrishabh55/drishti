@@ -19,14 +19,18 @@ export function featureForRoute(path: string) {
   const candidates = features.filter(f => !['timemachine', 'sizing'].includes(f.id) && matchesRoute(f.route, path))
   return candidates.sort((a, b) => b.route.length - a.route.length)[0]
 }
-const stop = new Set('a an the what why how to do does is are can i my we it for of in on this that and with have use'.split(' '))
+const stop = new Set('a an the what why how to do does is are can i my we it for of in on this that and with have use there'.split(' '))
 export function searchHelp(question: string, path: string): Feature[] {
   const terms = (question.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(t => t.length > 1 && !stop.has(t))
   if (!terms.length) return []
   const current = featureForRoute(path)?.id
   return features.map(f => {
-    const text = [f.title, f.summary, f.body, ...f.keywords, ...f.faqs.flatMap(q => [q.question, q.answer])].join(' ').toLowerCase()
-    const hits = terms.filter(t => new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)).length
-    return { f, score: hits ? hits + (f.id === current ? 0.5 : 0) : 0 }
+    const important = [f.title, ...f.keywords, ...f.faqs.map(q => q.question)].join(' ').toLowerCase()
+    const body = [f.summary, f.body, ...f.faqs.map(q => q.answer)].join(' ').toLowerCase()
+    const score = terms.reduce((total, t) => {
+      const word = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+      return total + (word.test(important) ? 3 : word.test(body) ? 1 : 0)
+    }, 0)
+    return { f, score: score ? score + (f.id === current ? 0.5 : 0) : 0 }
   }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 6).map(x => x.f)
 }

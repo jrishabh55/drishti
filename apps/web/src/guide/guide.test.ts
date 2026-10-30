@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { featureForRoute, searchHelp, features, tourSteps } from './content'
 import { readProgress, writeProgress, emptyProgress } from './state'
+import { readFileSync, readdirSync } from 'node:fs'
 
 describe('guide content', () => {
+  it('keeps every lesson destination and anchor connected to an actual screen', () => {
+    const routes = new URL('../routes/', import.meta.url)
+    const source = readdirSync(routes).filter(n => n.endsWith('.tsx')).map(n => readFileSync(new URL(n, routes), 'utf8')).join('\n')
+    const paths = [...source.matchAll(/createFileRoute\('([^']+)'\)/g)].map(m => m[1].replace(/\/$/, '') || '/')
+    for (const feature of features) for (const step of feature.steps) {
+      expect(paths, feature.id).toContain(step.route)
+      expect(source, feature.id).toContain(`data-guide="${step.anchor}"`)
+    }
+  })
   it('starts the paper tour on a useful screen rather than the redirect-only home', () => {
     expect(tourSteps('first-paper')[0].route).toBe('/desk/paper')
   })
@@ -16,6 +26,9 @@ describe('guide content', () => {
     expect(searchHelp('paper capital analysis credits', '/desk/paper')[0]?.id).toBe('paper')
     expect(searchHelp('how to bake chocolate cake', '/desk/paper')).toEqual([])
     expect(features.length).toBeGreaterThanOrEqual(16)
+  })
+  it('finds missing-bar guidance even when the question comes from the ledger', () => {
+    expect(searchHelp('why is there no data', '/desk/paper')[0]?.id).toBe('today')
   })
 })
 

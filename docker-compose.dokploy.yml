@@ -150,6 +150,7 @@ services:
         # vars during `vite build`) — must be a build arg, not runtime env.
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:?set VITE_CLERK_PUBLISHABLE_KEY or the sign-in UI cannot load}
     environment:
+      GUIDE_MEDIA_DIR: /app/guide-media
       # Internal DNS on the compose network. Read at request time by the
       # /api/* proxy route inside the built server (apps/web/src/routes/api.$.tsx).
       WEBAPP1_API_BASE: http://api:8080
@@ -164,6 +165,8 @@ services:
       # with no host filtering — Traefik owns the domain routing.
     expose:
       - "3000"
+    volumes:
+      - guide_media:/app/guide-media:ro
     healthcheck:
       # Quoted, and no `? :` ternary — a bare `" : "` inside a YAML plain
       # scalar parses as a mapping and compose rejects the item.
@@ -183,6 +186,7 @@ services:
 
 volumes:
   tradingagents_data:
+  guide_media:
 
 # If you deploy WITHOUT Dokploy's "Isolated Deployments" setting, both services
 # also need to join Dokploy's shared Traefik network for domain routing to

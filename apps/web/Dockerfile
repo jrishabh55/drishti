@@ -67,6 +67,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=build /app/dist ./dist
 COPY server-node.mjs ./
+COPY guide-media.mjs ./
 
 EXPOSE 3000
 

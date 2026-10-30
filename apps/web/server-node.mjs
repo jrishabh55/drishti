@@ -20,6 +20,7 @@ import { extname, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve } from 'srvx'
 import app from './dist/server/server.js'
+import { serveGuideMedia } from './guide-media.mjs'
 
 const CLIENT_DIR = fileURLToPath(new URL('./dist/client', import.meta.url))
 
@@ -67,6 +68,8 @@ serve({
   port,
   hostname: '0.0.0.0',
   fetch: async (req) => {
+    const media = await serveGuideMedia(req, process.env.GUIDE_MEDIA_DIR)
+    if (media) return media
     if (req.method === 'GET' || req.method === 'HEAD') {
       const { pathname } = new URL(req.url)
       // Only paths that look like files — /runs/123 must fall through to SSR.

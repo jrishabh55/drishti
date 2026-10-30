@@ -8,7 +8,7 @@ import { GuideVideo } from './GuideVideo'
 
 export function GuidePanel() {
   const guide = useGuide()!
-  const [tab, setTab] = useState<'screen' | 'tours' | 'ask'>('screen')
+  const [tab, setTab] = useState<'screen' | 'tours' | 'ask'>(guide.progress.tourId ? 'tours' : 'screen')
   const [filter, setFilter] = useState('')
   const feature = featureForRoute(guide.path) ?? features[0]
   const steps = guide.progress.tourId ? tourSteps(guide.progress.tourId) : []
