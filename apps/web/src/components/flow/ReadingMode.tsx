@@ -86,15 +86,15 @@ export function ReadingMode({ run }: { run: RunDetail }) {
       />
 
       <div
+        className="grid grid-cols-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[240px_minmax(0,1fr)] md:grid-rows-1"
         style={{
           flex: 1,
-          display: 'grid',
-          gridTemplateColumns: '240px 1fr',
           minHeight: 0,
         }}
       >
         {/* Agent rail */}
         <div
+          className="max-h-40 min-w-0 md:max-h-none"
           style={{
             borderRight: '1px solid var(--line-1)',
             background: 'var(--bg-1)',
@@ -169,6 +169,7 @@ export function ReadingMode({ run }: { run: RunDetail }) {
 
         {/* Reading area */}
         <div
+          className="min-w-0"
           style={{
             overflow: 'auto',
             display: 'flex',
@@ -176,7 +177,7 @@ export function ReadingMode({ run }: { run: RunDetail }) {
             padding: '24px 24px 60px',
           }}
         >
-          <div style={{ width: '100%', maxWidth: 760, position: 'relative' }}>
+          <div style={{ width: '100%', minWidth: 0, maxWidth: 760, position: 'relative' }}>
             <div
               style={{
                 display: 'flex',
@@ -229,6 +230,7 @@ export function ReadingMode({ run }: { run: RunDetail }) {
                   borderBottom: '1px solid var(--line-1)',
                   display: 'flex',
                   gap: 16,
+                  overflowX: 'auto',
                   fontSize: 12,
                 }}
               >
@@ -239,6 +241,8 @@ export function ReadingMode({ run }: { run: RunDetail }) {
                       key={t.id}
                       onClick={() => setTab(t.id)}
                       style={{
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
                         background: 'transparent',
                         border: 0,
                         cursor: 'pointer',

@@ -68,6 +68,7 @@ export function GeminiSetup({
         style={{
           display: 'flex',
           alignItems: 'center',
+          flexWrap: 'wrap',
           gap: 10,
           fontSize: 11.5,
         }}
@@ -122,10 +123,10 @@ export function GeminiSetup({
         </a>{' '}
         and paste it below:
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <input
           className="fld-input"
-          style={{ flex: 1 }}
+          style={{ flex: '1 1 180px', minWidth: 0 }}
           type="password"
           placeholder="AIza… Gemini API key"
           value={key}

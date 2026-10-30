@@ -436,17 +436,16 @@ export function AgentViewLive({ run }: { run: RunDetail }) {
       />
 
       <div
+        className="grid min-w-0 grid-cols-1 overflow-auto xl:grid-cols-[260px_minmax(0,1fr)_360px] xl:overflow-hidden"
         style={{
           flex: 1,
-          display: 'grid',
-          gridTemplateColumns: '260px 1fr 360px',
           gap: 12,
           padding: 12,
           minHeight: 0, // critical: lets children's overflow:auto kick in
         }}
       >
         {/* Pipeline */}
-        <div className="es-card">
+        <div className="es-card min-h-64 min-w-0 xl:min-h-0">
           <div className="es-panel-head">
             <span>Pipeline</span>
             <div style={{ flex: 1 }} />
@@ -598,7 +597,7 @@ export function AgentViewLive({ run }: { run: RunDetail }) {
         </div>
 
         {/* Current report — banner + tabs strip + body */}
-        <div className="es-card" style={{ minWidth: 0 }}>
+        <div className="es-card min-h-96 xl:min-h-0" style={{ minWidth: 0 }}>
           <div className="es-panel-head">
             <span>Current Report</span>
             <div style={{ flex: 1 }} />
@@ -741,7 +740,7 @@ export function AgentViewLive({ run }: { run: RunDetail }) {
         </div>
 
         {/* Activity */}
-        <div className="es-card">
+        <div className="es-card min-h-64 min-w-0 xl:min-h-0">
           <div className="es-panel-head">
             <span>Activity</span>
             <div style={{ flex: 1 }} />

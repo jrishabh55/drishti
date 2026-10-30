@@ -46,7 +46,7 @@ function LevelRow({
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '110px 1fr',
+        gridTemplateColumns: 'minmax(0, 110px) minmax(0, 1fr)',
         gap: 12,
         padding: '10px 0',
         borderBottom: '1px solid var(--line-1)',
@@ -150,7 +150,7 @@ export function LevelsPanel({ runId }: { runId: string }) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
           gap: 12,
           marginBottom: 18,
         }}
@@ -333,7 +333,7 @@ export function LevelsPanel({ runId }: { runId: string }) {
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))',
                   gap: 16,
                   padding: '18px 0',
                   borderBottom: '1px solid var(--line-1)',
@@ -371,7 +371,7 @@ export function LevelsPanel({ runId }: { runId: string }) {
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))',
                   gap: 16,
                 }}
               >

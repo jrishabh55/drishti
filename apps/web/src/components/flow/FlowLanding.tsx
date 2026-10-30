@@ -428,12 +428,10 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
               <Command
                 shouldFilter={false}
                 loop
-                className="overflow-visible rounded-none bg-transparent p-0"
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-y-2 overflow-visible rounded-none bg-transparent p-0 pb-1 sm:flex sm:pb-0"
                 style={{
-                  display: 'flex',
                   flexDirection: 'row',
                   alignItems: 'center',
-                  gap: 0,
                   position: 'relative',
                 }}
               >
@@ -462,6 +460,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
                   spellCheck={false}
                   style={{
                     flex: 1,
+                    minWidth: 0,
                     background: 'transparent',
                     border: 0,
                     outline: 'none',
@@ -475,6 +474,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
                 />
                 <input
                   type="date"
+                  className="col-span-2 mx-1 sm:mx-0 sm:mr-2.5"
                   value={form.date}
                   onChange={(e) => patch({ date: e.target.value })}
                   style={{
@@ -483,18 +483,16 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
                     color: 'var(--text-2)',
                     padding: '10px 12px',
                     borderRadius: 10,
-                    marginRight: 10,
                     fontSize: 13,
                     colorScheme: 'dark',
                   }}
                 />
                 <button
-                  className="es-btn primary"
+                  className="es-btn primary col-span-2 mx-1 sm:ml-0 sm:mr-1.5"
                   style={{
                     height: 50,
                     padding: '0 24px',
                     fontSize: 14,
-                    marginRight: 6,
                   }}
                   /* Wrapped, not passed directly: React would hand the
                      MouseEvent to startRun's tickerOverride parameter. */
@@ -756,6 +754,7 @@ export function FlowLanding({ initialTicker }: { initialTicker?: string } = {}) 
                         style={{
                           display: 'flex',
                           alignItems: 'center',
+                          flexWrap: 'wrap',
                           gap: 14,
                           padding: '12px 18px',
                           borderBottom:

@@ -128,7 +128,7 @@ export function FlowAdvanced({
               '0 0 0 4px rgba(79,124,255,0.08), 0 12px 40px rgba(0,0,0,0.4)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-y-2 pb-1 sm:flex sm:pb-0">
             <div
               style={{
                 paddingLeft: 18,
@@ -144,6 +144,7 @@ export function FlowAdvanced({
               onChange={(e) => patch({ ticker: e.target.value })}
               style={{
                 flex: 1,
+                minWidth: 0,
                 background: 'transparent',
                 border: 0,
                 outline: 'none',
@@ -156,6 +157,7 @@ export function FlowAdvanced({
             />
             <input
               type="date"
+              className="col-span-2 mx-1 sm:mx-0 sm:mr-2.5"
               value={form.date}
               onChange={(e) => patch({ date: e.target.value })}
               style={{
@@ -164,14 +166,13 @@ export function FlowAdvanced({
                 color: 'var(--text-2)',
                 padding: '9px 12px',
                 borderRadius: 10,
-                marginRight: 10,
                 fontSize: 13,
                 colorScheme: 'dark',
               }}
             />
             <button
-              className="es-btn primary"
-              style={{ height: 44, padding: '0 22px', fontSize: 14, marginRight: 6 }}
+              className="es-btn primary col-span-2 mx-1 sm:ml-0 sm:mr-1.5"
+              style={{ height: 44, padding: '0 22px', fontSize: 14 }}
               onClick={onStart}
               disabled={submitting || blocked || form.analysts.length === 0}
             >
@@ -186,6 +187,7 @@ export function FlowAdvanced({
             display: 'flex',
             alignItems: 'center',
             gap: 12,
+            flexWrap: 'wrap',
             margin: '16px 4px 8px',
             fontSize: 12,
             color: 'var(--text-3)',
@@ -253,7 +255,7 @@ export function FlowAdvanced({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))',
                   gap: 8,
                 }}
               >
@@ -327,7 +329,7 @@ export function FlowAdvanced({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))',
                   gap: 12,
                 }}
               >
@@ -441,6 +443,7 @@ export function FlowAdvanced({
             display: 'flex',
             alignItems: 'center',
             gap: 12,
+            flexWrap: 'wrap',
             marginTop: 20,
             padding: '14px 18px',
             background: 'var(--bg-1)',
@@ -486,7 +489,7 @@ function Field({
   children: React.ReactNode
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', minWidth: 0, flexDirection: 'column', gap: 6 }}>
       <label
         style={{
           fontSize: 11.5,
