@@ -104,7 +104,7 @@ export function BatchesPage() {
               <Input type="number" min={1} max={90} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value) || 1))} />
             </label>
             <label className="grid min-w-0 content-start gap-1.5 text-xs">Provider
-              <select className="fld-input h-8 min-w-0 w-full py-1" value={provider} onChange={(e) => {
+              <select className="fld-input h-8 min-w-0 w-full" style={{ paddingBlock: 4 }} value={provider} onChange={(e) => {
                 const ms = config?.models_by_provider[e.target.value] ?? []
                 setProvider(e.target.value); setQuick(ms[0]?.id ?? ''); setDeep(ms[1]?.id ?? ms[0]?.id ?? '')
               }}>
@@ -112,17 +112,17 @@ export function BatchesPage() {
               </select>
             </label>
             <label className="grid min-w-0 content-start gap-1.5 text-xs">Quick model
-              <select className="fld-input h-8 min-w-0 w-full py-1" value={quick} onChange={(e) => setQuick(e.target.value)}>
+              <select className="fld-input h-8 min-w-0 w-full" style={{ paddingBlock: 4 }} value={quick} onChange={(e) => setQuick(e.target.value)}>
                 {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </label>
             <label className="grid min-w-0 content-start gap-1.5 text-xs">Deep model
-              <select className="fld-input h-8 min-w-0 w-full py-1" value={deep} onChange={(e) => setDeep(e.target.value)}>
+              <select className="fld-input h-8 min-w-0 w-full" style={{ paddingBlock: 4 }} value={deep} onChange={(e) => setDeep(e.target.value)}>
                 {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </label>
             <label className="grid min-w-0 content-start gap-1.5 text-xs">Depth
-              <select className="fld-input h-8 min-w-0 w-full py-1" value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
+              <select className="fld-input h-8 min-w-0 w-full" style={{ paddingBlock: 4 }} value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
                 {(config?.research_depths ?? []).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
             </label>
