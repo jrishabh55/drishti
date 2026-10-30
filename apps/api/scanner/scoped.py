@@ -50,10 +50,16 @@ class ScopedStore:
         # Drop forming candles from both sources before any condition/indicator.
         if len(public):
             public = public.loc[public.ts.map(lambda ts: self.complete(pd.Timestamp(ts).to_pydatetime(), timeframe))]
+        daily_latest = (pd.to_datetime(public.ts, format='mixed', utc=True).dt.tz_convert(NSE.tz)
+                        .groupby(public.symbol).max()) if timeframe == '1d' else {}
         private = {}
         if self.hub:
             for sym in self.hub.symbols:
                 if timeframe == '1d':
+                    last = self.hub.builder.last_tick.get(sym)
+                    if (self.hub.state != 'live' or last is None or self.now - last > live.STALE_AFTER
+                            or sym not in self.hub.backfilled):
+                        continue
                     rows = self.hub.history.get('1d', {}).get(sym, [])
                 else:
                     series = live.provider(self.user_id, sym, '5m', 'session', now=self.now, expected_owner=self.owner)
@@ -63,6 +69,11 @@ class ScopedStore:
                     five.update({r[0]: r for r in series.rows})
                     rows = self.resample(list(five.values()), timeframe)
                 rows = [r for r in rows if self.complete(r[0], timeframe)][-limit:]
+                # A fresh tick cannot make older closed history more recent.
+                # Daily providers may label the same session at different times.
+                if (rows and timeframe == '1d' and sym in daily_latest
+                        and max(self.local(r[0]).date() for r in rows) < daily_latest[sym].date()):
+                    continue
                 if rows:
                     private[sym] = rows
         self.sources[timeframe] = {s: 'live:kite' if s in private else 'delayed:yahoo'
