@@ -20,10 +20,10 @@
 ## Tasks
 
 - [ ] Screenshot agent: audit each route, accessible dialogs and representative dark/light/narrow layouts; publish incremental issue list and coverage.
-- [ ] Desk agent: fix confirmed issues in Desk routes/components and Kite forms; root owns DeskNav and Start here.
-- [ ] Product agent: fix confirmed issues in analysis, scanners, evaluation, model settings, reports and Guide.
-- [ ] Coordinator: fix shared navigation/layout causes and Start here; keep file ownership disjoint.
-- [ ] Integrate fixes, review for behavior preservation and run existing tests/typecheck/build.
+- [x] Desk agent: fix confirmed issues in Desk routes/components and Kite forms; root owns DeskNav and Start here.
+- [x] Product agent: fix confirmed issues in analysis, scanners, evaluation, model settings, reports and Guide.
+- [x] Coordinator: fix shared navigation/layout causes and Start here; keep file ownership disjoint.
+- [x] Integrate fixes, review for behavior preservation and run existing tests/typecheck/build.
 - [ ] Verify every accessible page and affected form visually after integration; resolve remaining issues.
 - [ ] Deploy reviewed corrections, verify source/health and final live layout, release all workers and record coverage/limitations.
 
