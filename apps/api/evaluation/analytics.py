@@ -113,8 +113,7 @@ def _paper_row(t: Dict[str, Any], profile) -> Dict[str, Any]:
             "exit_time": ex.get("time"), "exit_reason": ex.get("reason"),
             "partial_pnl_net": acc["realized"] if is_open else 0.0,
             "partial_charges": acc["charges"] if is_open else 0.0,
-            "partial_time": (max((x["time"] for x in t.get("exit_legs") or []), default=None)
-                             if is_open else None)}
+            "realized_events": paper.realized_events(t, profile)}
 
 
 def _live_row(t: Dict[str, Any]) -> Dict[str, Any]:
@@ -125,7 +124,7 @@ def _live_row(t: Dict[str, Any]) -> Dict[str, Any]:
             "entry_price": t.get("entry_avg"), "exit_price": t.get("exit_avg") or ex.get("price"),
             # Live trades record the reason at the top level; exit_fill is {price, time}.
             "exit_time": ex.get("time"), "exit_reason": t.get("exit_reason") or ex.get("reason"),
-            "partial_pnl_net": 0.0, "partial_charges": 0.0, "partial_time": None}
+            "partial_pnl_net": 0.0, "partial_charges": 0.0, "realized_events": None}
 
 
 def _version(v: Any) -> Optional[int]:
@@ -228,13 +227,22 @@ def _stats(rows) -> Dict[str, Any]:
 
 
 def _curve(rows) -> List[Dict[str, Any]]:
-    """Realized P&L over time: each closed trade at its exit, and each open
-    trade's booked scale-out legs as one point at its latest leg."""
-    # ponytail: an open trade's legs are one point; per-leg points need per-leg costs.
-    events = [(f"{r['trade_date']} {r['exit_time'] or ''}".strip(), r["pnl_net"], "closed")
-              for r in _closed(rows)]
-    events += [(f"{r['trade_date']} {r['partial_time'] or ''}".strip(), r["partial_pnl_net"],
-                "partial") for r in rows if r["partial_time"]]
+    """Realized P&L over time, one point per booked exit: paper legs at their
+    own times (desk.paper.realized_events — a closed trade's legs sum to its
+    stored pnl_net), a live or legacy trade at its exit."""
+    events = []
+    for r in rows:
+        if r["realized_events"] is None:          # live: the trade's own net at its exit
+            if r in _closed([r]):
+                events.append((f"{r['trade_date']} {r['exit_time'] or ''}".strip(),
+                               r["pnl_net"], "closed"))
+            continue
+        if r["status"] == "closed" and r["pnl_net"] is None:
+            continue
+        last = len(r["realized_events"]) - 1
+        for i, e in enumerate(r["realized_events"]):
+            events.append((f"{r['trade_date']} {e['time'] or ''}".strip(), e["pnl_net"],
+                           "closed" if r["status"] == "closed" and i == last else "partial"))
     pnl, peak, out = 0.0, 0.0, [{"at": None, "pnl": 0, "drawdown": 0, "kind": None}]
     for at, v, kind in sorted(events, key=lambda e: e[0]):
         pnl = round(pnl + v, 2)

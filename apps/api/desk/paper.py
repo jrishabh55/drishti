@@ -262,14 +262,48 @@ def accounting(trade: Dict[str, Any], profile) -> Dict[str, float]:
     if st != "open":
         return zero
     entry = trade["entry_fill"]["price"]
-    legs = trade.get("exit_legs") or []
-    c = round(sum(charges_mod.round_trip_cost(entry, x["price"], x["qty"],
-                                              trade.get("product", "MIS"), profile.brokerage())
-                  for x in legs), 2)
-    gross = sum((x["price"] - entry) * x["qty"] for x in legs)
+    ev = realized_events(trade, profile)
     q = trade.get("open_qty", trade["qty"])
-    return {"open_qty": q, "committed": round(entry * q, 2), "realized": round(gross - c, 2),
-            "charges": c}
+    return {"open_qty": q, "committed": round(entry * q, 2),
+            "realized": round(sum(e["pnl_net"] for e in ev), 2),
+            "charges": round(sum(e["charges"] for e in ev), 2)}
+
+
+def realized_events(trade: Dict[str, Any], profile) -> List[Dict[str, Any]]:
+    """Each booked exit of a paper trade in order: {time, qty, reason,
+    pnl_net, charges} (estimated charges, one round trip per leg, as _settle).
+
+    Open: its completed scale-out legs. Closed: every leg, with the stored
+    pnl_net/charges authoritative — the final leg absorbs the rounding
+    residual, so the events always sum to them; a legacy close without legs
+    is one event at its exit. Pending/cancelled: none."""
+    st = trade.get("status")
+    if st not in ("open", "closed"):
+        return []
+    legs = trade.get("exit_legs") or []
+    if st == "closed" and not legs:
+        ex = trade.get("exit_fill") or {}
+        return [{"time": ex.get("time"), "qty": trade["qty"], "reason": ex.get("reason"),
+                 "pnl_net": trade.get("pnl_net") or 0.0, "charges": trade.get("charges") or 0.0}]
+    entry = trade["entry_fill"]["price"]
+    out = []
+    for x in legs:
+        c = charges_mod.round_trip_cost(entry, x["price"], x["qty"], trade.get("product", "MIS"),
+                                        profile.brokerage())
+        out.append({"time": x["time"], "qty": x["qty"], "reason": x.get("reason"),
+                    "pnl_net": (x["price"] - entry) * x["qty"] - c, "charges": c})
+    if not out:
+        return out
+    if st == "closed":
+        net, chg = trade.get("pnl_net") or 0.0, trade.get("charges") or 0.0
+    else:
+        chg = round(sum(e["charges"] for e in out), 2)
+        net = round(sum((x["price"] - entry) * x["qty"] for x in legs) - chg, 2)
+    for e in out[:-1]:
+        e["pnl_net"], e["charges"] = round(e["pnl_net"], 2), round(e["charges"], 2)
+    out[-1]["pnl_net"] = round(net - sum(e["pnl_net"] for e in out[:-1]), 2)
+    out[-1]["charges"] = round(chg - sum(e["charges"] for e in out[:-1]), 2)
+    return out
 
 
 def close_now(trade: Dict[str, Any], price: float, now: datetime, profile,

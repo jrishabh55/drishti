@@ -351,7 +351,9 @@ def test_partial_then_full_close_is_counted_once(env):
     assert out["realized"]["pnl_net"] == closed["pnl_net"]          # not leg + pnl_net
     assert out["realized"]["partial_pnl_net"] == 0 and out["realized"]["trades"] == 1
     assert out["realized"]["charges"] == closed["charges"]
-    assert [p["pnl"] for p in out["curve"]] == [0, closed["pnl_net"]]
+    # One point per booked leg; the closed trade's legs end exactly on its stored pnl_net.
+    assert [p["kind"] for p in out["curve"][1:]] == ["partial", "closed"]
+    assert out["curve"][-1]["pnl"] == closed["pnl_net"]
     assert out["open"]["positions"] == 0
 
 
@@ -362,3 +364,41 @@ def test_paper_performance_endpoint_stays_closed_only_with_open_partials(env):
     out = client.get("/api/evaluation/paper-performance").json()
     assert out["equity"] == 100_100.0 and out["stats"]["trades"] == 1
     assert len(out["curve"]) == 2
+
+
+def test_curve_books_each_leg_at_its_time_so_drawdown_is_real(env):
+    """10@100: 4 scaled out at 110 (10:00); another trade loses 30 (10:30);
+    the last 6 exit at 95 (11:00). Coarse one-point curves showed 30 drawdown."""
+    from apps.api.desk import paper as paper_mod
+    from apps.api.desk.profile import load_profile
+
+    desk, _, client, *_ = env
+    prof = load_profile("user_a", desk)
+    t = scaled(desk, "user_a")
+    leg = paper_mod.accounting(t, prof)["realized"]
+    closed = paper_mod.close_now(t, 95.0, NSE.local(datetime(2026, 10, 30).date(), 11 * 60), prof)
+    desk.update_paper(t["id"], "user_a", closed)
+    paper(desk, "user_a", "TCS", pnl=-30.0, date="2026-10-30", exit_time="10:30")
+
+    out = client.get("/api/evaluation/trading-performance").json()
+    assert leg == 39.55 and closed["pnl_net"] == 8.93
+    assert [(p["at"], p["pnl"], p["kind"]) for p in out["curve"]] == [
+        (None, 0, None), ("2026-10-30 10:00", 39.55, "partial"),
+        ("2026-10-30 10:30", 9.55, "closed"), ("2026-10-30 11:00", -21.07, "closed")]
+    assert out["stats"]["max_drawdown"] == 60.62
+    assert out["realized"]["pnl_net"] == round(8.93 - 30, 2)      # counted once
+    events = paper_mod.realized_events(closed, prof)
+    assert round(sum(e["pnl_net"] for e in events), 2) == closed["pnl_net"]
+    assert round(sum(e["charges"] for e in events), 2) == closed["charges"]
+
+
+def test_legacy_closed_trade_is_one_event_at_its_exit():
+    from apps.api.desk import paper as paper_mod
+    from apps.api.desk.profile import DeskProfile
+
+    t = {"status": "closed", "qty": 10, "entry_fill": {"time": "09:30", "price": 100.0},
+         "exit_fill": {"time": "10:30", "price": 101.0, "reason": "target"},
+         "pnl_net": 7.5, "charges": 2.5}
+    assert paper_mod.realized_events(t, DeskProfile()) == [
+        {"time": "10:30", "qty": 10, "reason": "target", "pnl_net": 7.5, "charges": 2.5}]
+    assert paper_mod.realized_events({"status": "cancelled"}, DeskProfile()) == []
