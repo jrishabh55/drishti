@@ -60,3 +60,17 @@ it('retains a visible cleanup retry after disconnect failed at the provider', as
   expect(await screen.findByRole('button',{name:'Retry WhatsApp cleanup'})).toHaveProperty('disabled',false)
   expect(screen.getByRole('button',{name:'Save WhatsApp server'})).toHaveProperty('disabled',true)
 })
+
+it('offers separate supervision, summary and live-link opt-ins that never arm or approve live orders', async () => {
+  const verified = {...base,configured:true,connected:true,verified:true,inbound_verified:true}
+  vi.mocked(messagingApi.status).mockImplementation(async ch => ch==='telegram' ? verified : base)
+  vi.mocked(messagingApi.preferences).mockResolvedValue({...verified,supervision:true})
+  render(<MessagingSettings />)
+  const control = await screen.findByRole('switch',{name:'Telegram strategy status and pause/resume'})
+  expect((screen.getByRole('switch',{name:'WhatsApp strategy status and pause/resume'}) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(control)
+  await waitFor(() => expect(messagingApi.preferences).toHaveBeenCalledWith('telegram',false,false,{supervision:true}))
+  expect(screen.getByRole('switch',{name:'Telegram daily summary'})).toBeTruthy()
+  expect(screen.getByRole('switch',{name:'Telegram live-signal links'})).toBeTruthy()
+  expect(screen.getAllByText(/never arms live trading/i).length).toBeGreaterThan(0)
+})
