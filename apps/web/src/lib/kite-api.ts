@@ -275,6 +275,10 @@ export interface BacktestTrade extends StrategyAttribution {
   pnl_net?: number
   r_net?: number | null
   charges?: number
+  limit?: number | null
+  sizing_bound_by?: string
+  cash_at_signal?: number
+  risk_warnings?: string[]
 }
 
 export type CoverageDay = 'complete' | 'incomplete' | 'no_data'
@@ -295,7 +299,10 @@ export interface Backtest extends BacktestSummary {
   profile_snapshot: Record<string, unknown>
   coverage: Record<string, { status: 'ok' | 'partial' | 'insufficient_history'; days: Record<string, CoverageDay>; error?: string }>
   trades: BacktestTrade[]
-  skipped: { date: string; symbol: string; reason: string; signal_time?: string }[]
+  skipped: { date: string; symbol: string; reason: string; reasons?: string[]; signal_time?: string; cash?: number }[]
+  /** Desk risk.check replayed at each signal; past NSE facts are unavailable and disclosed. */
+  risk: { engine: string; market_facts: 'unavailable'; warnings: string[] }
+  scanner: { id: string; universe: string[]; matches: Record<string, string[]>; timeframe: '1d'; as_of: string } | null
   disclaimer: string
   assumptions: string[]
 }

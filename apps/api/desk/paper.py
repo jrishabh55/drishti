@@ -239,6 +239,34 @@ def _settle(t: Dict[str, Any], profile) -> None:
                              if t.get("planned_entry") else None)
 
 
+def accounting(trade: Dict[str, Any], profile) -> Dict[str, float]:
+    """What a paper trade means for its portfolio's cash right now — shared by
+    the runtime account (routes.desk._account), backtest replay and analytics.
+
+    pending: reserves the intended entry × qty. open: the fill price × the
+    REMAINING open_qty is committed, and completed scale-out legs are booked
+    (gross minus their per-leg estimated charges, as _settle charges them).
+    closed: pnl_net/charges unchanged. Anything else (cancelled): nothing."""
+    st = trade.get("status")
+    zero = {"open_qty": 0, "committed": 0.0, "realized": 0.0, "charges": 0.0}
+    if st == "closed":
+        return dict(zero, realized=trade.get("pnl_net") or 0.0, charges=trade.get("charges") or 0.0)
+    if st == "pending":
+        px = trade.get("limit") or trade.get("planned_entry") or 0.0
+        return dict(zero, committed=round(px * trade["qty"], 2))
+    if st != "open":
+        return zero
+    entry = trade["entry_fill"]["price"]
+    legs = trade.get("exit_legs") or []
+    c = round(sum(charges_mod.round_trip_cost(entry, x["price"], x["qty"],
+                                              trade.get("product", "MIS"), profile.brokerage())
+                  for x in legs), 2)
+    gross = sum((x["price"] - entry) * x["qty"] for x in legs)
+    q = trade.get("open_qty", trade["qty"])
+    return {"open_qty": q, "committed": round(entry * q, 2), "realized": round(gross - c, 2),
+            "charges": c}
+
+
 def close_now(trade: Dict[str, Any], price: float, now: datetime, profile,
               spec: SessionSpec = NSE) -> Dict[str, Any]:
     """Manual close at a given price (the user's call, e.g. on news)."""

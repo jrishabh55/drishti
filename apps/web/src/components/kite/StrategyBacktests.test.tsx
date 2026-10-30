@@ -20,7 +20,11 @@ const result: Backtest = {
   },
   trades: [{ symbol: 'SBIN', trade_date: '2026-10-01', signal_time: '09:35', qty: 10, status: 'closed', split: 'train',
     entry_fill: { time: '09:35', price: 802.5 }, exit_fill: { time: '11:00', price: 807, reason: 'target' }, pnl_net: 200, r_net: 1.8 }],
-  skipped: [{ date: '2026-10-03', symbol: 'SBIN', reason: 'sized to 0 shares' }],
+  skipped: [{ date: '2026-10-03', symbol: 'TCS', signal_time: '09:40', reason: 'x',
+    reasons: ['trades: 1 entries today plus 0 passed in this batch; your limit is 1'] }],
+  risk: { engine: 'desk risk.check', market_facts: 'unavailable',
+    warnings: ['Circuit band, ASM/GSM, F&O ban and results-week checks were skipped: NSE data unavailable (they never silently pass).'] },
+  scanner: { id: 'sc', universe: ['SBIN', 'TCS'], matches: { '2026-10-01': ['SBIN'] }, timeframe: '1d', as_of: 'open' },
   disclaimer: 'Historical simulation … It is not a prediction.', assumptions: ['Charges: estimated'],
 }
 
@@ -32,6 +36,9 @@ it('shows the disclaimer, split periods, honest coverage and skipped signals', (
   expect(screen.getByText(/SBIN partial · 1 day\(s\) skipped · live:kite/)).toBeTruthy()
   expect(screen.getByText(/INFY insufficient history/)).toBeTruthy()
   expect(screen.getByText(/1 signal\(s\) not traded/)).toBeTruthy()
+  expect(screen.getByText(/TCS: trades: 1 entries today/)).toBeTruthy()
+  expect(screen.getByText(/NSE data unavailable/)).toBeTruthy()
+  expect(screen.getByText(/2026-10-01: SBIN/)).toBeTruthy()
 })
 
 it('drops blank exit inputs so an empty policy keeps the fixed stop/target', () => {
@@ -47,15 +54,21 @@ it('gives legacy strategies the new defaults and strips server-owned fields', ()
   expect(rest).not.toHaveProperty('paused_from')
 })
 
-it('live modes hide paper-only exits and save on the Default portfolio', () => {
+it('switching to a live mode never rewrites rules: it shows the conflict until the user fixes it', () => {
   const onSave = vi.fn()
   render(<StrategyForm initial={{ ...BLANK_STRATEGY, symbols: ['SBIN'], portfolio_id: 'lab', exit_policy: { breakeven_after_r: 1 } }}
     busy={false} onCancel={() => {}} onSave={onSave} portfolios={[{ id: 'default', name: 'Default' }, { id: 'lab', name: 'Lab' }]} />)
-  expect(screen.getByLabelText('Stop to breakeven after (R)')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Auto' }))
-  expect(screen.queryByLabelText('Stop to breakeven after (R)')).toBeNull()
   expect(screen.getByText(/separate typed opt-in/)).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: 'Save strategy' }))
+  // The policy is still there and saving is blocked with the reason shown.
+  expect((screen.getByLabelText('Stop to breakeven after (R)') as HTMLInputElement).value).toBe('1')
+  expect(screen.getAllByRole('alert')).toHaveLength(2)
+  const save = screen.getByRole('button', { name: 'Save strategy' }) as HTMLButtonElement
+  expect(save.disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove advanced exits' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Use Default portfolio' }))
+  expect(save.disabled).toBe(false)
+  fireEvent.click(save)
   expect(onSave.mock.calls[0][0]).toMatchObject({ mode: 'auto', portfolio_id: 'default', exit_policy: null, symbols: ['SBIN'] })
 })
 

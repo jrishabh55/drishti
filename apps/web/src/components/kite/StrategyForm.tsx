@@ -61,6 +61,17 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
   const num = (v: string) => (v === '' ? null : Number(v))
   const row = 'flex items-center justify-between gap-3 text-sm'
   const live = LIVE.includes(s.mode)
+  // Never rewrite the user's rules on a mode switch: say what conflicts and let them fix it.
+  const conflicts: { why: string; fix: string; apply: () => void }[] = live ? [
+    ...(s.portfolio_id !== 'default' ? [{
+      why: 'Confirm and Auto trade the real account: they run on the Default portfolio only.',
+      fix: 'Use Default portfolio', apply: () => setS((x) => ({ ...x, portfolio_id: 'default' })),
+    }] : []),
+    ...(cleanPolicy(s.exit_policy) ? [{
+      why: 'Advanced exits run in Paper and backtests only; live orders keep the fixed stop and target.',
+      fix: 'Remove advanced exits', apply: () => setS((x) => ({ ...x, exit_policy: null })),
+    }] : []),
+  ] : []
   const pol = s.exit_policy ?? {}
   const setPol = (k: keyof ExitPolicy, v: string) => setS({ ...s, exit_policy: { ...pol, [k]: num(v) ?? undefined } })
   const pfs = portfolios.length ? portfolios : [{ id: 'default', name: 'Default' }]
@@ -87,20 +98,17 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
       ) : (
         <>
           <div className={row}><span>Mode</span>
-            <Seg value={s.mode} options={MODES} onChange={(mode) => setS({
-              ...s, mode, ...(LIVE.includes(mode) ? { portfolio_id: 'default', exit_policy: null } : {}),
-            })} /></div>
+            <Seg value={s.mode} options={MODES} onChange={(mode) => setS({ ...s, mode })} /></div>
           <p className="text-xs text-[var(--text-4)]">{MODES.find((m) => m.value === s.mode)?.hint}</p>
         </>
       )}
       <div className={row}><span>Portfolio</span>
-        <Select value={s.portfolio_id} disabled={live} onValueChange={(portfolio_id) => setS({ ...s, portfolio_id })}>
+        <Select value={s.portfolio_id} onValueChange={(portfolio_id) => setS({ ...s, portfolio_id })}>
           <SelectTrigger size="sm" aria-label="Portfolio" className="w-64"><SelectValue /></SelectTrigger>
           <SelectContent>
             {pfs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select></div>
-      {live && <p className="text-xs text-[var(--text-4)]">Confirm and Auto trade the real account, so they use Default.</p>}
       <div className={row}><span>Bars</span>
         <Seg value={s.interval} options={[{ value: '5m', label: '5 min' }, { value: '1m', label: '1 min' }] as const}
           onChange={(interval) => setS({ ...s, interval })} /></div>
@@ -149,8 +157,7 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
       <label className={row}><span>Confirm window (seconds)</span>
         <Input className="w-36 es-mono" type="number" value={s.confirm_ttl_s}
           onChange={(e) => setS({ ...s, confirm_ttl_s: Number(e.target.value) })} /></label>
-      {!live && (
-        <fieldset className="space-y-2 rounded-[var(--r-sm)] border border-[var(--line-1)] p-2">
+      <fieldset className="space-y-2 rounded-[var(--r-sm)] border border-[var(--line-1)] p-2">
           <legend className="px-1 text-xs text-[var(--text-3)]">Advanced exits (paper &amp; backtests; blank = fixed stop/target)</legend>
           {([
             ['breakeven_after_r', 'Stop to breakeven after (R)'],
@@ -164,13 +171,18 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
                 onChange={(e) => setPol(k, e.target.value)} /></label>
           ))}
         </fieldset>
-      )}
       <p className="text-xs text-[var(--text-4)]">
         Sizing, loss limits and entry window come from Limits &amp; settings. Every edit is a new version;
         trades keep the version that made them.
       </p>
+      {conflicts.map((c) => (
+        <div key={c.fix} role="alert" className="flex flex-wrap items-center gap-2 text-xs text-[var(--err)]">
+          <span>{c.why}</span>
+          <Button type="button" size="sm" variant="outline" onClick={c.apply}>{c.fix}</Button>
+        </div>
+      ))}
       <div className="flex gap-2">
-        <Button type="submit" disabled={busy}>Save strategy</Button>
+        <Button type="submit" disabled={busy || conflicts.length > 0}>Save strategy</Button>
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
       </div>
     </form>

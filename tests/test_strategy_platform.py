@@ -473,20 +473,6 @@ def test_backtest_keeps_research_absolute_levels(bt):
     assert (t["stop"], t["target"]) == (801.0, 808.0) and t["exit_fill"]["reason"] == "target"
 
 
-def test_backtest_refuses_to_replay_scanner_matches(bt):
-    client, s, days, _ = bt
-    from apps.api.scanner.store import get_scanner_store
-    sid = get_scanner_store().create_scanner("user_a", "mine", "", {"op": "and", "conditions": []})
-    store = get_kite_store()
-    store.put_strategy("user_a", dict(store.get_strategy(s["id"], "user_a"), scanner_id=sid))
-    body = {"strategy_id": s["id"], "start_date": days[0].isoformat(),
-            "end_date": days[-1].isoformat()}
-    r = client.post("/api/kite/strategy-backtests", json={**body, "symbols": ["TCS"]})
-    assert r.status_code == 422 and "scanner" in r.text
-    ok = client.post("/api/kite/strategy-backtests", json={**body, "symbols": ["SBIN"]})
-    assert ok.status_code == 201 and ok.json()["scanner_candidates"] == "not_replayed"
-
-
 # ---------------------------------------------------------------- broker funds
 
 def _funds_send(env, funds):
@@ -521,3 +507,229 @@ def test_live_send_with_enough_funds_places_exact_quantity(env):
                                 "available": {"live_balance": 1e6, "cash": 1e6}})
     assert r.status_code == 201, r.text
     assert [o["quantity"] for o in fake.placed()] == [50]
+
+
+# ---------------------------------------------------------------- account replay (follow-up)
+
+def _late_session(day):
+    """Breakout one bar later than _full_session (the 09:35–09:40 bar)."""
+    closes = [800.0, 801.0, 800.5, 800.8, 802.5] + [803 + 0.1 * k for k in range(NSE.n_bars - 5)]
+    highs = [801.0, 801.5, 801.0, 801.0, 803.0] + [c + 0.3 for c in closes[5:]]
+    lows = [799.0, 800.0, 800.0, 800.5, 801.0] + [c - 0.3 for c in closes[5:]]
+    return session_rows(day, closes, highs=highs, lows=lows)
+
+
+def _daily(days_before, closes):
+    from apps.api.desk.market.session import NSE as _N
+    out = []
+    for d, c in zip(days_before, closes):
+        out.append((datetime.combine(d, datetime.min.time(), _N.tz), c, c + 1, c - 1, c, 1e6))
+    return out
+
+
+@pytest.fixture()
+def acct(env, monkeypatch):
+    """SBIN breaks out at 09:35 and TCS at 09:40 on the same day; INFY has daily
+    history only. Scanner tests use the daily rows."""
+    client, desk, user, fake, clock = env
+    day = trading_days(DAY - timedelta(days=1), 1)[0]
+    intraday = {"SBIN": _full_session(day), "TCS": _late_session(day)}
+    hist = trading_days(DAY - timedelta(days=1), 40)
+    daily = {"SBIN": _daily(hist, [900.0] * 40),
+             "TCS": _daily(hist, [700.0] * 39 + [950.0])}   # TCS only matches on the last day
+
+    def history(user_id, symbol, interval, kind):
+        if kind != "history" or user_id != "user_a":
+            return None
+        rows = (daily if interval == "1d" else intraday).get(symbol, [])
+        return bars_source.BarSeries(symbol, interval, rows, "live:kite",
+                                     rows[-1][0].isoformat() if rows else None)
+    bars_source.register_live_provider(history)
+    clock["now"] = ist(16, 0)
+    monkeypatch.setattr(bt_routes, "_now", lambda: clock["now"])
+    bclient, _ = desk_client(bt_routes.router, user)
+    s = _strategy(client, symbols=["SBIN", "TCS"], max_signals_per_day=3)
+    return bclient, desk, s, day, hist
+
+
+def _run(client, s, day, **kw):
+    r = client.post("/api/kite/strategy-backtests", json={
+        "strategy_id": s["id"], "start_date": day.isoformat(), "end_date": day.isoformat(), **kw})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_concurrent_backtest_orders_compete_for_cash(acct):
+    client, desk, s, day, _ = acct
+    res = _run(client, s, day)
+    first, second = sorted(res["trades"], key=lambda t: t["signal_time"])
+    assert (first["symbol"], second["symbol"]) == ("SBIN", "TCS")
+    assert first["qty"] == 62                                   # max order ₹50,000 binds
+    reserved = first["qty"] * first["limit"]
+    # TCS sizes from the cash left while SBIN is still open, minus the 10% buffer.
+    assert second["qty"] == int((100_000 - reserved - 10_000) // second["limit"])
+    assert second["sizing_bound_by"] == "cash"
+    assert res["risk"]["market_facts"] == "unavailable"
+    assert any("NSE data unavailable" in w for w in res["risk"]["warnings"])
+
+
+def test_daily_trade_limit_refuses_later_signals(acct):
+    client, desk, s, day, _ = acct
+    desk.put("/api/desk/profile", json={"max_loss_per_trade_inr": 200, "flat_by": "15:05",
+                                        "max_trades_per_day": 1})
+    res = _run(client, s, day)
+    assert [t["symbol"] for t in res["trades"]] == ["SBIN"]
+    blocked = [x for x in res["skipped"] if x["symbol"] == "TCS"][0]
+    assert any(r.startswith("trades:") for r in blocked["reasons"])
+
+
+def test_daily_loss_limit_refuses_later_signals(acct):
+    client, desk, s, day, _ = acct
+    desk.put("/api/desk/profile", json={"max_loss_per_trade_inr": 200, "flat_by": "15:05",
+                                        "max_daily_loss_inr": 200})
+    res = _run(client, s, day)
+    assert [t["symbol"] for t in res["trades"]] == ["SBIN"]
+    blocked = [x for x in res["skipped"] if x["symbol"] == "TCS"][0]
+    assert any(r.startswith("daily loss:") for r in blocked["reasons"])
+
+
+def _scanner(definition, user="user_a"):
+    from apps.api.scanner.store import get_scanner_store
+    return get_scanner_store().create_scanner(user, "scan", "", definition)
+
+
+DAILY_ABOVE_850 = {"logic": "AND", "children": [
+    {"timeframe": "1d", "left": {"field": "close"}, "op": ">", "right": {"const": 850}}]}
+
+
+def test_scanner_candidates_replay_as_of_each_date_on_a_frozen_universe(acct):
+    client, desk, s, day, hist = acct
+    store = get_kite_store()
+    store.put_strategy("user_a", dict(store.get_strategy(s["id"], "user_a"), symbols=[],
+                                      scanner_id=_scanner(DAILY_ABOVE_850)))
+    res = _run(client, s, day, symbols=["SBIN", "TCS"])
+    # TCS's only daily close above 850 is the session itself (not before it):
+    # today's match must never leak into the replayed date.
+    assert res["scanner"]["matches"][day.isoformat()] == ["SBIN"]
+    assert [t["symbol"] for t in res["trades"]] == ["SBIN"]
+    assert res["scanner"]["universe"] == ["SBIN", "TCS"]
+    assert "survivorship" in " ".join(res["assumptions"])
+
+
+def test_scanner_conditions_without_history_are_refused(acct):
+    client, desk, s, day, _ = acct
+    store = get_kite_store()
+    bad = [
+        {"logic": "AND", "children": [{"timeframe": "1d", "left": {"fundamental": "pe"},
+                                       "op": "<", "right": {"const": 20}}]},
+        {"logic": "AND", "children": [{"timeframe": "1d", "left": {"meta": "index"},
+                                       "op": "in", "right": {"const_list": ["NIFTY50"]}}]},
+        {"logic": "AND", "children": [{"timeframe": "5m", "left": {"field": "close"},
+                                       "op": ">", "right": {"const": 1}}]},
+    ]
+    for d in bad:
+        store.put_strategy("user_a", dict(store.get_strategy(s["id"], "user_a"),
+                                          scanner_id=_scanner(d)))
+        r = client.post("/api/kite/strategy-backtests", json={
+            "strategy_id": s["id"], "start_date": day.isoformat(), "end_date": day.isoformat(),
+            "symbols": ["SBIN", "TCS"]})
+        assert r.status_code == 422 and "historical" in r.text, (d, r.text)
+
+
+def test_scanner_only_strategy_needs_a_frozen_universe(acct):
+    client, desk, s, day, _ = acct
+    store = get_kite_store()
+    store.put_strategy("user_a", dict(store.get_strategy(s["id"], "user_a"), symbols=[],
+                                      scanner_id=_scanner(DAILY_ABOVE_850)))
+    r = client.post("/api/kite/strategy-backtests", json={
+        "strategy_id": s["id"], "start_date": day.isoformat(), "end_date": day.isoformat()})
+    assert r.status_code == 422 and "universe" in r.text
+
+
+# ---------------------------------------------------------------- MARKET funds pricing
+
+def _market_ticket(desk):
+    plan = desk.post("/api/desk/plans", json={"symbol": "SBIN", "entry": 800.0,
+                                              "entry_time": "09:40", "setup": "level",
+                                              "stop_rule": "price", "stop_param": 796,
+                                              "target_param": 2}).json()
+    tk = desk.post("/api/desk/tickets", json={"plan_id": plan["id"], "order_type": "MARKET"}).json()
+    assert tk["status"] == "ready", tk
+    return tk
+
+
+def test_market_funds_check_prices_from_a_fresh_owner_quote(env):
+    client, desk, _, fake, clock = env
+    _armed(client, fake, clock)
+    tk = _market_ticket(desk)
+    qty = tk["order"]["qty"]
+    # Enough for qty × plan entry (+10% buffer) but not at the gapped-up quote.
+    fake.funds = {"enabled": True, "net": qty * 800 / 0.9 + 1,
+                  "available": {"live_balance": qty * 800 / 0.9 + 1}}
+    fake.quote_price = 900.0
+    r = client.post("/api/kite/trades", json={"ticket_id": tk["id"],
+                                              "confirm_text": f"buy {qty} SBIN"})
+    assert r.status_code == 409 and "funds" in r.text and "900" in r.text
+    assert fake.placed() == []
+
+
+def test_market_funds_check_refuses_without_a_quote(env):
+    client, desk, _, fake, clock = env
+    _armed(client, fake, clock)
+    tk = _market_ticket(desk)
+    fake.quote_price = None
+    r = client.post("/api/kite/trades", json={"ticket_id": tk["id"],
+                                              "confirm_text": f"buy {tk['order']['qty']} SBIN"})
+    assert r.status_code == 409 and "quote" in r.text and fake.placed() == []
+
+
+# ---------------------------------------------------------------- partial-exit accounting
+
+def _scaled_open_trade():
+    t = paper.advance(_open_trade({"scale_out_at_r": 1, "scale_out_pct": 50}),
+                      _bars([(100, 100.5, 99.5, 100), (100, 101.2, 99.8, 101.0)]),
+                      ist(9, 45), PROF)
+    assert t["status"] == "open" and t["open_qty"] == 5
+    return t
+
+
+def test_accounting_books_partial_exits_and_releases_their_cash():
+    from apps.api.desk.market import charges as charges_mod
+    pending = _open_trade()
+    assert paper.accounting(pending, PROF) == {"open_qty": 0, "committed": 1000.0,
+                                               "realized": 0.0, "charges": 0.0}
+    t = _scaled_open_trade()
+    leg_c = round(charges_mod.round_trip_cost(100.0, 101.0, 5, "MIS", PROF.brokerage()), 2)
+    acc = paper.accounting(t, PROF)
+    assert acc == {"open_qty": 5, "committed": 500.0, "realized": round(5.0 - leg_c, 2),
+                   "charges": leg_c}
+    closed = paper.advance(t, _bars([(100, 100.5, 99.5, 100), (100, 101.2, 99.8, 101.0),
+                                     (101, 104.5, 100.5, 104)]), ist(15, 30), PROF)
+    acc = paper.accounting(closed, PROF)
+    assert acc == {"open_qty": 0, "committed": 0.0, "realized": closed["pnl_net"],
+                   "charges": closed["charges"]}
+    assert paper.accounting(dict(pending, status="cancelled"), PROF)["committed"] == 0.0
+
+
+def test_runtime_account_uses_remaining_quantity_after_a_partial_exit(env):
+    from apps.api.routes import desk as desk_routes
+    t = dict(_scaled_open_trade(), portfolio_id="default")
+    get_desk_store().create_paper("user_a", t)
+    acc = desk_routes._account("user_a")
+    assert acc["holdings"] == {"TEST": 5} and acc["values"] == {"TEST": 500.0}
+    booked = paper.accounting(t, PROF)["realized"]
+    assert acc["cash"] == round(100_000 + booked - 500.0, 2)
+
+
+def test_replay_account_releases_scaled_out_cash_only_after_its_bar():
+    from apps.api.kite import backtest
+    t = _scaled_open_trade()                    # scale-out in the 09:35 bar
+    before = backtest._account(100_000, 0.0, [t], parse(9, 39), 5)
+    after = backtest._account(100_000, 0.0, [t], parse(9, 40), 5)
+    assert before["values"] == {"TEST": 1000.0} and before["holdings"] == {"TEST": 10}
+    assert after["values"] == {"TEST": 500.0} and after["holdings"] == {"TEST": 5}
+    assert after["cash"] == round(100_000 + paper.accounting(t, PROF)["realized"] - 500.0, 2)
+
+
+def parse(h, m):
+    return h * 60 + m

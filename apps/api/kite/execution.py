@@ -567,7 +567,10 @@ def check_funds(client: rest.KiteClient, doc: Dict[str, Any], profile: DeskProfi
     """Real broker funds, read fresh before any entry is placed: the equity
     segment must be enabled and its finite current balance must cover the
     full notional (no MIS leverage assumed) plus the profile's cash buffer.
-    Paper capital never stands in; the approved quantity is never resized."""
+    A MARKET entry is priced at the higher of the plan and a fresh quote from
+    the owner's own Kite session (a gap above the plan needs more cash); no
+    quote means no send. Paper capital never stands in; the approved
+    quantity is never resized."""
     try:
         m = client.margins_equity()
     except rest.KiteError as exc:
@@ -584,10 +587,26 @@ def check_funds(client: rest.KiteClient, doc: Dict[str, Any], profile: DeskProfi
                            "missing); nothing was sent"])
     balance = min(live, net)
     price = max(float(doc.get("limit") or 0), float(doc.get("planned_entry") or 0))
+    priced = ""
+    if doc["order_type"] == "MARKET":
+        try:
+            ltp = float((client.quote([doc["symbol"]]).get(doc["symbol"]) or {}).get("last_price"))
+        except rest.KiteError as exc:
+            if exc.token_error:
+                auth.mark_revoked(user_id)
+            ltp = float("nan")
+        except (TypeError, ValueError):
+            ltp = float("nan")
+        if not (math.isfinite(ltp) and ltp > 0):
+            raise ExecRefused([f"no fresh Kite quote for {doc['symbol']} to price this MARKET "
+                               "order's funds check; nothing was sent"])
+        if ltp > price:
+            price, priced = ltp, f" at the live quote ₹{ltp:,.2f}"
+        doc["funds_quote"] = ltp
     need = doc["qty"] * price
     usable = balance * (1 - profile.cash_buffer_pct / 100)
     if price <= 0 or need > usable:
-        raise ExecRefused([f"insufficient Kite funds: this order needs ₹{need:,.0f} in full, "
+        raise ExecRefused([f"insufficient Kite funds: this order needs ₹{need:,.0f} in full{priced}, "
                            f"₹{usable:,.0f} is available after your {profile.cash_buffer_pct:g}% "
                            "cash buffer; nothing was sent"])
     doc["funds_checked"] = {"live_balance": live, "net": net, "required": round(need, 2)}

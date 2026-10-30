@@ -486,14 +486,16 @@ def _account(user_id: str, portfolio_id: str = pf_mod.DEFAULT) -> Dict[str, Any]
     holdings: Dict[str, float] = {}
     values: Dict[str, float] = {}
     realized = 0.0
+    from apps.api.desk import paper
+
     for t in trades:
-        if t["status"] in ("open", "pending"):
-            px = (t.get("entry_fill") or {}).get("price") or t.get("limit") or t.get("planned_entry")
-            if t["status"] == "open":
-                holdings[t["symbol"]] = holdings.get(t["symbol"], 0) + t["qty"]
-            values[t["symbol"]] = values.get(t["symbol"], 0.0) + (px or 0) * t["qty"]
-        elif t["status"] == "closed":
-            realized += t.get("pnl_net") or 0.0
+        # Partial (scale-out) exits release their cash and holdings here.
+        acc = paper.accounting(t, prof)
+        realized += acc["realized"]
+        if acc["open_qty"]:
+            holdings[t["symbol"]] = holdings.get(t["symbol"], 0) + acc["open_qty"]
+        if acc["committed"]:
+            values[t["symbol"]] = values.get(t["symbol"], 0.0) + acc["committed"]
     entries = [{"symbol": t["symbol"], "side": "buy",
                 "max_loss": (t.get("risk_per_share") or 0) * t["qty"]}
                for t in trades if t["trade_date"] == today and t["status"] != "cancelled"]

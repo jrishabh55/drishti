@@ -5,6 +5,7 @@ Routes (under /api, Clerk-authed, per user):
   GET  /kite/strategy-backtests?strategy_id=   own runs, newest first (summaries)
   POST /kite/strategy-backtests                {strategy_id, start_date, end_date,
                                                 split_date?, symbols?} → 201 full result
+                                               (scanner strategies: symbols = frozen universe)
   GET  /kite/strategy-backtests/{id}           one own run, in full
 """
 from __future__ import annotations

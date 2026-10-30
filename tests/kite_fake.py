@@ -41,6 +41,8 @@ class FakeKite:
         #: order types whose new orders Kite accepts but hides from GET /orders
         #: until ``reveal()`` — a lagging order book
         self.hidden_types: set = set()
+        #: GET /quote last_price; None = no quote available
+        self.quote_price: Optional[float] = 801.5
         #: GET /user/margins/equity payload; None = the endpoint is down
         self.funds: Optional[Dict[str, Any]] = {
             "enabled": True, "net": 1e7, "available": {"live_balance": 1e7, "cash": 1e7}}
@@ -86,8 +88,10 @@ class FakeKite:
         if path == "/instruments/NSE":
             return 200, INSTRUMENTS
         if path == "/quote":
-            return self._ok({i: {"instrument_token": 1, "last_price": 801.5, "volume": 1000,
-                                 "ohlc": {"open": 800}} for _, i in params})
+            if self.quote_price is None:
+                return self._ok({})
+            return self._ok({i: {"instrument_token": 1, "last_price": self.quote_price,
+                                 "volume": 1000, "ohlc": {"open": 800}} for _, i in params})
         if path.startswith("/instruments/historical/"):
             return self._ok({"candles": self.candles})
         if method == "POST" and path == "/orders/regular":

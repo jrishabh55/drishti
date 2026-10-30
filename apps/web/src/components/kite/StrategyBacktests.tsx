@@ -53,7 +53,9 @@ export function StrategyBacktests({ strategy }: { strategy: Strategy }) {
     <div className="space-y-2 rounded-[var(--r-sm)] border border-[var(--line-1)] p-2 text-xs">
       <p className="text-[var(--text-3)]">
         Replays v{strategy.version ?? 1} on past {strategy.interval ?? '5m'} bars with the same entry, exit and sizing rules.
-        Up to 60 days and 20 symbols. Historical simulation only — not a prediction.
+        Up to 60 days and 20 symbols, replayed in time order on one virtual account with your desk risk limits.
+        {strategy.scanner_id ? ' The scanner is replayed on daily bars before each date over the universe you list.' : ''}
+        {' '}Historical simulation only — not a prediction.
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="space-y-1"><span className="block">From</span>
@@ -62,7 +64,8 @@ export function StrategyBacktests({ strategy }: { strategy: Strategy }) {
           <Input type="date" className="h-8 w-36" value={end} max={istDay()} onChange={(e) => setEnd(e.target.value)} /></label>
         <label className="space-y-1"><span className="block">Test period from (optional)</span>
           <Input type="date" className="h-8 w-36" value={split} onChange={(e) => setSplit(e.target.value)} /></label>
-        <label className="space-y-1"><span className="block">Symbols (blank = strategy's)</span>
+        <label className="space-y-1"><span className="block">
+          {strategy.scanner_id ? 'Frozen universe for the scanner' : "Symbols (blank = strategy's)"}</span>
           <Input className="h-8 w-48 es-mono" value={syms} placeholder={strategy.symbols.join(', ')}
             onChange={(e) => setSyms(e.target.value.toUpperCase())} /></label>
         <Button size="sm" disabled={busy} onClick={() => void run()}>{busy ? 'Running…' : 'Run backtest'}</Button>
@@ -127,6 +130,17 @@ export function BacktestResult({ b }: { b: Backtest }) {
         {b.summary.test && <div>Test (from {b.config.split_date}): <Stats s={b.summary.test} /></div>}
         <div>Estimated charges {inr(b.costs.charges)}</div>
       </div>
+      {b.risk?.warnings.length > 0 && (
+        <ul className="list-disc pl-4 text-[var(--text-3)]">{b.risk.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+      )}
+      {b.scanner && (
+        <details>
+          <summary className="cursor-pointer">Scanner replay over {b.scanner.universe.join(', ') || 'no universe'}</summary>
+          <ul>{Object.entries(b.scanner.matches).map(([d, m]) => (
+            <li key={d} className="es-mono">{d}: {m.length ? m.join(', ') : 'no matches'}</li>
+          ))}</ul>
+        </details>
+      )}
       <div className="flex flex-wrap gap-1">
         {Object.entries(b.coverage).map(([sym, c]) => {
           const bad = Object.entries(c.days).filter(([, v]) => v !== 'complete')
@@ -164,7 +178,9 @@ export function BacktestResult({ b }: { b: Backtest }) {
       {b.skipped.length > 0 && (
         <details>
           <summary className="cursor-pointer">{b.skipped.length} signal(s) not traded</summary>
-          <ul>{b.skipped.map((x, i) => <li key={i} className="es-mono">{x.date} {x.symbol}: {x.reason}</li>)}</ul>
+          <ul>{b.skipped.map((x, i) => (
+            <li key={i} className="es-mono">{x.date} {x.signal_time ?? ''} {x.symbol}: {(x.reasons ?? [x.reason]).join(' · ')}</li>
+          ))}</ul>
         </details>
       )}
       <details>
