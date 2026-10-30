@@ -172,16 +172,16 @@ function PortfolioRow({ p, onSaved }: { p: Portfolio; onSaved: () => void }) {
   return (
     <div className="space-y-2 rounded-[var(--r-md)] border border-[var(--line-1)] p-3 text-sm">
       <div className="flex flex-wrap items-end gap-2">
-        <div className="space-y-1">
+        <div className="grid gap-1.5">
           <Label htmlFor={`pf-name-${p.id}`}>Name</Label>
           <Input id={`pf-name-${p.id}`} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
         </div>
-        <div className="space-y-1">
+        <div className="grid gap-1.5">
           <Label htmlFor={`pf-cap-${p.id}`}>Starting capital ₹</Label>
           <Input id={`pf-cap-${p.id}`} type="number" min={1} value={capital} disabled={p.capital_locked}
             onChange={(e) => setCapital(e.target.value)} />
         </div>
-        <Button size="sm" variant="outline" disabled={busy} onClick={save}>Save</Button>
+        <Button variant="outline" disabled={busy} onClick={save}>Save</Button>
       </div>
       {p.capital_locked && (
         <p className="text-xs text-[var(--text-4)]">
@@ -237,16 +237,16 @@ export function PortfolioManager() {
         {portfolios.map((p) => <PortfolioRow key={`${p.id}:${p.name}:${p.capital}`} p={p} onSaved={() => { reload() }} />)}
       </div>
       <div className="flex flex-wrap items-end gap-2 border-t border-[var(--line-1)] pt-3">
-        <div className="space-y-1">
+        <div className="grid gap-1.5">
           <Label htmlFor="pf-new-name">New portfolio</Label>
           <Input id="pf-new-name" placeholder="e.g. Small ORB test" value={name} maxLength={60}
             onChange={(e) => setName(e.target.value)} />
         </div>
-        <div className="space-y-1">
+        <div className="grid gap-1.5">
           <Label htmlFor="pf-new-cap">Starting capital ₹</Label>
           <Input id="pf-new-cap" type="number" min={1} value={capital} onChange={(e) => setCapital(e.target.value)} />
         </div>
-        <Button size="sm" disabled={busy || !name.trim() || !(Number(capital) > 0)} onClick={create}>Create</Button>
+        <Button disabled={busy || !name.trim() || !(Number(capital) > 0)} onClick={create}>Create</Button>
       </div>
       {error && <p className="text-xs text-[var(--err)]">{error}</p>}
     </section>

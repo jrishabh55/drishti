@@ -58,17 +58,17 @@ export function StrategyBacktests({ strategy }: { strategy: Strategy }) {
         {' '}Historical simulation only — not a prediction.
       </p>
       <div className="flex flex-wrap items-end gap-2">
-        <label className="space-y-1"><span className="block">From</span>
+        <label className="flex flex-col gap-1.5"><span>From</span>
           <Input type="date" className="h-8 w-36" value={start} onChange={(e) => setStart(e.target.value)} /></label>
-        <label className="space-y-1"><span className="block">To</span>
+        <label className="flex flex-col gap-1.5"><span>To</span>
           <Input type="date" className="h-8 w-36" value={end} max={istDay()} onChange={(e) => setEnd(e.target.value)} /></label>
-        <label className="space-y-1"><span className="block">Test period from (optional)</span>
+        <label className="flex flex-col gap-1.5"><span>Test period from (optional)</span>
           <Input type="date" className="h-8 w-36" value={split} onChange={(e) => setSplit(e.target.value)} /></label>
-        <label className="space-y-1"><span className="block">
+        <label className="flex flex-col gap-1.5"><span>
           {strategy.scanner_id ? 'Frozen universe for the scanner' : "Symbols (blank = strategy's)"}</span>
           <Input className="h-8 w-48 es-mono" value={syms} placeholder={strategy.symbols.join(', ')}
             onChange={(e) => setSyms(e.target.value.toUpperCase())} /></label>
-        <Button size="sm" disabled={busy} onClick={() => void run()}>{busy ? 'Running…' : 'Run backtest'}</Button>
+        <Button disabled={busy} onClick={() => void run()}>{busy ? 'Running…' : 'Run backtest'}</Button>
       </div>
       {error && <p className="text-[var(--err)]">{error}</p>}
 

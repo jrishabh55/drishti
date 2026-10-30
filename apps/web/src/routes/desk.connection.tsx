@@ -103,7 +103,7 @@ function ConnectionPage() {
                       onChange={(e) => setApiKey(e.target.value.trim())} />
                     <Input placeholder="api_secret" type="password" autoComplete="new-password"
                       value={apiSecret} onChange={(e) => setApiSecret(e.target.value.trim())} />
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button type="submit" disabled={busy || !apiKey || !apiSecret}>
                         {st.app_configured ? 'Replace keys' : 'Save keys'}
                       </Button>
@@ -131,7 +131,7 @@ function ConnectionPage() {
                   Logged in {istTime(st.login_at)} IST · expires {new Date(st.expires_at ?? '').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
                 </p>
               )}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button disabled={busy || !st.app_configured} onClick={() => void run(async () => {
                   const { login_url } = await kite.login()
                   window.location.assign(login_url)
@@ -173,8 +173,8 @@ function ConnectionPage() {
                 </Button>
               </div>
               <p className="text-xs text-[var(--text-4)]">Up to 500 symbols. History fills in the background at a bounded rate; use source coverage before acting.</p>
-              <div className="flex gap-2">
-                <Input placeholder="SBIN, RELIANCE (blank = watchlist)" value={symbols} disabled={sharedData}
+              <div className="flex flex-wrap items-center gap-2">
+                <Input className="w-auto min-w-48 flex-1" placeholder="SBIN, RELIANCE (blank = watchlist)" value={symbols} disabled={sharedData}
                   onChange={(e) => setSymbols(e.target.value.toUpperCase())} />
                 <Button disabled={busy || sharedData || st.session !== 'active'} onClick={() => void run(() => kite.liveStart(
                   symbols.split(',').map((s) => s.trim()).filter(Boolean)), 'Streaming started.')}>

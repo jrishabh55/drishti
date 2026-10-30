@@ -46,24 +46,28 @@ export function KiteSharingPanel({ configured, onChange }: { configured: boolean
     {notice && <p role="status" className="text-xs text-[var(--text-3)]">{notice}</p>}
     {!info ? <p className="text-sm text-[var(--text-3)]">Loading sharing settings…</p> : !info.enabled ?
       <p className="text-sm">Sharing requires separate signed-in Drishti accounts.</p> : <>
-      <div className="space-y-1">
+      <div className="grid gap-1.5">
         <label htmlFor="kite-account-id" className="text-xs text-[var(--text-3)]">Your Drishti account ID</label>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Input id="kite-account-id" readOnly value={info.user_id} className="es-mono" />
-          <Button variant="outline" size="sm" onClick={async () => {
+          <Button variant="outline" onClick={async () => {
             try { await navigator.clipboard.writeText(info.user_id); setNotice('Account ID copied.') }
             catch { setNotice('Select and copy the account ID above.') }
           }}>Copy ID</Button>
         </div>
         <p className="text-xs text-[var(--text-4)]">Copy the recipient account's ID from this page while signed in to that account.</p>
       </div>
-      <form className="space-y-2" onSubmit={e => {
+      <form className="space-y-3" onSubmit={e => {
         e.preventDefault(); void perform(() => kite.grantData(recipient.trim(), label.trim()))
       }}>
-        <label htmlFor="kite-share-recipient" className="text-xs text-[var(--text-3)]">Recipient account ID</label>
-        <Input id="kite-share-recipient" value={recipient} onChange={e => setRecipient(e.target.value)} maxLength={128} placeholder="Recipient's Drishti account ID" />
-        <label htmlFor="kite-share-label" className="text-xs text-[var(--text-3)]">Account label</label>
-        <Input id="kite-share-label" value={label} onChange={e => setLabel(e.target.value)} maxLength={60} placeholder="Optional, e.g. Momentum tests" />
+        <div className="grid gap-1.5">
+          <label htmlFor="kite-share-recipient" className="text-xs text-[var(--text-3)]">Recipient account ID</label>
+          <Input id="kite-share-recipient" value={recipient} onChange={e => setRecipient(e.target.value)} maxLength={128} placeholder="Recipient's Drishti account ID" />
+        </div>
+        <div className="grid gap-1.5">
+          <label htmlFor="kite-share-label" className="text-xs text-[var(--text-3)]">Account label</label>
+          <Input id="kite-share-label" value={label} onChange={e => setLabel(e.target.value)} maxLength={60} placeholder="Optional, e.g. Momentum tests" />
+        </div>
         <Button type="submit" size="sm" disabled={busy || !configured || !recipient.trim()}>Grant data access</Button>
         {!configured && <p className="text-xs text-[var(--text-4)]">Save your own Kite app to grant access. You can use an incoming shared connection without saving keys.</p>}
         <p className="text-xs text-[var(--text-4)]">Replacing or forgetting your Kite keys removes your outgoing grants.</p>

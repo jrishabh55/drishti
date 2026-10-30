@@ -78,23 +78,23 @@ function AlertsPage() {
         <h1 className="text-2xl font-bold">Alerts</h1>
         <DeskNav />
         <div className="flex flex-wrap items-end gap-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-3">
-          <label className="text-xs text-[var(--text-3)]">Rings when
+          <label className="flex flex-col gap-1.5 text-xs text-[var(--text-3)]">Rings when
             <Select value={type} onValueChange={(v) => setType(v as AlertType)}>
               <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
               <SelectContent>{TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
             </Select>
           </label>
           {needsSymbol && (
-            <label className="text-xs text-[var(--text-3)]">Symbol
+            <label className="flex flex-col gap-1.5 text-xs text-[var(--text-3)]">Symbol
               <Input className="w-36" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
             </label>
           )}
           {type !== 'opening_bell' && (
-            <label className="text-xs text-[var(--text-3)]">{valueLabel}
+            <label className="flex flex-col gap-1.5 text-xs text-[var(--text-3)]">{valueLabel}
               <Input className="w-32" value={value} onChange={(e) => setValue(e.target.value)} />
             </label>
           )}
-          <Button size="sm" onClick={add}>Add alert</Button>
+          <Button onClick={add}>Add alert</Button>
         </div>
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
         <p className="text-xs text-[var(--text-4)]">

@@ -158,7 +158,7 @@ export function TradingAnalytics() {
             </SelectContent>
           </Select>
         )}
-        <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href={evaluationApi.tradeJournalCsvUrl(filters)} download>
+        <a className={buttonVariants({ variant: 'outline' })} href={evaluationApi.tradeJournalCsvUrl(filters)} download>
           Export CSV
         </a>
       </div>

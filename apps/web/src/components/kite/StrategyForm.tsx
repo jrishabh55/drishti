@@ -59,7 +59,7 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
   const [s, setS] = useState(draft ? { ...initial, mode: 'off' as const } : initial)
   const [syms, setSyms] = useState(initial.symbols.join(', '))
   const num = (v: string) => (v === '' ? null : Number(v))
-  const row = 'flex items-center justify-between gap-3 text-sm'
+  const row = 'flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 text-sm'
   const live = LIVE.includes(s.mode)
   // Never rewrite the user's rules on a mode switch: say what conflicts and let them fix it.
   const conflicts: { why: string; fix: string; apply: () => void }[] = live ? [
@@ -86,7 +86,7 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
         <Input className="w-64 es-mono" value={syms} onChange={(e) => setSyms(e.target.value.toUpperCase())} /></label>
       <div className={row}><span>Scanner candidates</span>
         <Select value={s.scanner_id ?? NONE} onValueChange={(v) => setS({ ...s, scanner_id: v === NONE ? null : v })}>
-          <SelectTrigger size="sm" aria-label="Scanner" className="w-64"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Scanner" className="w-64"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE}>None — symbols only</SelectItem>
             {scanners.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}{x.prebuilt ? ' (prebuilt)' : ''}</SelectItem>)}
@@ -104,7 +104,7 @@ export function StrategyForm({ initial, onSave, onCancel, busy, portfolios = [],
       )}
       <div className={row}><span>Portfolio</span>
         <Select value={s.portfolio_id} onValueChange={(portfolio_id) => setS({ ...s, portfolio_id })}>
-          <SelectTrigger size="sm" aria-label="Portfolio" className="w-64"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Portfolio" className="w-64"><SelectValue /></SelectTrigger>
           <SelectContent>
             {pfs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>

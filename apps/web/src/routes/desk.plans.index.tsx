@@ -46,19 +46,19 @@ function PlansPage() {
         <h1 className="text-2xl font-bold">Plans</h1>
         <DeskNav />
         <div className="flex flex-wrap items-end gap-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-3">
-          <label className="text-xs text-[var(--text-3)]">Symbol
+          <label className="flex flex-col gap-1.5 text-xs text-[var(--text-3)]">Symbol
             <Input className="w-36" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} />
           </label>
-          <label className="text-xs text-[var(--text-3)]">Entry ₹ (blank = from the entry timer)
+          <label className="flex flex-col gap-1.5 text-xs text-[var(--text-3)]">Entry ₹ (blank = from the entry timer)
             <Input className="w-40" type="number" value={entry} onChange={(e) => setEntry(e.target.value)} />
           </label>
           {entry && (
-            <label className="text-xs text-[var(--text-3)]">Stop % under entry
+            <label className="flex flex-col gap-1.5 text-xs text-[var(--text-3)]">Stop % under entry
               <Input className="w-28" type="number" step="0.1" value={stopPct}
                 onChange={(e) => setStopPct(e.target.value)} />
             </label>
           )}
-          <Button size="sm" onClick={create} disabled={!sym}>New plan</Button>
+          <Button onClick={create} disabled={!sym}>New plan</Button>
         </div>
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
         <div className="overflow-auto rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)]">
