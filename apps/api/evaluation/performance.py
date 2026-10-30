@@ -1,7 +1,7 @@
 """Paper performance: equity, drawdown, per-day results and, where a Time
 Machine replay of the same plan exists, its odds next to what happened.
 
-Read-only over the user's own paper ledger. Expectations are only ever the
+Read-only over one of the user's own paper portfolios (``default`` unless named). Expectations are only ever the
 stored replay's numbers; a trade without one says so instead of guessing.
 """
 from __future__ import annotations
@@ -46,14 +46,13 @@ def _expectation(store, user_id: str, trade: Dict[str, Any], replays) -> Optiona
             "data_as_of": tm.get("data_as_of")}
 
 
-def performance(user_id: str, store=None) -> Dict[str, Any]:
-    from apps.api.desk import paper
-    from apps.api.desk.profile import load_profile
+def performance(user_id: str, store=None, portfolio_id: str = "default") -> Dict[str, Any]:
+    from apps.api.desk import paper, portfolios
     from apps.api.desk.store import get_desk_store
 
     store = store or get_desk_store()
-    capital = load_profile(user_id, store).capital
-    trades = store.list_paper(user_id, limit=10_000)
+    capital = portfolios.profile_for(user_id, portfolio_id, store).capital
+    trades = store.list_paper(user_id, limit=10_000, portfolio_id=portfolio_id)
     closed = sorted((t for t in trades if t.get("status") == "closed" and t.get("pnl_net") is not None),
                     key=lambda t: (t["trade_date"], t["exit_fill"]["time"]))
 
@@ -104,7 +103,7 @@ def performance(user_id: str, store=None) -> Dict[str, Any]:
     if closed:
         stats["expectancy_net"] = round(sum(t["pnl_net"] for t in closed) / len(closed), 2)
         stats["max_drawdown_pct"] = max((p["drawdown_pct"] or 0) for p in curve)
-    return {"capital": capital, "equity": round(equity, 2), "stats": stats, "curve": curve,
+    return {"portfolio_id": portfolio_id, "capital": capital, "equity": round(equity, 2), "stats": stats, "curve": curve,
             "days": sorted(days.values(), key=lambda d: d["date"], reverse=True),
             "comparisons": comparisons, "calibration": calibration,
             "unmatched": len(comparisons) - len(matched)}

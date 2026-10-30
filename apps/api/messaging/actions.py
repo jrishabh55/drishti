@@ -52,7 +52,7 @@ def propose(uid, ticket_id):
         from apps.api.desk.risk import fingerprint
         if fingerprint(tk['order'])!=tk['fingerprint']:
             raise ValueError('The ticket changed; make a new ticket')
-        verdict=desk._risk_for([tk['order']],uid)['results'][0]
+        verdict=desk._risk_bound([tk['order']],uid,tk.get('portfolio_id') or 'default')['results'][0]
         if verdict['verdict']!='PASS' or verdict['fingerprint']!=tk['fingerprint']:
             raise ValueError('The current risk check does not allow this paper proposal')
         a=store.action(uid,ticket_id)
@@ -85,7 +85,9 @@ def _queue_proposal(a,tk):
     token=a['token'];expiry=a['expires_at']
     p=tk['order'].get('plan') or {}
     order=tk['order'];s=tk.get('sizing') or {}
+    from apps.api.desk.portfolios import name_of
     text=(f"PAPER TRADE — {order['symbol']}\n{tk.get('words','')}\n"
+          f"Portfolio: {name_of(a['user_id'],tk.get('portfolio_id') or 'default')}\n"
           f"Quantity: {order['qty']} · {order['order_type']}\nEntry: {order.get('price','market')}\n"
           f"Stop: {order.get('stop')} · Target: {order.get('target')}\n"
           f"Estimated loss incl. charges: ₹{s.get('max_loss_net','unavailable')}\n"

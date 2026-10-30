@@ -272,6 +272,8 @@ export interface Ticket {
   kite_basket: Record<string, unknown>[]
   paper_trade_id?: string
   created_at?: string
+  /** The paper portfolio this ticket is bound to for life (legacy: 'default'). */
+  portfolio_id?: string
 }
 
 export interface PaperTrade {
@@ -298,6 +300,7 @@ export interface PaperTrade {
   mae?: number
   mfe?: number
   events: { at: string; what: string }[]
+  portfolio_id?: string
 }
 
 export interface PaperLedger {
@@ -316,6 +319,23 @@ export interface PaperLedger {
   cash: number
   realized: number
   capital: number
+  portfolio_id: string
+  portfolio_name: string
+}
+
+/** A paper portfolio. 'default' is the original ledger; its capital is the
+ *  profile's capital (Limits & settings). Named ones keep their own capital,
+ *  which locks once they have trades. Risk rules, plans and the watchlist
+ *  are shared by every portfolio of the account. */
+export interface Portfolio {
+  id: string
+  name: string
+  capital: number
+  is_default: boolean
+  trades: number
+  capital_locked: boolean
+  capital_history: { at: string; from: number; to: number }[]
+  created_at?: string
 }
 
 export type AlertType = 'above' | 'below' | 'target' | 'stop' | 'pct_move' | 'time' | 'opening_bell'

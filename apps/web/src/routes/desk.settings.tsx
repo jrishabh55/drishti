@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
+import { PortfolioManager, usePortfolios } from '#/components/desk/Portfolios'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -19,7 +20,7 @@ type StrKey = 'no_entries_before' | 'no_entries_after' | 'flat_by' | 'broker_squ
 const GROUPS: { title: string; hint: string; nums: [NumKey, string][]; times?: [StrKey, string][] }[] = [
   {
     title: 'Money', hint: 'Sizing never uses more than these.',
-    nums: [['capital', 'Capital ₹'], ['cash_buffer_pct', 'Cash buffer %'],
+    nums: [['capital', 'Default portfolio capital ₹'], ['cash_buffer_pct', 'Cash buffer %'],
       ['max_position_pct', 'Max position % of capital'], ['min_order_inr', 'Min order ₹'],
       ['max_order_inr', 'Max order ₹']],
   },
@@ -52,6 +53,7 @@ function SettingsPage() {
   const [blocked, setBlocked] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const portfolios = usePortfolios()
 
   useEffect(() => {
     api.desk.profile().then((x) => { setP(x); setBlocked(x.blocked.join(', ')) }).catch((e) => setError(String(e)))
@@ -66,6 +68,7 @@ function SettingsPage() {
       })
       setP(saved); setBlocked(saved.blocked.join(', '))
       setMsg('Saved.')
+      portfolios?.reload()   // the default portfolio's capital is the profile's
     } catch (e) {
       if (e instanceof ApiError && Array.isArray(e.detail)) {
         setError((e.detail as { loc: string[]; msg: string }[])
@@ -140,6 +143,7 @@ function SettingsPage() {
           {msg && <span className="text-sm text-[var(--ok)]">{msg}</span>}
           {error && <span className="text-sm text-[var(--err)]">{error}</span>}
         </div>
+        <PortfolioManager />
         <DeskFooter />
       </main>
     </div>

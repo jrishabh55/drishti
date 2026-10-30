@@ -2,18 +2,19 @@
 
 One hub per connected user: a ticker task (ticker.run_ticker) feeding a
 BarBuilder. Everything lives in this process's memory only — Kite data is
-licensed to the user whose session fetched it, so it is never written to the
-shared scanner/desk caches and never served to another user.
+never written to the shared scanner/desk caches. Explicit direct grants may
+allow other signed-in accounts to read the owner's feed through sharing.py.
 
 ``provider`` is what root wiring registers with
 ``bars_source.register_live_provider``. It answers only for the caller's own
-hub, only for subscribed symbols whose current session has been backfilled
+hub or an explicitly selected, directly granted owner's hub, only for
+subscribed symbols whose current session has been backfilled
 from the user's Kite minute history (a hub started — or reconnected — after
 09:15 would otherwise serve a session missing its opening bars) and that
 have a recent tick (``STALE_AFTER``). Any other case returns None, and
 bars_source falls back to its delayed source, whose BarSeries says
 ``delayed:yahoo``. History (Time Machine pools) comes
-from the user's Kite historical API, again per user and uncached.
+from the selected connection's Kite historical API and remains uncached.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from typing import Any, Callable, Dict, List, Optional
 from apps.api.desk import bars as bars_mod
 from apps.api.desk.bars_source import BarSeries
 from apps.api.desk.market.session import NSE as NSE_SPEC
-from apps.api.kite import auth, rest, ticker
+from apps.api.kite import auth, rest, sharing, ticker
 from apps.api.scanner.calendar import IST
 
 logger = logging.getLogger(__name__)
@@ -285,9 +286,15 @@ _HISTORY_DAYS = {"1m": 30, "5m": 59, "1d": 730}
 def provider(user_id: str, symbol: str, interval: str, kind: str, *,
              now: Optional[datetime] = None, transport: Optional[rest.Transport] = None
              ) -> Optional[BarSeries]:
+    # Explicit timestamps keep replay/test reads deterministic; ordinary
+    # requests must re-read the clock after a blocking provider call.
+    clock = _now if now is None else lambda: now
     now = now or _now()
+    owner_id = sharing.owner_for(user_id)
+    if owner_id != user_id and not sharing.still_allowed(user_id, owner_id, now):
+        return None
     if kind == "session":
-        hub = _hubs.get(user_id)
+        hub = _hubs.get(owner_id)
         if hub is None or symbol not in hub.symbols or interval not in ("1m", "5m"):
             return None
         last = hub.builder.last_tick.get(symbol)
@@ -295,22 +302,25 @@ def provider(user_id: str, symbol: str, interval: str, kind: str, *,
                 or symbol not in hub.backfilled:
             return None   # bars_source falls back to delayed bars, labelled as such
         rows = hub.builder.rows(symbol, interval)
+        if not sharing.still_allowed(user_id, owner_id, clock()):
+            return None
         return BarSeries(symbol, interval, rows, SOURCE,
                          max(r[0] for r in rows).isoformat() if rows else None)
     if kind == "history" and interval in _KITE_INTERVAL:
         try:
-            client = auth.client_for(user_id, now, transport)
+            owner_id, client = sharing.data_client(user_id, now, transport)
             table = rest.nse_instruments(client, now.astimezone(IST).date())
             if symbol not in table:
                 return None
             candles = client.historical(table[symbol]["token"], _KITE_INTERVAL[interval],
                                         (now - timedelta(days=_HISTORY_DAYS[interval]))
                                         .astimezone(IST), now.astimezone(IST))
+            sharing.require_access(user_id, owner_id, clock())
         except auth.KiteAuthError:
             return None
         except rest.KiteError as exc:
             if exc.token_error:
-                auth.mark_revoked(user_id)
+                auth.mark_revoked(owner_id)
             logger.warning("Kite history failed for %s %s: %s", symbol, interval, exc)
             return None
         rows = _rows(candles)

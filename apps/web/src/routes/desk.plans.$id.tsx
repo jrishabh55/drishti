@@ -4,6 +4,7 @@ import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
 import { ReplayOdds } from '#/components/desk/ReplayOdds'
 import { SourceBadge } from '#/components/desk/SourceBadge'
 import { TicketCard } from '#/components/desk/TicketCard'
+import { portfolioName, usePortfolios } from '#/components/desk/Portfolios'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -58,6 +59,8 @@ function PlanPage() {
   const [orderType, setOrderType] = useState<'LIMIT' | 'MARKET'>('LIMIT')
   const [busy, setBusy] = useState(false)
   const [alertNote, setAlertNote] = useState<string | null>(null)
+  const pf = usePortfolios()
+  const portfolioId = pf?.selectedId ?? 'default'
 
   useEffect(() => {
     api.desk.tickets().then((all) => setTickets(all.filter((t) => t.plan_id === plan.id))).catch(() => {})
@@ -85,7 +88,8 @@ function PlanPage() {
   async function makeTicket() {
     setBusy(true); setError(null)
     try {
-      const t = await api.desk.createTicket(plan.id, orderType)
+      // Bound for life to the portfolio selected NOW; a later switch never moves it.
+      const t = await api.desk.createTicket(plan.id, orderType, portfolioId)
       setTickets((prev) => [t, ...prev])
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -199,7 +203,8 @@ function PlanPage() {
                       onClick={() => setOrderType(t)}>{t.toLowerCase()}</button>
                   ))}
                 </div>
-                <Button data-guide="guide-size-ticket" size="sm" onClick={makeTicket} disabled={busy}>Make a ticket</Button>
+                <Button data-guide="guide-size-ticket" size="sm" onClick={makeTicket} disabled={busy || pf?.ready === false}>Make a ticket</Button>
+                <span className="text-xs text-[var(--text-3)]">for paper portfolio <b>{portfolioName(pf?.portfolios, portfolioId)}</b></span>
               </div>
               <p className="text-xs text-[var(--text-4)]">
                 Sizes the trade to your limits, then runs every risk check. Nothing is placed until

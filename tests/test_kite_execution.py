@@ -340,3 +340,23 @@ def test_confirm_strategy_waits_then_expires_and_cancels_ticket(env):
                     json={"confirm_text": words})
     assert r.status_code == 409 and "expired" in r.text
     assert get_desk_store().get_ticket(sig["ticket_id"], "user_a")["status"] == "cancelled"
+
+
+def test_named_paper_ticket_is_refused_by_live_send_even_with_all_broker_gates_open(env):
+    client, desk, user, fake, clock = env
+    _armed(client, fake, clock)
+    original = _ticket(desk)
+    portfolio = desk.post('/api/desk/portfolios', json={'name': 'Independent paper', 'capital': 100000}).json()
+    response = desk.post('/api/desk/tickets', json={
+        'plan_id': original['plan_id'], 'portfolio_id': portfolio['id']})
+    assert response.status_code == 201, response.text
+    ticket = response.json()
+    assert ticket['status'] == 'ready', ticket
+    from apps.api.desk.profile import load_profile
+    assert execution.gate_reasons(user['id'], clock['now'], load_profile(user['id'])) == []
+    result = _send(client, ticket)
+    assert result.status_code == 409, result.text
+    assert any('portfolio:' in reason for reason in result.json()['detail']['reasons'])
+    assert get_desk_store().get_ticket(ticket['id'], user['id'])['status'] == 'ready'
+    assert fake.placed() == []
+    assert get_kite_store().list_trades(user['id']) == []

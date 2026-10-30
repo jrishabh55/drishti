@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.auth import current_user_id
@@ -88,10 +88,14 @@ def cancel_batch(bid: str, user_id: str = Depends(current_user_id)) -> Dict[str,
 
 
 @router.get("/evaluation/paper-performance")
-def paper_performance(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+def paper_performance(portfolio_id: str = Query("default", pattern=r"^[A-Za-z0-9_-]{1,64}$"),
+                      user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    from apps.api.desk import portfolios
     from apps.api.evaluation.performance import performance
 
-    return performance(user_id)
+    if portfolios.get(user_id, portfolio_id) is None:
+        raise HTTPException(status_code=404, detail="portfolio not found")
+    return performance(user_id, portfolio_id=portfolio_id)
 
 
 @router.get("/runs/{run_id}/report.html")

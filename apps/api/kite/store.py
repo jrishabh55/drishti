@@ -2,7 +2,8 @@
 
 Same conventions as desk/store.py: WAL, per-call connections, singleton plus
 a reset hook for tests, JSON documents with a few indexed columns. Every
-per-user read filters on user_id.
+secret, control and order read filters on user_id. Separate explicit grants
+and recipient selections authorize market-data reads without sharing secrets.
 
 Secrets (the Kite app's api_secret, the daily access_token) are stored only
 as Fernet ciphertext — see kite/auth.py. Nothing here is market data: live
@@ -57,6 +58,17 @@ CREATE TABLE IF NOT EXISTS kite_strategies (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_kite_strategies_user ON kite_strategies (user_id, created_at);
+CREATE TABLE IF NOT EXISTS kite_data_grants (
+    owner_id TEXT NOT NULL,
+    recipient_id TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, recipient_id)
+);
+CREATE TABLE IF NOT EXISTS kite_data_sources (
+    recipient_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL
+);
 """
 
 #: Trade states that still need the engine (anything not terminal).
@@ -112,6 +124,60 @@ class KiteStore:
         with self._conn() as c:
             return [r["user_id"] for r in
                     c.execute("SELECT user_id FROM kite_secrets WHERE kind=?", (kind,))]
+
+    # Data grants contain identities only. Credentials remain owner-scoped.
+    def grant_data_access(self, owner_id: str, recipient_id: str, label: str = "") -> None:
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            count = c.execute("SELECT COUNT(*) FROM kite_data_grants WHERE owner_id=?",
+                              (owner_id,)).fetchone()[0]
+            exists = c.execute("SELECT 1 FROM kite_data_grants WHERE owner_id=? AND recipient_id=?",
+                               (owner_id, recipient_id)).fetchone()
+            if count >= 50 and not exists:
+                raise ValueError("share with at most 50 accounts")
+            c.execute("INSERT INTO kite_data_grants VALUES (?,?,?,?) ON CONFLICT(owner_id,recipient_id) "
+                      "DO UPDATE SET label=excluded.label", (owner_id, recipient_id, label, now_iso()))
+
+    def revoke_data_access(self, owner_id: str, recipient_id: str) -> bool:
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            removed = c.execute("DELETE FROM kite_data_grants WHERE owner_id=? AND recipient_id=?",
+                                (owner_id, recipient_id)).rowcount > 0
+            c.execute("DELETE FROM kite_data_sources WHERE owner_id=? AND recipient_id=?",
+                      (owner_id, recipient_id))
+            return removed
+
+    def revoke_all_data_access(self, owner_id: str) -> None:
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            c.execute("DELETE FROM kite_data_grants WHERE owner_id=?", (owner_id,))
+            c.execute("DELETE FROM kite_data_sources WHERE owner_id=?", (owner_id,))
+
+    def data_grants(self, user_id: str, *, received: bool = False) -> List[Dict[str, Any]]:
+        col = "recipient_id" if received else "owner_id"
+        with self._conn() as c:
+            return [dict(r) for r in c.execute(f"SELECT * FROM kite_data_grants WHERE {col}=? "
+                                              "ORDER BY created_at", (user_id,))]
+
+    def select_data_source(self, recipient_id: str, owner_id: Optional[str]) -> bool:
+        with self._conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            if owner_id is None:
+                c.execute("DELETE FROM kite_data_sources WHERE recipient_id=?", (recipient_id,))
+                return True
+            if not c.execute("SELECT 1 FROM kite_data_grants WHERE owner_id=? AND recipient_id=?",
+                             (owner_id, recipient_id)).fetchone():
+                return False
+            c.execute("INSERT INTO kite_data_sources VALUES (?,?) ON CONFLICT(recipient_id) "
+                      "DO UPDATE SET owner_id=excluded.owner_id", (recipient_id, owner_id))
+            return True
+
+    def selected_data_source(self, recipient_id: str) -> Optional[str]:
+        with self._conn() as c:
+            row = c.execute("SELECT s.owner_id FROM kite_data_sources s JOIN kite_data_grants g "
+                            "ON g.owner_id=s.owner_id AND g.recipient_id=s.recipient_id "
+                            "WHERE s.recipient_id=?", (recipient_id,)).fetchone()
+            return row["owner_id"] if row else None
 
     # ------------------------------------------------------------ login states
     def add_state(self, nonce: str, user_id: str, expires_at: str) -> None:

@@ -22,7 +22,7 @@ describe('PaperPortfolioOptIn', () => {
     expect(screen.getByText('opted:false')).toBeTruthy()
     expect(evaluationApi.portfolioSnapshot).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Use my paper portfolio' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Use my Default paper portfolio' }))
     expect(screen.getByText('opted:true')).toBeTruthy()
     const book = await screen.findByTestId('paper-book')
     expect(book.textContent).toContain('RELIANCE.NS 20')

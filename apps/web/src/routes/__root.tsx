@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 
 import { api, isNotActivated } from '../lib/api'
 import { GuideProvider } from '../guide/GuideProvider'
+import { PortfolioProvider } from '../components/desk/Portfolios'
 import appCss from '../styles.css?url'
 
 /* Vite exposes any env var prefixed with VITE_* to the browser bundle.
@@ -106,7 +107,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 function GuidedProduct({ children }: { children: React.ReactNode }) {
   const { user } = useUser()
-  return user ? <GuideProvider userId={user.id}>{children}</GuideProvider> : <BootScreen />
+  /* Keyed by account: a Clerk account switch remounts every user-scoped page
+     (and drops its in-flight responses) instead of carrying state across. */
+  return user ? (
+    <GuideProvider userId={user.id}>
+      <PortfolioProvider key={user.id} userId={user.id}>{children}</PortfolioProvider>
+    </GuideProvider>
+  ) : <BootScreen />
 }
 
 /** Full-page pulsing wordmark shown while Clerk hydrates and while the

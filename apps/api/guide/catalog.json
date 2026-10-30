@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-30.2",
+  "version": "2026-10-30.3",
   "features": [
     {
       "id": "orientation",
@@ -86,6 +86,10 @@
         {
           "question": "Will the tour run an analysis for me?",
           "answer": "No. The tour explains the form and report. You decide whether to press Run and spend any applicable credits or provider tokens."
+        },
+        {
+          "question": "Which paper portfolio can an analysis use?",
+          "answer": "The optional Use my Default paper portfolio switch snapshots Default cash and open positions at submission. Named portfolios are used for desk sizing, tickets, ledger and performance; they are not sent to analysis."
         }
       ],
       "chapter": "analysis",
@@ -378,7 +382,7 @@
       "title": "Paper ledger",
       "route": "/desk/paper",
       "summary": "Practice with simulated capital and review positions.",
-      "body": "Paper capital funds simulated trades and is separate from analysis credits. Free cash is currently available simulated cash. A confirmed ticket waits for an eligible entry bar; data and price conditions determine fills. Review open and closed trades, exits, charges and net P&L. Do not treat paper fills as proof of live execution quality.",
+      "body": "Paper capital funds simulated trades and is separate from analysis credits. Free cash is currently available simulated cash. A confirmed ticket waits for an eligible entry bar; data and price conditions determine fills. Review open and closed trades, exits, charges and net P&L. Do not treat paper fills as proof of live execution quality. Use Manage beside the Trade Desk portfolio selector to create named paper portfolios in Settings for separate experiments. Each has its own starting capital, cash, tickets, trades and performance. Existing trades remain in Default. Select a portfolio before sizing and creating a ticket; changing the selector does not move existing tickets or trades.",
       "keywords": [
         "paper",
         "capital",
@@ -398,6 +402,10 @@
         {
           "question": "Does my paper balance pay for analysis?",
           "answer": "No. Paper capital funds simulated trades. Analysis credits are a separate balance used by supported paid analysis runs. Changing one does not add to the other."
+        },
+        {
+          "question": "How do I compare different paper trading experiments?",
+          "answer": "Create named portfolios with separate starting capital using the Trade Desk portfolio selector. Choose one before sizing a plan and creating a ticket, then review that portfolio in Paper ledger and Performance. Existing tickets stay bound to their original portfolio. Separate Drishti accounts also keep separate ledgers."
         }
       ],
       "chapter": "paper",
@@ -416,7 +424,7 @@
       "title": "Performance",
       "route": "/desk/performance",
       "summary": "Review paper outcomes and compare expectations.",
-      "body": "Review paper results by day and expected versus observed outcomes. Check charges, losses and sample size as well as gains. A new account has no trading history; zeros and empty charts are expected until simulated trades progress. Delayed data and execution assumptions limit conclusions about live performance.",
+      "body": "Review paper results by day and expected versus observed outcomes. Check charges, losses and sample size as well as gains. A new account has no trading history; zeros and empty charts are expected until simulated trades progress. Delayed data and execution assumptions limit conclusions about live performance. Results follow the portfolio selected in Trade Desk, so you can compare separate experiments without combining their cash or trades.",
       "keywords": [
         "performance",
         "results",
@@ -547,7 +555,7 @@
       "title": "Zerodha connection",
       "route": "/desk/connection",
       "summary": "Understand broker setup and connection status.",
-      "body": "Broker connection uses your own Kite application and explicit credential setup. Keys are stored encrypted; daily login is separate from arming or confirming an order. Connected broker data may differ from delayed public data. This deployment keeps live order execution disabled until explicitly configured otherwise.",
+      "body": "Broker connection uses your own Kite application and explicit credential setup. Keys are stored encrypted; daily login is separate from arming or confirming an order. Connected broker data may differ from delayed public data. This deployment keeps live order execution disabled until explicitly configured otherwise. For internal accounts, the connection owner can grant market-data access to an exact Drishti account ID in Shared market-data connections. The recipient selects that incoming connection on this page. This shares quotes and supported fresh session/history bars; broker credentials, orders, positions and controls remain with the owner. The owner logs in daily and manages subscribed streaming symbols. Revoking access stops subsequent shared reads; unavailable data uses the desk’s labeled delayed fallback. The full-universe opening-range scanner continues to use delayed public data.",
       "keywords": [
         "zerodha",
         "broker",
@@ -562,6 +570,18 @@
         {
           "question": "Does connecting Zerodha enable orders?",
           "answer": "No. Connection, live execution enablement, daily arming and per-order confirmation are separate gates. The guide cannot enable or exercise those gates."
+        },
+        {
+          "question": "How do I share a Kite connection with my other account?",
+          "answer": "In the recipient account, open Zerodha connection and copy Your Drishti account ID. In the owner account, enter that ID under Shared market-data connections and grant access. Sign in as the recipient and choose Use connection for that owner. The owner can revoke it at any time. Each account and paper portfolio keeps its own results."
+        },
+        {
+          "question": "Does sharing let another account place broker orders or see my keys?",
+          "answer": "No. Grants authorize market-data reads only. Keys, broker positions, orders, daily arming and stream management remain with the owner. The owner must log in daily, and streaming is limited to symbols the owner subscribed. This deployment keeps live orders disabled."
+        },
+        {
+          "question": "Does a shared connection have separate provider limits?",
+          "answer": "No. Shared quotes and history requests use the connection owner’s Kite API quota. Keep simultaneous requests modest; if the feed is unavailable, the desk falls back to labeled delayed data."
         }
       ],
       "chapter": "broker",

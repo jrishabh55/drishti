@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
+import { portfolioName, usePortfolios, useSelectedPortfolioData } from '#/components/desk/Portfolios'
 import { Topbar } from '#/components/shared/Topbar'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -36,12 +36,9 @@ function Spark({ values, color, label, fill = false }: { values: number[]; color
 }
 
 function PerformancePage() {
-  const [perf, setPerf] = useState<PaperPerformance | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    evaluationApi.paperPerformance().then(setPerf).catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
+  const pf = usePortfolios()
+  // The selected portfolio's performance; a switch drops the previous one's late answer.
+  const { data: perf, error } = useSelectedPortfolioData<PaperPerformance>(evaluationApi.paperPerformance)
 
   const s = perf?.stats
   const c = perf?.calibration
@@ -49,7 +46,9 @@ function PerformancePage() {
     <div className="min-h-screen">
       <Topbar state="idle" />
       <main data-guide="guide-performance" className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
-        <h1 className="text-2xl font-bold">Paper performance</h1>
+        <h1 className="text-2xl font-bold">
+          Paper performance{perf && <span className="text-[var(--text-3)]"> — {portfolioName(pf?.portfolios, perf.portfolio_id)}</span>}
+        </h1>
         <DeskNav />
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
         {perf && s && (

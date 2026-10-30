@@ -22,12 +22,13 @@ export function PaperPortfolioOptIn({ checked, onCheckedChange }: {
   return (
     <div className="space-y-1.5">
       <label className="flex items-center gap-2 text-sm">
-        <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label="Use my paper portfolio" />
-        Use my paper portfolio
+        <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label="Use my Default paper portfolio" />
+        Use my Default paper portfolio
       </label>
       <p className="text-xs text-[var(--text-4)]">
-        The decision agents see your paper cash and open positions as of submit. Pending orders
-        reserve cash but are not holdings. The book is frozen with the run.
+        The decision agents see your Default portfolio's paper cash and open positions as of submit.
+        Named portfolios aren't sent to analysis. Pending orders reserve cash but are not holdings.
+        The book is frozen with the run.
       </p>
       {checked && error && <p className="text-xs text-[var(--err)]">Couldn't read your paper book: {error}</p>}
       {checked && book && (

@@ -22,6 +22,7 @@ import type {
   PaperLedger,
   PaperTrade,
   Plan,
+  Portfolio,
   PlanRequest,
   Ticket,
   TimeMachineRequest,
@@ -244,15 +245,27 @@ export const api = {
     timeMachine: (body: TimeMachineRequest) =>
       jsonFetch<TimeMachineResult>('/desk/timemachine', { method: 'POST', body: JSON.stringify(body) }),
     tickets: () => jsonFetch<Ticket[]>('/desk/tickets'),
-    createTicket: (planId: string, orderType: 'LIMIT' | 'MARKET' = 'LIMIT') =>
+    /** The ticket is bound to `portfolioId` for life (omitted = 'default'). */
+    createTicket: (planId: string, orderType: 'LIMIT' | 'MARKET' = 'LIMIT', portfolioId?: string) =>
       jsonFetch<Ticket>('/desk/tickets', {
         method: 'POST',
-        body: JSON.stringify({ plan_id: planId, order_type: orderType }),
+        body: JSON.stringify({ plan_id: planId, order_type: orderType, portfolio_id: portfolioId }),
       }),
-    confirmTicket: (id: string, mode: 'paper' | 'broker') =>
-      jsonFetch<Ticket>(`/desk/tickets/${id}/confirm`, { method: 'POST', body: JSON.stringify({ mode }) }),
+    /** `portfolioId` is the portfolio shown on the ticket; a mismatch is refused server-side. */
+    confirmTicket: (id: string, mode: 'paper' | 'broker', portfolioId?: string) =>
+      jsonFetch<Ticket>(`/desk/tickets/${id}/confirm`, {
+        method: 'POST', body: JSON.stringify({ mode, portfolio_id: portfolioId }),
+      }),
     cancelTicket: (id: string) => jsonFetch<Ticket>(`/desk/tickets/${id}/cancel`, { method: 'POST' }),
-    paper: () => jsonFetch<PaperLedger>('/desk/paper'),
+    paper: (portfolioId = 'default') =>
+      jsonFetch<PaperLedger>(`/desk/paper?portfolio_id=${encodeURIComponent(portfolioId)}`),
+    portfolios: () => jsonFetch<Portfolio[]>('/desk/portfolios'),
+    createPortfolio: (body: { name: string; capital: number }) =>
+      jsonFetch<Portfolio>('/desk/portfolios', { method: 'POST', body: JSON.stringify(body) }),
+    updatePortfolio: (id: string, body: { name?: string; capital?: number }) =>
+      jsonFetch<Portfolio>(`/desk/portfolios/${encodeURIComponent(id)}`, {
+        method: 'PATCH', body: JSON.stringify(body),
+      }),
     closePaper: (id: string, price?: number) =>
       jsonFetch<PaperTrade>(`/desk/paper/${id}/close`, { method: 'POST', body: JSON.stringify({ price }) }),
     alerts: () => jsonFetch<Alert[]>('/desk/alerts'),

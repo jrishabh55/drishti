@@ -13,7 +13,12 @@ Routes (all under /api, all Clerk-authed; per-user rows 404 when not yours):
   POST /desk/risk                    PASS / BLOCK per order (no save)
   GET|POST /desk/tickets  POST /desk/tickets/{id}/confirm  POST /desk/tickets/{id}/cancel
   GET  /desk/paper                   paper ledger + stats   POST /desk/paper/{id}/close
+  GET|POST /desk/portfolios  PATCH /desk/portfolios/{id}   named paper portfolios
   GET|POST /desk/alerts  PUT|DELETE /desk/alerts/{id}  GET /desk/alerts/events
+
+Sizing, risk, tickets and the ledger take an optional ``portfolio_id``
+(omitted = ``default``, the original ledger). A ticket is bound to its
+portfolio for life; confirming re-checks risk against that portfolio only.
 
 Every number a desk endpoint returns is arithmetic over public, delayed
 bars — not advice. Responses carry ``source`` / ``data_as_of`` so the UI can
@@ -34,7 +39,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from apps.api.auth import current_user_id
-from apps.api.desk import bars as bars_mod, bars_source, timemachine as tm
+from apps.api.desk import bars as bars_mod, bars_source, portfolios as pf_mod, timemachine as tm
 from apps.api.desk.market.session import NSE as NSE_SPEC
 from apps.api.desk.profile import DeskProfile, load_profile
 from apps.api.desk.store import get_desk_store
@@ -421,13 +426,25 @@ def _today_ist() -> str:
     return bars_mod.today_ist(_now()).isoformat()
 
 
-def _account(user_id: str) -> Dict[str, Any]:
-    """Cash, holdings and today's entries from the paper ledger + broker-mode
-    tickets — the state the risk check simulates against."""
+def _portfolio(user_id: str, portfolio_id: str) -> Dict[str, Any]:
+    try:
+        return pf_mod.require(user_id, portfolio_id)
+    except pf_mod.PortfolioError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+PortfolioId = Field(pf_mod.DEFAULT, pattern=pf_mod.ID_PATTERN)
+
+
+def _account(user_id: str, portfolio_id: str = pf_mod.DEFAULT) -> Dict[str, Any]:
+    """Cash, holdings and today's entries from one portfolio's paper ledger
+    (+ broker-mode tickets for ``default``, the only broker-facing book) — the
+    state the risk check simulates against."""
     store = get_desk_store()
-    prof = load_profile(user_id)
+    _portfolio(user_id, portfolio_id)
+    prof = pf_mod.profile_for(user_id, portfolio_id)
     today = _today_ist()
-    trades = store.list_paper(user_id, limit=1000)
+    trades = store.list_paper(user_id, limit=1000, portfolio_id=portfolio_id)
     holdings: Dict[str, float] = {}
     values: Dict[str, float] = {}
     realized = 0.0
@@ -442,8 +459,10 @@ def _account(user_id: str) -> Dict[str, Any]:
     entries = [{"symbol": t["symbol"], "side": "buy",
                 "max_loss": (t.get("risk_per_share") or 0) * t["qty"]}
                for t in trades if t["trade_date"] == today and t["status"] != "cancelled"]
-    broker_today = [tk for tk in store.list_tickets(user_id, limit=500)
-                    if tk.get("status") == "sent" and (tk.get("sent_at") or "")[:10] == today]
+    broker_today = [tk for tk in store.list_tickets(user_id, limit=500,
+                                                    portfolio_id=pf_mod.DEFAULT)
+                    if tk.get("status") == "sent" and (tk.get("sent_at") or "")[:10] == today
+                    ] if portfolio_id == pf_mod.DEFAULT else []
     for tk in broker_today:
         o = tk["order"]
         entries.append({"symbol": o["symbol"], "side": o["side"],
@@ -471,16 +490,37 @@ def _market_facts(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     return feeds.market_facts(symbols)
 
 
-def _risk_for(orders: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
+def _risk_for(orders: List[Dict[str, Any]], user_id: str,
+              portfolio_id: str = pf_mod.DEFAULT) -> Dict[str, Any]:
+    """Risk-check ``orders`` against ONE portfolio's account. An order bound
+    to a different portfolio always BLOCKs: callers that don't name one (the
+    live broker path) check ``default`` and so can never pass a named
+    portfolio's paper ticket."""
     from apps.api.desk import risk
 
-    acct = _account(user_id)
+    acct = _account(user_id, portfolio_id)
     syms = sorted({str(o.get("symbol", "")).upper() for o in orders if o.get("symbol")})
     prices = {s: p for s in syms if (p := _fresh_price(user_id, s)) is not None}
-    return risk.check(orders, acct["profile"], now=_now(), cash=acct["cash"],
-                      holdings=acct["holdings"], holding_values=acct["values"],
-                      today_entries=acct["entries_today"], today_orders=acct["orders_today"],
-                      prices=prices, market=_market_facts(syms))
+    out = risk.check(orders, acct["profile"], now=_now(), cash=acct["cash"],
+                     holdings=acct["holdings"], holding_values=acct["values"],
+                     today_entries=acct["entries_today"], today_orders=acct["orders_today"],
+                     prices=prices, market=_market_facts(syms))
+    for o, res in zip(orders, out["results"]):
+        bound = o.get("portfolio_id") or pf_mod.DEFAULT
+        if bound != portfolio_id:
+            res["verdict"] = "BLOCK"
+            res["reasons"] = list(res["reasons"]) + [
+                f"portfolio: this order is bound to paper portfolio {bound!r}, not {portfolio_id!r}"]
+    out["pass"] = sum(r["verdict"] == "PASS" for r in out["results"])
+    out["block"] = sum(r["verdict"] == "BLOCK" for r in out["results"])
+    return out
+
+
+def _risk_bound(orders: List[Dict[str, Any]], user_id: str, portfolio_id: str) -> Dict[str, Any]:
+    # ``default`` keeps the legacy two-argument call that existing callers patch.
+    if portfolio_id == pf_mod.DEFAULT:
+        return _risk_for(orders, user_id)
+    return _risk_for(orders, user_id, portfolio_id)
 
 
 # ---------------------------------------------------------------- sizing, risk, tickets
@@ -488,12 +528,13 @@ def _risk_for(orders: List[Dict[str, Any]], user_id: str) -> Dict[str, Any]:
 class SizeBody(BaseModel):
     plan_id: str
     order_type: Literal["LIMIT", "MARKET"] = "LIMIT"
+    portfolio_id: str = PortfolioId
 
 
 def _size(plan: Dict[str, Any], body: SizeBody, user_id: str) -> Dict[str, Any]:
     from apps.api.desk import sizing
 
-    acct = _account(user_id)
+    acct = _account(user_id, body.portfolio_id)
     price = _fresh_price(user_id, plan["symbol"]) if body.order_type == "MARKET" else None
     try:
         return sizing.size_trade(plan, acct["profile"], cash=acct["cash"], price=price,
@@ -504,11 +545,13 @@ def _size(plan: Dict[str, Any], body: SizeBody, user_id: str) -> Dict[str, Any]:
 
 @router.post("/desk/size")
 def size_plan(body: SizeBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
-    return _size(_own_plan(body.plan_id, user_id), body, user_id)
+    plan = _own_plan(body.plan_id, user_id)
+    return dict(_size(plan, body, user_id), portfolio_id=body.portfolio_id)
 
 
 class RiskBody(BaseModel):
     orders: List[Dict[str, Any]] = Field(min_length=1, max_length=20)
+    portfolio_id: str = PortfolioId
 
     @field_validator("orders")
     @classmethod
@@ -522,12 +565,16 @@ class RiskBody(BaseModel):
 
 @router.post("/desk/risk")
 def check_risk(body: RiskBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
-    return _risk_for(body.orders, user_id)
+    return _risk_bound(body.orders, user_id, body.portfolio_id)
 
 
 @router.get("/desk/tickets")
-def list_tickets(user_id: str = Depends(current_user_id)) -> List[Dict[str, Any]]:
-    return get_desk_store().list_tickets(user_id)
+def list_tickets(portfolio_id: Optional[str] = Query(None, pattern=pf_mod.ID_PATTERN),
+                 user_id: str = Depends(current_user_id)) -> List[Dict[str, Any]]:
+    """Every ticket (each carries its bound ``portfolio_id``), or one portfolio's."""
+    if portfolio_id is not None:
+        _portfolio(user_id, portfolio_id)
+    return get_desk_store().list_tickets(user_id, portfolio_id=portfolio_id)
 
 
 @router.post("/desk/tickets", status_code=201)
@@ -535,10 +582,14 @@ def create_ticket(body: SizeBody, user_id: str = Depends(current_user_id)) -> Di
     from apps.api.desk import sizing, ticket
 
     plan = _own_plan(body.plan_id, user_id)
+    pid = body.portfolio_id
     s = _size(plan, body, user_id)
     order = sizing.order_from(s, plan_id=plan["id"])
-    verdict = _risk_for([order], user_id) if order else None
+    if order and pid != pf_mod.DEFAULT:
+        order["portfolio_id"] = pid      # part of the fingerprint
+    verdict = _risk_bound([order], user_id, pid) if order else None
     doc = ticket.build(plan=plan, sizing=s, order=order, verdict=verdict)
+    doc["portfolio_id"] = pid
     return get_desk_store().create_ticket(user_id, doc)
 
 
@@ -551,6 +602,8 @@ def _own_ticket(tid: str, user_id: str) -> Dict[str, Any]:
 
 class ConfirmBody(BaseModel):
     mode: Literal["paper", "broker"]
+    # The portfolio the user saw on the ticket; a mismatch refuses (never moves it).
+    portfolio_id: Optional[str] = Field(None, pattern=pf_mod.ID_PATTERN)
 
 
 def _user_lock(user_id: str):
@@ -574,7 +627,13 @@ def confirm_ticket(tid: str, body: ConfirmBody, user_id: str = Depends(current_u
         if tk["status"] != "ready":
             raise HTTPException(status_code=409, detail=f"ticket is {tk['status']}; only a ready "
                                                         "ticket can be confirmed")
-        verdict = _risk_for([tk["order"]], user_id)
+        pid = tk.get("portfolio_id") or pf_mod.DEFAULT
+        if body.portfolio_id is not None and body.portfolio_id != pid:
+            raise HTTPException(status_code=409, detail="this ticket belongs to another paper "
+                                                        "portfolio: review it there")
+        if body.mode == "broker" and pid != pf_mod.DEFAULT:
+            raise HTTPException(status_code=409, detail="named paper portfolios are paper only")
+        verdict = _risk_bound([tk["order"]], user_id, pid)
         res = verdict["results"][0]
         if res["fingerprint"] != tk["fingerprint"]:
             raise HTTPException(status_code=409, detail="the order changed since it was checked: "
@@ -588,7 +647,8 @@ def confirm_ticket(tid: str, body: ConfirmBody, user_id: str = Depends(current_u
         tk["verdict"] = res
         if body.mode == "paper":
             trade = paper.new_trade(tk["order"], ticket_id=tid, placed_at=now,
-                                    profile=load_profile(user_id))
+                                    profile=pf_mod.profile_for(user_id, pid))
+            trade["portfolio_id"] = pid
             done = store.confirm_paper(user_id, tid, dict(tk, confirmed_at=now.isoformat()), trade)
         else:
             done = store.transition_ticket(tid, user_id, ("ready",), dict(
@@ -617,18 +677,19 @@ def cancel_ticket(tid: str, user_id: str = Depends(current_user_id)) -> Dict[str
 
 # ---------------------------------------------------------------- paper ledger
 
-def refresh_paper(user_id: str) -> List[Dict[str, Any]]:
-    """Advance the user's pending/open paper trades over the latest bars of
-    each trade's own interval (legacy trades: 5m). Bars are read outside the
-    lock; each trade is re-read and written under it, so a concurrent close
-    or confirm is never overwritten with a stale copy."""
+def refresh_paper(user_id: str, portfolio_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Advance the user's pending/open paper trades (one portfolio, or all of
+    them for the background loop) over the latest bars of each trade's own
+    interval (legacy trades: 5m). Bars are read with the real user ID. Bars
+    are read outside the lock; each trade is re-read and written under it, so
+    a concurrent close or confirm is never overwritten with a stale copy."""
     from apps.api.desk import paper
 
     store = get_desk_store()
     prof = load_profile(user_id)
     now = _now()
     out = []
-    for t in store.list_paper(user_id, limit=1000):
+    for t in store.list_paper(user_id, limit=1000, portfolio_id=portfolio_id):
         if t["status"] in ("pending", "open"):
             interval = paper.interval_of(t)
             recovery_error = None
@@ -671,13 +732,43 @@ def refresh_paper(user_id: str) -> List[Dict[str, Any]]:
 
 
 @router.get("/desk/paper")
-def get_paper(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+def get_paper(portfolio_id: str = Query(pf_mod.DEFAULT, pattern=pf_mod.ID_PATTERN),
+              user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     from apps.api.desk import paper
 
-    trades = refresh_paper(user_id)
-    acct = _account(user_id)
+    pf = _portfolio(user_id, portfolio_id)
+    trades = refresh_paper(user_id, portfolio_id)
+    acct = _account(user_id, portfolio_id)
     return {"trades": trades, "stats": paper.stats(trades), "cash": acct["cash"],
-            "realized": acct["realized"], "capital": acct["profile"].capital}
+            "realized": acct["realized"], "capital": acct["profile"].capital,
+            "portfolio_id": portfolio_id, "portfolio_name": pf["name"]}
+
+
+# ---------------------------------------------------------------- paper portfolios
+
+@router.get("/desk/portfolios")
+def list_portfolios(user_id: str = Depends(current_user_id)) -> List[Dict[str, Any]]:
+    return pf_mod.list_for(user_id)
+
+
+@router.post("/desk/portfolios", status_code=201)
+def create_portfolio(body: pf_mod.PortfolioCreate, user_id: str = Depends(current_user_id)
+                     ) -> Dict[str, Any]:
+    with _user_lock(user_id):     # name uniqueness and the cap hold under concurrent creates
+        try:
+            return pf_mod.create(user_id, body)
+        except pf_mod.PortfolioError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.patch("/desk/portfolios/{portfolio_id}")
+def update_portfolio(portfolio_id: str, body: pf_mod.PortfolioPatch,
+                     user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    with _user_lock(user_id):     # no paper confirm between the history check and the write
+        try:
+            return pf_mod.update(user_id, portfolio_id, body)
+        except pf_mod.PortfolioError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
 class CloseBody(BaseModel):

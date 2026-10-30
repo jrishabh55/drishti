@@ -87,6 +87,7 @@ export interface KiteStatus {
   expires_at: string | null
   redirect_path: string
   live: LiveStatus
+  data_access?: KiteDataAccess
   control: KiteControl
   /** NSE closing auction session timing for F&O stocks, when one is in force */
   cas?: { active: false } | {
@@ -95,6 +96,29 @@ export interface KiteStatus {
   }
   orders: { server_enabled: boolean; owner: boolean; owner_client_id?: string | null; blocked_by: string[] }
   note?: string | null
+}
+
+export interface KiteDataAccess {
+  owner_id: string
+  shared: boolean
+  session: SessionState
+  live: LiveStatus
+}
+
+export interface KiteDataGrant {
+  owner_id: string
+  recipient_id: string
+  label: string
+  created_at: string
+}
+
+export interface KiteSharing {
+  user_id: string
+  enabled: boolean
+  grants: KiteDataGrant[]
+  received: Pick<KiteDataGrant, 'owner_id' | 'created_at'>[]
+  selected_owner_id: string | null
+  data_access: KiteDataAccess
 }
 
 export interface KiteLeg {
@@ -181,6 +205,13 @@ export interface KitePerformance {
 }
 
 export const kite = {
+  sharing: () => kfetch<KiteSharing>('/kite/sharing'),
+  grantData: (recipient_id: string, label = '') =>
+    post<KiteSharing>('/kite/sharing/grants', { recipient_id, label }),
+  revokeData: (recipient_id: string) => kfetch<void>(`/kite/sharing/grants/${encodeURIComponent(recipient_id)}`, { method: 'DELETE' }),
+  selectDataSource: (owner_id: string | null) => kfetch<KiteSharing>('/kite/sharing/source', {
+    method: 'PUT', body: JSON.stringify({ owner_id }),
+  }),
   status: () => kfetch<KiteStatus>('/kite/status'),
   saveApp: (api_key: string, api_secret: string) =>
     kfetch<KiteStatus>('/kite/app', { method: 'PUT', body: JSON.stringify({ api_key, api_secret }) }),

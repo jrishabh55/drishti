@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DeskSymbolSearch } from '#/components/desk/DeskSymbolSearch'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
+import { useSelectedPortfolioData } from '#/components/desk/Portfolios'
 import { SourceBadge } from '#/components/desk/SourceBadge'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
@@ -34,7 +35,8 @@ function DeskToday() {
   const [rules, setRules] = useState<Record<string, EntryRule>>({})
   const [watch, setWatch] = useState<string[]>([])
   const [statuses, setStatuses] = useState<Record<string, EntryStatus | string>>({})
-  const [ledger, setLedger] = useState<PaperLedger | null>(null)
+  const { data: ledger, error: ledgerError } = useSelectedPortfolioData<PaperLedger>(api.desk.paper,
+    { refreshMs: auto ? REFRESH_MS : undefined })
   const [events, setEvents] = useState<AlertEvent[]>([])
   const [planning, setPlanning] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -68,7 +70,6 @@ function DeskToday() {
 
   const refreshAll = useCallback(async () => {
     runScan()
-    api.desk.paper().then(setLedger).catch(() => {})
     api.desk.alertEvents(true).then(setEvents).catch(() => {})
     const [w, savedRules] = await Promise.all([api.desk.watchlist().catch(() => [] as string[]), jsonFetch<Record<string,EntryRule>>('/desk/watch-rules').catch(() => ({}))])
     rulesRef.current = savedRules; setRules(savedRules)
@@ -134,6 +135,7 @@ function DeskToday() {
         </div>
         <DeskNav />
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
+        {ledgerError && <p role="alert" className="text-sm text-[var(--err)]">Paper portfolio: {ledgerError}</p>}
 
         {(events.length > 0 || openTrades.length > 0) && (
           <section className="grid gap-3 md:grid-cols-2">
@@ -152,7 +154,7 @@ function DeskToday() {
             {openTrades.length > 0 && (
               <div className="space-y-1 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Open paper trades</span>
+                  <span className="text-sm font-medium">Open paper trades · {ledger?.portfolio_name}</span>
                   <Link to="/desk/paper" className="text-xs">Ledger →</Link>
                 </div>
                 {openTrades.map((t) => (
@@ -281,7 +283,7 @@ function DeskToday() {
 
         {ledger && ledger.stats.trades > 0 && (
           <p className="text-xs text-[var(--text-3)]">
-            Paper record: {ledger.stats.trades} trades, win rate{' '}
+            Paper record ({ledger.portfolio_name}): {ledger.stats.trades} trades, win rate{' '}
             {((ledger.stats.win_rate ?? 0) * 100).toFixed(0)}%, average {rMult(ledger.stats.avg_r_net)} net,
             P&amp;L {inr(ledger.stats.pnl_net)} after {inr(ledger.stats.charges)} charges.
           </p>

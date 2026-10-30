@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useState } from 'react'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
+import { useSelectedPortfolioData } from '#/components/desk/Portfolios'
 import { Topbar } from '#/components/shared/Topbar'
 import { Button } from '#/components/ui/button'
 import {
@@ -25,16 +26,13 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: str
 }
 
 function PaperPage() {
-  const [ledger, setLedger] = useState<PaperLedger | null>(null)
   const [open, setOpen] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = () => api.desk.paper().then(setLedger).catch((e) => setError(String(e)))
-  useEffect(() => {
-    load()
-    const t = setInterval(load, 60_000)
-    return () => clearInterval(t)
-  }, [])
+  const [actionError, setError] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+  // The selected portfolio's ledger; a switch drops the previous one's late answer.
+  const { data: ledger, error: loadError } = useSelectedPortfolioData<PaperLedger>(
+    api.desk.paper, { refreshMs: 60_000, tick })
+  const error = actionError ?? loadError
 
   async function close(t: PaperTrade) {
     let px: string | null = ''
@@ -44,7 +42,7 @@ function PaperPage() {
     }
     try {
       await api.desk.closePaper(t.id, px ? Number(px) : undefined)
-      load()
+      setTick((n) => n + 1)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -55,7 +53,9 @@ function PaperPage() {
     <div className="min-h-screen">
       <Topbar state="idle" />
       <main data-guide="guide-paper" className="mx-auto w-full max-w-[1400px] space-y-6 px-6 py-4">
-        <h1 className="text-2xl font-bold">Paper ledger</h1>
+        <h1 className="text-2xl font-bold">
+          Paper ledger{ledger && <span className="text-[var(--text-3)]"> — {ledger.portfolio_name}</span>}
+        </h1>
         <DeskNav />
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
         {ledger && (

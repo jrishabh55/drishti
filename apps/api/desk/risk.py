@@ -41,7 +41,7 @@ ORDER_TYPES = ("LIMIT", "MARKET", "SL", "SL-M")
 PRODUCTS = ("MIS", "CNC")
 PAISA = 0.005
 FINGERPRINT_FIELDS = ("symbol", "exchange", "side", "qty", "order_type", "product", "validity",
-                      "price", "trigger_price", "stop", "target")
+                      "price", "trigger_price", "stop", "target", "portfolio_id")
 _DERIVATIVE = re.compile(r"\d{2}[A-Z]{3}.*(FUT|CE|PE)$")
 _SYMBOL = re.compile(r"^[A-Z0-9&\-]{1,20}$")
 TRADE_FOR_TRADE = {"BE", "BZ", "BT", "IL", "SM", "ST"}

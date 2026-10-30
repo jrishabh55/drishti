@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { PortfolioPicker } from './Portfolios'
 
 const TABS = [
   { to: '/desk', label: 'Today', exact: true },
@@ -15,7 +16,7 @@ const TABS = [
 
 export function DeskNav() {
   return (
-    <nav className="flex flex-wrap gap-1 border-b border-[var(--line-1)] pb-2">
+    <nav className="flex flex-wrap items-center gap-1 border-b border-[var(--line-1)] pb-2">
       {TABS.map((t) => (
         <Link
           key={t.to}
@@ -27,6 +28,7 @@ export function DeskNav() {
           {t.label}
         </Link>
       ))}
+      <div className="ml-auto"><PortfolioPicker /></div>
     </nav>
   )
 }

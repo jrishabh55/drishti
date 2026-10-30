@@ -24,7 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+#: Every paper trade and ticket belongs to one paper portfolio; legacy rows
+#: (schema 1) are the user's ``default`` portfolio.
+DEFAULT_PORTFOLIO = "default"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -79,6 +83,14 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_paper_user ON paper_trades (user_id, trade_date);
+CREATE TABLE IF NOT EXISTS desk_portfolios (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    doc TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_portfolios_user ON desk_portfolios (user_id, created_at);
 CREATE TABLE IF NOT EXISTS desk_alerts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -128,8 +140,22 @@ class DeskStore:
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            # v2: portfolio_id on trades/tickets; legacy rows default. Idempotent.
+            for table in ("paper_trades", "desk_tickets"):
+                cols = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+                if "portfolio_id" not in cols:
+                    try:
+                        c.execute(f"ALTER TABLE {table} ADD COLUMN portfolio_id TEXT NOT NULL "
+                                  f"DEFAULT '{DEFAULT_PORTFOLIO}'")
+                    except sqlite3.OperationalError as exc:  # another process migrated first
+                        if "duplicate column" not in str(exc):
+                            raise
+            c.execute("CREATE INDEX IF NOT EXISTS idx_paper_portfolio "
+                      "ON paper_trades (user_id, portfolio_id, trade_date)")
             c.execute("INSERT INTO meta (k, v) VALUES ('schema_version', ?) "
-                      "ON CONFLICT(k) DO NOTHING", (str(SCHEMA_VERSION),))
+                      "ON CONFLICT(k) DO UPDATE SET v=excluded.v "
+                      "WHERE CAST(meta.v AS INTEGER) < CAST(excluded.v AS INTEGER)",
+                      (str(SCHEMA_VERSION),))
 
     @contextlib.contextmanager
     def _conn(self):
@@ -248,6 +274,7 @@ class DeskStore:
         doc = dict(doc, id=tid)
         self._insert("desk_tickets", {"id": tid, "user_id": user_id,
                                       "plan_id": doc.get("plan_id"),
+                                      "portfolio_id": doc.get("portfolio_id") or DEFAULT_PORTFOLIO,
                                       "status": doc["status"], "fingerprint": doc["fingerprint"],
                                       "doc": json.dumps(doc), "created_at": now,
                                       "updated_at": now})
@@ -292,15 +319,22 @@ class DeskStore:
                 c.rollback()
                 return None
             c.execute("INSERT INTO paper_trades (id, user_id, ticket_id, symbol, status, "
-                      "trade_date, doc, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                      "trade_date, doc, created_at, updated_at, portfolio_id) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?)",
                       (pid, user_id, tid, trade["symbol"], trade["status"], trade["trade_date"],
-                       json.dumps(trade), now, now))
+                       json.dumps(trade), now, now,
+                       trade.get("portfolio_id") or DEFAULT_PORTFOLIO))
         return self.get_paper(pid, user_id)
 
-    def list_tickets(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_tickets(self, user_id: str, limit: int = 100,
+                     portfolio_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """All the user's tickets, or only those bound to ``portfolio_id``."""
+        q, args = "SELECT * FROM desk_tickets WHERE user_id=?", [user_id]
+        if portfolio_id is not None:
+            q += " AND portfolio_id=?"
+            args.append(portfolio_id)
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM desk_tickets WHERE user_id=? "
-                             "ORDER BY created_at DESC LIMIT ?", (user_id, limit)).fetchall()
+            rows = c.execute(q + " ORDER BY created_at DESC LIMIT ?", (*args, limit)).fetchall()
         return [_row_doc(r) for r in rows]
 
     # -- paper trades -----------------------------------------------------
@@ -309,6 +343,7 @@ class DeskStore:
         doc = dict(doc, id=pid)
         self._insert("paper_trades", {"id": pid, "user_id": user_id,
                                       "ticket_id": doc.get("ticket_id"), "symbol": doc["symbol"],
+                                      "portfolio_id": doc.get("portfolio_id") or DEFAULT_PORTFOLIO,
                                       "status": doc["status"], "trade_date": doc["trade_date"],
                                       "doc": json.dumps(doc), "created_at": now,
                                       "updated_at": now})
@@ -323,8 +358,13 @@ class DeskStore:
             "status": doc["status"], "doc": json.dumps(doc), "updated_at": now_iso()})
 
     def list_paper(self, user_id: str, *, status: Optional[str] = None,
-                   trade_date: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+                   trade_date: Optional[str] = None, limit: int = 500,
+                   portfolio_id: Optional[str] = DEFAULT_PORTFOLIO) -> List[Dict[str, Any]]:
+        """One portfolio's trades (legacy callers: the default book); None = all."""
         q, args = "SELECT * FROM paper_trades WHERE user_id=?", [user_id]
+        if portfolio_id is not None:
+            q += " AND portfolio_id=?"
+            args.append(portfolio_id)
         if status:
             q += " AND status=?"
             args.append(status)
@@ -341,6 +381,32 @@ class DeskStore:
         """Every open paper trade across users — for the background updater."""
         with self._conn() as c:
             rows = c.execute("SELECT * FROM paper_trades WHERE status IN ('pending','open')").fetchall()
+        return [_row_doc(r) for r in rows]
+
+    def count_paper(self, user_id: str, portfolio_id: str) -> int:
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM paper_trades WHERE user_id=? AND portfolio_id=?",
+                             (user_id, portfolio_id)).fetchone()[0]
+
+    # -- paper portfolios (named; ``default`` is virtual) --------------------
+    def create_portfolio(self, user_id: str, doc: Dict[str, Any]) -> Dict[str, Any]:
+        pid, now = new_id(), now_iso()
+        self._insert("desk_portfolios", {"id": pid, "user_id": user_id,
+                                         "doc": json.dumps(dict(doc, id=pid)),
+                                         "created_at": now, "updated_at": now})
+        return self.get_portfolio(pid, user_id)  # type: ignore[return-value]
+
+    def get_portfolio(self, pid: str, user_id: str) -> Optional[Dict[str, Any]]:
+        return self._get("desk_portfolios", pid, user_id)
+
+    def update_portfolio(self, pid: str, user_id: str, doc: Dict[str, Any]) -> bool:
+        return self._update("desk_portfolios", pid, user_id, {
+            "doc": json.dumps(dict(doc, id=pid)), "updated_at": now_iso()})
+
+    def list_portfolios(self, user_id: str) -> List[Dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM desk_portfolios WHERE user_id=? ORDER BY created_at",
+                             (user_id,)).fetchall()
         return [_row_doc(r) for r in rows]
 
     # -- alerts -----------------------------------------------------------
@@ -436,7 +502,7 @@ class DeskStore:
 def _row_doc(row: sqlite3.Row) -> Dict[str, Any]:
     doc = json.loads(row["doc"])
     keys = row.keys()
-    for meta in ("created_at", "updated_at", "user_id"):
+    for meta in ("created_at", "updated_at", "user_id", "portfolio_id"):
         if meta in keys:
             doc[meta] = row[meta]
     return doc

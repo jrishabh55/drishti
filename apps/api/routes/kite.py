@@ -8,7 +8,10 @@ Routes (all under /api, all Clerk-authed, all per user):
   POST   /kite/callback            {request_token, state} from the redirect → session
   POST   /kite/disconnect          Kite logout + drop today's session + stop streaming
   POST   /kite/live/start|stop     the user's private tick stream (1m/5m bars)
-  GET    /kite/quote?symbols=      Kite quotes for the user (never cached/shared)
+  GET    /kite/quote?symbols=      uncached quotes from own/directly granted source
+  GET    /kite/sharing            own grants, incoming grants and data selection
+  POST|DELETE /kite/sharing/grants owner-managed market-data access
+  PUT    /kite/sharing/source     explicitly select an incoming connection
   POST   /kite/arm  /kite/disarm  /kite/kill
   GET    /kite/trades  POST /kite/trades (confirm a ready desk ticket live)
   POST   /kite/trades/{id}/refresh  /kite/trades/{id}/exit
@@ -33,7 +36,7 @@ from apps.api.auth import current_user_id
 from apps.api.desk import bars as bars_mod
 from apps.api.desk.profile import load_profile
 from apps.api.desk.store import get_desk_store
-from apps.api.kite import auth, execution, live, rest, sessions, strategies
+from apps.api.kite import auth, execution, live, rest, sessions, sharing, strategies
 from apps.api.kite.store import get_kite_store
 
 router = APIRouter()
@@ -50,7 +53,7 @@ def _now() -> datetime:
 
 def _auth_http(exc: auth.KiteAuthError) -> HTTPException:
     code = 503 if exc.code == "encryption_unconfigured" else \
-        409 if exc.code in ("app_missing", "not_connected") else 400
+        409 if exc.code in ("app_missing", "not_connected", "sharing_changed") else 400
     return HTTPException(status_code=code, detail={"code": exc.code, "message": str(exc)})
 
 
@@ -77,6 +80,7 @@ def status(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
         **auth.session_status(user_id, now),
         "redirect_path": REDIRECT_PATH,
         "live": live.freshness(user_id, now),
+        "data_access": sharing.data_status(user_id, now),
         "control": execution.control(user_id, now),
         "cas": sessions.status(now, prof.flat_by),
         "orders": {"server_enabled": execution.orders_enabled(),
@@ -95,6 +99,7 @@ class AppBody(BaseModel):
 def save_app(body: AppBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     try:
         auth.save_app(user_id, body.api_key, body.api_secret)
+        get_kite_store().revoke_all_data_access(user_id)
     except auth.KiteAuthError as exc:
         raise _auth_http(exc) from exc
     return auth.session_status(user_id, _now())
@@ -103,6 +108,7 @@ def save_app(body: AppBody, user_id: str = Depends(current_user_id)) -> Dict[str
 @router.delete("/kite/app")
 async def forget_app(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     await live.stop(user_id)
+    get_kite_store().revoke_all_data_access(user_id)
     return auth.disconnect(user_id, _now(), forget_app=True, transport=_transport)
 
 
@@ -139,12 +145,65 @@ async def disconnect(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- live data
 
+class DataGrantBody(BaseModel):
+    recipient_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    label: str = Field(default="", max_length=60)
+
+
+class DataSourceBody(BaseModel):
+    owner_id: Optional[str] = Field(default=None, min_length=1, max_length=128,
+                                    pattern=r"^[A-Za-z0-9_-]+$")
+
+
+@router.get("/kite/sharing")
+def data_sharing(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    return sharing.summary(user_id, _now())
+
+
+@router.post("/kite/sharing/grants", status_code=201)
+def grant_data(body: DataGrantBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    if not sharing.individual(user_id):
+        raise HTTPException(409, detail="Sharing requires separate signed-in accounts.")
+    if body.recipient_id == user_id or not sharing.individual(body.recipient_id):
+        raise HTTPException(422, detail="Choose another signed-in Drishti account.")
+    if auth.load_app(user_id) is None:
+        raise HTTPException(409, detail="Save your own Kite app before sharing its data.")
+    try:
+        get_kite_store().grant_data_access(user_id, body.recipient_id, body.label.strip())
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    return sharing.summary(user_id, _now())
+
+
+@router.delete("/kite/sharing/grants/{recipient_id}", status_code=204)
+def revoke_data(recipient_id: str, user_id: str = Depends(current_user_id)) -> Response:
+    if not get_kite_store().revoke_data_access(user_id, recipient_id):
+        raise HTTPException(404, detail="Sharing grant not found.")
+    return Response(status_code=204)
+
+
+@router.put("/kite/sharing/source")
+def select_data(body: DataSourceBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    if not sharing.individual(user_id):
+        raise HTTPException(409, detail="Sharing requires separate signed-in accounts.")
+    owner_id = None if body.owner_id == user_id else body.owner_id
+    if not get_kite_store().select_data_source(user_id, owner_id):
+        raise HTTPException(404, detail="Shared connection not found.")
+    return sharing.summary(user_id, _now())
+
+
+def _own_stream(user_id: str) -> None:
+    if sharing.owner_for(user_id) != user_id:
+        raise HTTPException(409, detail="The connection owner controls the shared stream. "
+                                        "Select your own connection to manage your stream.")
+
 class LiveBody(BaseModel):
     symbols: List[str] = Field(default_factory=list, max_length=live.MAX_SYMBOLS)
 
 
 @router.post("/kite/live/start")
 async def live_start(body: LiveBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    _own_stream(user_id)
     syms = body.symbols or get_desk_store().watchlist(user_id)
     try:
         await live.start(user_id, syms, transport=_transport, connect=_connect, now=_now())
@@ -159,22 +218,32 @@ async def live_start(body: LiveBody, user_id: str = Depends(current_user_id)) ->
 
 @router.post("/kite/live/stop")
 async def live_stop(user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    # Always allow the caller to stop their OWN hub, even while reading a
+    # shared feed. The selected owner's hub is never the stop target.
     await live.stop(user_id)
     return live.freshness(user_id, _now())
 
 
 @router.get("/kite/quote")
 def quote(symbols: str, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
+    owner_id = sharing.owner_for(user_id)
     try:
         syms = sorted({bars_mod.nse_symbol(s) for s in symbols.split(",") if s.strip()})[:50]
-        client = auth.client_for(user_id, _now(), _transport)
+        owner_id, client = sharing.data_client(user_id, _now(), _transport)
         data = client.quote(syms)
+        sharing.require_access(user_id, owner_id, _now())
     except bars_mod.BarsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except auth.KiteAuthError as exc:
         raise _auth_http(exc) from exc
     except rest.KiteError as exc:
-        raise _kite_http(exc, user_id) from exc
+        if owner_id != user_id:
+            if exc.token_error:
+                auth.mark_revoked(owner_id)
+            raise HTTPException(409 if exc.token_error else 502, detail={
+                "code": "shared_feed_unavailable", "message": "Shared Kite data is unavailable; "
+                "the connection owner can check their session."}) from exc
+        raise _kite_http(exc, owner_id) from exc
     return {"source": live.SOURCE, "quotes": {
         s: {"last_price": q.get("last_price"), "volume": q.get("volume"),
             "ohlc": q.get("ohlc"), "timestamp": q.get("timestamp"),

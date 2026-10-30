@@ -4,6 +4,7 @@ import { api } from '#/lib/api'
 import type { Ticket } from '#/lib/desk-types'
 import { inr } from '#/lib/desk-format'
 import { messagingApi } from '#/lib/messaging-api'
+import { DEFAULT_PORTFOLIO, portfolioName, usePortfolios } from './Portfolios'
 
 /* The order in plain words, its risk verdict, and the user's explicit yes.
    Nothing goes anywhere until "Confirm" on THIS ticket; confirming re-runs
@@ -30,6 +31,10 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
   const formRef = useRef<HTMLFormElement>(null)
   const s = ticket.sizing
   const v = ticket.verdict
+  // Every action uses the ticket's own portfolio, never the page's current selection.
+  const portfolioId = ticket.portfolio_id ?? DEFAULT_PORTFOLIO
+  const label = portfolioName(usePortfolios()?.portfolios, portfolioId)
+  const brokerAllowed = portfolioId === DEFAULT_PORTFOLIO
 
   async function act(fn: () => Promise<Ticket>) {
     setBusy(true); setError(null)
@@ -68,6 +73,9 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
                 : ticket.status.toUpperCase()}
         </span>
         {v && <span className="es-pill">risk check {v.verdict}</span>}
+        <span className="es-pill info" title="This ticket is sized, checked and filled against this paper portfolio">
+          Portfolio: {label}
+        </span>
       </div>
 
       <p className="text-base font-medium">{ticket.words}</p>
@@ -108,8 +116,8 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
       {ticket.status === 'ready' && (
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line-1)] pt-3">
           <Button size="sm" disabled={busy}
-            onClick={() => act(() => api.desk.confirmTicket(ticket.id, 'paper'))}>
-            Confirm — paper trade
+            onClick={() => act(() => api.desk.confirmTicket(ticket.id, 'paper', portfolioId))}>
+            Confirm — paper trade in {label}
           </Button>
           <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
             setBusy(true); setError(null); setMessage('')
@@ -117,7 +125,9 @@ export function TicketCard({ ticket, publisherKey, onChange }: {
             catch (e) { setError(e instanceof Error ? e.message : String(e)) }
             finally { setBusy(false) }
           }}>Send for paper approval</Button>
-          {publisherKey ? (
+          {!brokerAllowed ? (
+            <span className="text-xs text-[var(--text-4)]">Named portfolios are paper only.</span>
+          ) : publisherKey ? (
             <>
               {/* Kite Publisher: the user confirms on Zerodha's own screen.
                   Static-IP/algo rules don't apply to Publisher orders. */}

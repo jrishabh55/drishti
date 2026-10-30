@@ -83,6 +83,7 @@ export interface BatchRow {
 export interface CurvePoint { at: string | null; equity: number; drawdown: number; drawdown_pct: number | null }
 
 export interface PaperPerformance {
+  portfolio_id: string
   capital: number
   equity: number
   stats: {
@@ -149,6 +150,7 @@ export const evaluationApi = {
   listBatches: () => call<BatchRow[]>('/evaluation/batches'),
   getBatch: (id: string) => call<BatchView>(`/evaluation/batches/${encodeURIComponent(id)}`),
   cancelBatch: (id: string) => post<BatchView>(`/evaluation/batches/${encodeURIComponent(id)}/cancel`, {}),
-  paperPerformance: () => call<PaperPerformance>('/evaluation/paper-performance'),
+  paperPerformance: (portfolioId = 'default') =>
+    call<PaperPerformance>(`/evaluation/paper-performance?portfolio_id=${encodeURIComponent(portfolioId)}`),
   reportHtmlUrl: (runId: string) => `${API_BASE}/runs/${encodeURIComponent(runId)}/report.html`,
 }

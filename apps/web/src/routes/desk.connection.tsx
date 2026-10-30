@@ -7,6 +7,7 @@ import { Input } from '#/components/ui/input'
 import { istTime } from '#/lib/desk-format'
 import { kite, kiteError, kiteRedirectParams, type KiteStatus } from '#/lib/kite-api'
 import { Card, Pill, sessionPill } from '#/components/kite/KiteBits'
+import { KiteSharingPanel } from '#/components/kite/KiteSharingPanel'
 
 export const Route = createFileRoute('/desk/connection')({
   ssr: false,
@@ -55,6 +56,8 @@ function ConnectionPage() {
 
   const redirectUrl = st ? `${window.location.origin}${st.redirect_path}` : ''
   const sp = st ? sessionPill(st.session) : null
+  const stream = st?.data_access?.live ?? st?.live
+  const sharedData = st?.data_access?.shared ?? false
 
   return (
     <div className="min-h-screen">
@@ -64,10 +67,10 @@ function ConnectionPage() {
         <DeskNav />
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
         {msg && <p className="text-sm text-[var(--ok)]">{msg}</p>}
-        {st && (
+        {st && stream && (
           <div className="grid gap-4 md:grid-cols-2">
             <Card title="1 · Your Kite Connect app"
-              hint="Each user connects their own Kite Connect app (developers.kite.trade). Keys are encrypted on the server and never shown again.">
+              hint="Save a Kite app you own, or select an incoming shared market-data connection below. Keys are encrypted and never shown again.">
               {!st.encryption_configured ? (
                 <p className="text-sm text-[var(--err)]">
                   Credential storage is not configured on this server
@@ -114,7 +117,7 @@ function ConnectionPage() {
               )}
             </Card>
 
-            <Card title="2 · Today's session"
+            <Card title="2 · Your broker session"
               hint="Kite sessions expire at 06:00 IST every day — log in each trading morning.">
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 {sp && <Pill tone={sp.tone}>{sp.label}</Pill>}
@@ -144,31 +147,41 @@ function ConnectionPage() {
             </Card>
 
             <Card title="3 · Live data"
-              hint="Stream ticks for your watchlist (or the symbols below) into private 1m/5m bars. Only you see them; the desk uses them instead of delayed bars while they're fresh.">
+              hint="Use your own stream or a connection explicitly shared with you. The desk uses fresh 1m/5m bars for subscribed symbols, with delayed fallback when unavailable.">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Pill tone={st.live.state === 'live' ? 'ok' : st.live.state === 'off' ? 'warn' : 'run'}>
-                  {st.live.state === 'off' ? 'Not streaming · desk uses DELAYED bars' : st.live.state}
+                <Pill tone={stream.state === 'live' ? 'ok' : stream.state === 'off' ? 'warn' : 'run'}>
+                  {stream.state === 'off' ? 'Not streaming · desk uses DELAYED bars' : stream.state}
                 </Pill>
-                {st.live.reconnects > 0 && <span className="text-xs text-[var(--text-3)]">{st.live.reconnects} reconnects</span>}
+                {stream.reconnects > 0 && <span className="text-xs text-[var(--text-3)]">{stream.reconnects} reconnects</span>}
               </div>
-              {st.live.detail && <p className="text-xs text-[var(--text-3)]">{st.live.detail}</p>}
+              {sharedData && <p className="text-xs text-[var(--text-3)]">
+                Shared market data · {st.data_access?.session === 'active' ? 'owner connected today' : 'owner must log in'}.
+                The owner controls streaming symbols; your broker session and orders stay separate.
+              </p>}
+              {stream.detail && <p className="text-xs text-[var(--text-3)]">{stream.detail}</p>}
               <div className="flex gap-2">
-                <Input placeholder="SBIN, RELIANCE (blank = watchlist)" value={symbols}
+                <Input placeholder="SBIN, RELIANCE (blank = watchlist)" value={symbols} disabled={sharedData}
                   onChange={(e) => setSymbols(e.target.value.toUpperCase())} />
-                <Button disabled={busy || st.session !== 'active'} onClick={() => void run(() => kite.liveStart(
+                <Button disabled={busy || sharedData || st.session !== 'active'} onClick={() => void run(() => kite.liveStart(
                   symbols.split(',').map((s) => s.trim()).filter(Boolean)), 'Streaming started.')}>
                   Start
                 </Button>
-                {st.live.state !== 'off' && (
+                {!sharedData && stream.state !== 'off' && (
                   <Button variant="outline" disabled={busy} onClick={() => void run(() => kite.liveStop())}>Stop</Button>
                 )}
+                {sharedData && st.live.state !== 'off' && (
+                  <Button variant="outline" disabled={busy}
+                    onClick={() => void run(() => kite.liveStop(), 'Your own stream stopped; shared feed unchanged.')}>
+                    Stop my own stream
+                  </Button>
+                )}
               </div>
-              {st.live.symbols.length > 0 && (
+              {stream.symbols.length > 0 && (
                 <table className="w-full text-sm">
                   <thead><tr className="text-left text-xs text-[var(--text-4)]">
                     <th>Symbol</th><th>Last tick</th><th>1m bars</th><th>Desk source</th></tr></thead>
                   <tbody>
-                    {st.live.symbols.map((s) => (
+                    {stream.symbols.map((s) => (
                       <tr key={s.symbol}>
                         <td className="es-mono">{s.symbol}</td>
                         <td className="es-mono">{s.last_tick_at ? `${istTime(s.last_tick_at)} IST` : '—'}</td>
@@ -210,6 +223,7 @@ function ConnectionPage() {
                 <p className="text-xs text-[var(--text-3)]">Blocked: {st.orders.blocked_by.join(' · ')}</p>
               )}
             </Card>
+            <div className="md:col-span-2"><KiteSharingPanel configured={st.app_configured} onChange={() => void load()} /></div>
           </div>
         )}
         <DeskFooter />
