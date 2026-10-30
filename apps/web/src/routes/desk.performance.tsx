@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { DeskFooter, DeskNav } from '#/components/desk/DeskNav'
 import { portfolioName, usePortfolios, useSelectedPortfolioData } from '#/components/desk/Portfolios'
 import { Topbar } from '#/components/shared/Topbar'
+import { TradingAnalytics } from '#/components/desk/TradingAnalytics'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '#/components/ui/table'
@@ -152,6 +153,7 @@ function PerformancePage() {
             </section>
           </>
         )}
+        <TradingAnalytics />
         <DeskFooter />
       </main>
     </div>

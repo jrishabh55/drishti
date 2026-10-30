@@ -1,5 +1,6 @@
 /* Pure helpers for the evaluation screens — unit-tested. */
-import type { BatchCell } from './evaluation-api'
+import type { AnalyticsFilters, Attribution, BatchCell, OpenMark } from './evaluation-api'
+import { inr, istTime, sourceLabel } from './desk-format'
 
 /** Polyline points for values scaled into a w x h box (y grows downward). */
 export function linePoints(values: number[], w: number, h: number, pad = 2): string {
@@ -33,4 +34,26 @@ export function cellLabel(c: BatchCell): string {
     case 'error': return c.score?.reason ?? 'closes unavailable'
     default: return c.error ?? c.phase
   }
+}
+
+/** Query string for the trading-performance / journal CSV filters. */
+export function analyticsQuery(f: AnalyticsFilters): string {
+  const q = new URLSearchParams({ mode: f.mode, portfolio_id: f.portfolio_id })
+  if (f.strategy_id) q.set('strategy_id', f.strategy_id)
+  return q.toString()
+}
+
+/** "ORB 15 v2"; an unattributed trade is Manual/legacy, never guessed. */
+export function strategyLabel(a: Attribution): string {
+  if (!a.strategy_id) return 'Manual/legacy'
+  const name = a.strategy_name ?? a.strategy_id
+  return a.strategy_version != null ? `${name} v${a.strategy_version}` : name
+}
+
+/** An open position's mark with its source and age. */
+export function markLabel(m: OpenMark | null): string {
+  if (!m) return '—'
+  if (m.status === 'unavailable' || m.price == null) return 'no price'
+  if (m.status === 'stale') return `stale ${inr(m.price)} · ${m.as_of?.slice(0, 16).replace('T', ' ') ?? '?'}`
+  return `${sourceLabel(m.source).label} ${inr(m.price)} @ ${istTime(m.as_of)}`
 }

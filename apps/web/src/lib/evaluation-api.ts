@@ -1,6 +1,7 @@
 /* Evaluation endpoints (apps/api/routes/evaluation.py). Kept out of lib/api.ts
    on purpose; same base URL, legacy bearer and ApiError shape. */
 import { API_BASE, ApiError } from './api'
+import { analyticsQuery } from './evaluation-format'
 import type { RunRequest } from './types'
 
 export interface PortfolioSnapshot {
@@ -120,6 +121,105 @@ export interface PaperPerformance {
   unmatched: number
 }
 
+export type BookMode = 'paper' | 'live'
+
+/** Filters shared by /evaluation/trading-performance and the journal CSV. */
+export interface AnalyticsFilters {
+  mode: BookMode
+  /** 'all' | 'default' | a portfolio id (paper); live trades belong to Default. */
+  portfolio_id: string
+  /** A strategy id, or 'manual' for unattributed (legacy/manual) trades. */
+  strategy_id?: string | null
+}
+
+export interface Attribution { strategy_id: string | null; strategy_name: string | null; strategy_version: number | null }
+
+export interface OpenMark {
+  status: 'live' | 'delayed' | 'stale' | 'unavailable'
+  price: number | null
+  source: string | null
+  as_of: string | null
+}
+
+export interface Annotation { note: string; tags: string[]; updated_at: string | null }
+
+export interface JournalRow extends Attribution {
+  mode: BookMode
+  trade_id: string
+  trade_date: string
+  symbol: string
+  portfolio_id: string
+  portfolio_name: string
+  attribution: 'strategy' | 'manual'
+  status: string
+  qty: number | null
+  entry_price: number | null
+  exit_price: number | null
+  exit_time: string | null
+  exit_reason: string | null
+  pnl_gross: number | null
+  charges: number | null
+  charges_basis: 'estimated'
+  pnl_net: number | null
+  r_net: number | null
+  /** Only for an open position; null otherwise. */
+  mark: OpenMark | null
+  /** Gross, from a fresh (live/delayed same-session) mark only. */
+  open_pnl: number | null
+  annotation: Annotation | null
+}
+
+export interface BookStats {
+  trades: number
+  wins?: number
+  losses?: number
+  win_rate?: number
+  avg_r_net?: number | null
+  pnl_net?: number
+  charges?: number
+  profit_factor?: number | null
+  expectancy_net?: number
+  max_drawdown?: number
+}
+
+export interface BookGroup {
+  trades: number
+  closed: number
+  realized: number
+  open_pnl: number
+  open_positions: number
+  unmarked: number
+  stats: BookStats
+}
+
+export interface TradingPerformance {
+  mode: BookMode
+  filters: { portfolio_id: string; strategy_id: string | null }
+  generated_at: string
+  /** Null when no single account applies (e.g. all paper portfolios). */
+  capital: number | null
+  realized: { pnl_net: number; trades: number; charges: number; return_pct: number | null }
+  open: { positions: number; marked: number; unmarked: number; pnl: number; basis: string }
+  stats: BookStats
+  curve: { at: string | null; pnl: number; drawdown: number }[]
+  by_strategy: (BookGroup & Attribution & { label: string })[]
+  by_portfolio: (BookGroup & { id: string; name: string; capital: number })[]
+  benchmark: {
+    symbol: string
+    name: string
+    available: boolean
+    start: string | null
+    end: string | null
+    return_pct: number | null
+    book_return_pct: number | null
+    source: string
+    as_of: string | null
+    reason: string | null
+  }
+  charges_note: string
+  trades: JournalRow[]
+}
+
 const LEGACY_TOKEN: string | undefined = (
   import.meta as unknown as { env?: { VITE_API_TOKEN?: string } }
 ).env?.VITE_API_TOKEN
@@ -152,5 +252,11 @@ export const evaluationApi = {
   cancelBatch: (id: string) => post<BatchView>(`/evaluation/batches/${encodeURIComponent(id)}/cancel`, {}),
   paperPerformance: (portfolioId = 'default') =>
     call<PaperPerformance>(`/evaluation/paper-performance?portfolio_id=${encodeURIComponent(portfolioId)}`),
+  tradingPerformance: (f: AnalyticsFilters) =>
+    call<TradingPerformance>(`/evaluation/trading-performance?${analyticsQuery(f)}`),
+  tradeJournalCsvUrl: (f: AnalyticsFilters) => `${API_BASE}/evaluation/trade-journal.csv?${analyticsQuery(f)}`,
+  annotateTrade: (mode: BookMode, tradeId: string, body: { note: string; tags: string[] }) =>
+    call<Annotation>(`/evaluation/trade-journal/${mode}/${encodeURIComponent(tradeId)}`,
+      { method: 'PUT', body: JSON.stringify(body) }),
   reportHtmlUrl: (runId: string) => `${API_BASE}/runs/${encodeURIComponent(runId)}/report.html`,
 }
