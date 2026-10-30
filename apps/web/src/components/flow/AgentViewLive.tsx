@@ -598,7 +598,7 @@ export function AgentViewLive({ run }: { run: RunDetail }) {
 
         {/* Current report — banner + tabs strip + body */}
         <div className="es-card min-h-96 xl:min-h-0" style={{ minWidth: 0 }}>
-          <div className="es-panel-head">
+          <div className="es-panel-head es-report-head">
             <span>Current Report</span>
             <div style={{ flex: 1 }} />
             <span
