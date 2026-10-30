@@ -9,6 +9,8 @@ from apps.api.routes import strategy_workflow as workflow
 from tests.desk_utils import desk_client
 from tests.scanner_utils import make_store
 
+REAL_RUN_LEVELS = workflow._run_levels
+
 NOW = datetime(2026, 10, 30, 6, tzinfo=timezone.utc)
 
 
@@ -202,3 +204,46 @@ def test_reviewed_absolute_research_draft_saves_in_an_owned_named_portfolio(env)
     assert r.status_code==201,r.text
     s=r.json()['strategy']
     assert (s['portfolio_id'],s['mode'],s['stop_param'],s['target_param'])==(pf['id'],'off',98,104)
+
+
+def test_research_draft_preserves_selected_target_multiple(env, monkeypatch):
+    client, _, _, _ = env
+    from apps.api.routes import runs
+    calls = []
+    def calculate(run_id, *, capital, risk_pct, r_multiple, user_id):
+        calls.append((run_id, r_multiple, user_id))
+        return SimpleNamespace(model_dump=lambda: {'currency':'INR','viable':True,'levels': {
+            'entry':{'price':100},'stop':{'price':98},'target':{'price':100+2*r_multiple}}})
+    monkeypatch.setattr(runs, 'get_run_levels', calculate)
+    # Exercise the real workflow adapter rather than the fixture's fixed levels.
+    monkeypatch.setattr(workflow, '_run_levels', REAL_RUN_LEVELS)
+    res = client.post('/api/desk/strategy-drafts',json={'run_id':'mine','r_multiple':3})
+    assert res.status_code == 201, res.text
+    draft=res.json()
+    assert calls == [('mine',3,'user_a')]
+    assert draft['strategy']['target_param'] == 106
+    assert draft['strategy']['target_r'] == 3
+    assert draft['source']['r_multiple'] == 3
+    saved=client.post('/api/desk/strategy-drafts/'+draft['id']+'/save',json={'strategy':draft['strategy']})
+    assert saved.status_code == 201 and saved.json()['strategy']['target_param'] == 106
+
+
+@pytest.mark.parametrize('body', [
+    {'run_id':'mine','r_multiple':0}, {'run_id':'mine','r_multiple':11},
+    {'run_id':'mine','r_multiple':float('inf')}, {'symbols':['SBIN'],'r_multiple':3},
+])
+def test_target_multiple_is_finite_bounded_and_analysis_only(env, body):
+    import json
+    assert env[0].post('/api/desk/strategy-drafts',content=json.dumps(body),
+                       headers={'Content-Type':'application/json'}).status_code == 422
+
+
+@pytest.mark.parametrize('pid',[[],{},['default']])
+def test_invalid_portfolio_shape_is_refused_without_consuming_draft(env, pid):
+    client, _, _, _=env
+    d=client.post('/api/desk/strategy-drafts',json={'symbols':['SBIN']}).json()
+    path='/api/desk/strategy-drafts/'+d['id']+'/save'
+    res=client.post(path,json={'strategy':{'name':'x','symbols':['SBIN'],'mode':'off','portfolio_id':pid}})
+    assert res.status_code == 422
+    assert client.get('/api/desk/strategy-drafts/'+d['id']).json()['state'] == 'review'
+    assert not get_kite_store().list_strategies('user_a')

@@ -1,7 +1,7 @@
 import { jsonFetch } from './api'
 import type { Strategy, StrategyInput, KiteStatus } from './kite-api'
 
-export type DraftSource = { run_id?: string; scanner_id?: string; symbols?: string[]; portfolio_id?: string }
+export type DraftSource = { run_id?: string; r_multiple?: number; scanner_id?: string; symbols?: string[]; portfolio_id?: string }
 export interface StrategyDraft {
   id: string
   state: string

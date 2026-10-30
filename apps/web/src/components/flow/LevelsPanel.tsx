@@ -96,6 +96,7 @@ export function LevelsPanel({ runId }: { runId: string }) {
   const [capital, setCapital] = useState(String(DEFAULT_CAPITAL))
   const [riskPct, setRiskPct] = useState(String(DEFAULT_RISK_PCT))
   const [rMultiple, setRMultiple] = useState(String(DEFAULT_R))
+  const [displayedR, setDisplayedR] = useState(DEFAULT_R)
   const [data, setData] = useState<LevelsResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -121,6 +122,7 @@ export function LevelsPanel({ runId }: { runId: string }) {
         .then((res) => {
           if (cancelled) return
           setData(res)
+          setDisplayedR(rNum)
           setError(null)
         })
         .catch((e: unknown) => {
@@ -395,8 +397,8 @@ export function LevelsPanel({ runId }: { runId: string }) {
             </div>
           )}
 
-          {levels && data?.viable && data.ticker.toUpperCase().endsWith('.NS') && (
-            <div className="py-4"><StrategyDraftButton source={{ run_id: runId }} label="Draft a strategy from these levels" /></div>
+          {!loading && !error && levels && data?.viable && data.run_id === runId && data.ticker.toUpperCase().endsWith('.NS') && (
+            <div className="py-4"><StrategyDraftButton source={{ run_id: runId, r_multiple: displayedR }} label="Draft a strategy from these levels" /></div>
           )}
 
           {/* Time Machine (swing mode): replay this exact entry/stop/target

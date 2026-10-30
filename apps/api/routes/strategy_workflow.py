@@ -30,6 +30,7 @@ def _now():
 class DraftBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
     run_id: str | None = Field(None, min_length=1, max_length=100)
+    r_multiple: float | None = Field(None, ge=1, le=10)
     scanner_id: str | None = Field(None, min_length=1, max_length=100)
     symbols: list[str] = Field(default_factory=list, max_length=20)
     portfolio_id: str = Field('default', pattern=portfolios.ID_PATTERN)
@@ -55,6 +56,8 @@ class DraftBody(BaseModel):
 
     @model_validator(mode='after')
     def source(self):
+        if self.r_multiple is not None and not self.run_id:
+            raise ValueError('A target multiple requires an analysis run')
         if self.run_id and (self.scanner_id or self.symbols):
             raise ValueError('Choose one research run, a scanner, or selected symbols')
         if not (self.run_id or self.scanner_id or self.symbols):
@@ -94,9 +97,9 @@ def _put(doc, uid):
                   (doc['id'], uid, json.dumps(doc)))
 
 
-def _run_levels(run_id, capital, uid):
+def _run_levels(run_id, capital, uid, r_multiple=2):
     from apps.api.routes.runs import get_run_levels
-    return get_run_levels(run_id, capital=capital, risk_pct=1, r_multiple=2, user_id=uid).model_dump()
+    return get_run_levels(run_id, capital=capital, risk_pct=1, r_multiple=r_multiple, user_id=uid).model_dump()
 
 
 def _scan(sid, uid):
@@ -127,7 +130,7 @@ def create_draft(body: DraftBody, user_id: str = Depends(current_user_id)):
         if not run.ticker.upper().endswith('.NS'):
             raise HTTPException(422, 'Strategy automation currently supports NSE cash stocks (.NS)')
         sym = bars.nse_symbol(run.ticker)
-        response = _run_levels(body.run_id, portfolio['capital'], user_id)
+        response = _run_levels(body.run_id, portfolio['capital'], user_id, r_multiple=body.r_multiple or 2)
         levels = response.get('levels')
         if not response.get('viable') or response.get('currency') != 'INR' or not levels:
             raise HTTPException(422, 'Research has no viable long-side INR levels for this draft')
@@ -139,7 +142,8 @@ def create_draft(body: DraftBody, user_id: str = Depends(current_user_id)):
                         stop_param=stop, target_rule='price', target_param=target,
                         target_r=round((target-entry)/(entry-stop), 6))
         source = dict(kind='analysis', run_id=body.run_id, ticker=run.ticker,
-                      analysis_date=run.analysis_date, entry=entry, stop=stop, target=target)
+                      analysis_date=run.analysis_date, entry=entry, stop=stop, target=target,
+                      r_multiple=body.r_multiple or 2)
         warnings.append(f'These levels came from research dated {run.analysis_date}; this is an '
                         'intraday rule draft, not the original swing horizon. Recheck the levels and exit horizon before enabling it.')
     elif body.scanner_id:
@@ -185,9 +189,6 @@ def save_draft(did: str, body: SaveBody, user_id: str = Depends(current_user_id)
 
     if body.strategy.get('mode', 'off') != 'off':
         raise HTTPException(409, 'Save the reviewed strategy Off; enable Paper separately in Strategies')
-    pid = body.strategy.get('portfolio_id', 'default')
-    if portfolios.get(user_id, pid) is None:
-        raise HTTPException(404, 'portfolio not found')
     try:
         encoded = json.dumps(body.strategy, sort_keys=True, allow_nan=False)
     except (ValueError, TypeError):
