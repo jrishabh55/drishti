@@ -64,8 +64,10 @@ Interface: create an OFF strategy draft from owned completed analysis levels or 
 - [x] Integrate worker commits, resolve contracts/conflicts, accept task reviews and fix material findings.
 - [x] Independent whole-branch review with no unresolved blockers.
 - [x] Full pytest, frontend tests, typecheck, Node build, catalog/whitespace checks.
-- [ ] Preserve volume/encryption/media, verify live-orders0, push and deploy existing Dokploy app.
-- [ ] Authenticated browser QA of scanner source/readiness, strategy draft/portfolio/backtests, analytics and Telegram controls without sending/trading.
-- [ ] Record exact implemented outcomes and user-dependent Kite login/full-session trial; release every worker.
+- [x] Preserve volume/encryption/media, verify live-orders0, push and deploy existing Dokploy app.
+- [x] Authenticated browser QA of scanner source/readiness, strategy draft/portfolio/backtests, analytics and Telegram controls without sending/trading.
+- [x] Record exact implemented outcomes and user-dependent Kite login/full-session trial; release every worker.
 
 Review checkpoint: data/mobile/workflow and root follow-ups independently verified. Engine F1–F4 and analytics/backtest FWR-4 corrections independently verified through26174d1, with benchmark copybb84ecb reviewed. Final2650Python+103subtests,94web,typecheck,Nodebuild,catalog/whitespace checks pass. Controlled tests do not replace a connected full NSE session. Release verification follows below.
+
+Release complete at runtime3de688d: DokployibypmY-rVQtBCQw_lwRjIdone, API/webhealthy, sourcehashesmatch/liveorders0, authenticatedUIQAincludingdynamic-scannerdraftpassed. Productionexperiment/tradecreation intentionallynotperformed; controlledtestscoveredbacktests/nonemptymoneyflows. Kiteconnection/fullsessiontrial remainsuserdependent. See docs/reviews/2026-10-30-private-platform-release.md.
