@@ -19,16 +19,20 @@
 
 ## Tasks
 
-- [ ] Screenshot agent: audit each route, accessible dialogs and representative dark/light/narrow layouts; publish incremental issue list and coverage.
+- [x] Screenshot agent: audit each route, accessible dialogs and representative dark/light/narrow layouts; publish incremental issue list and coverage.
 - [x] Desk agent: fix confirmed issues in Desk routes/components and Kite forms; root owns DeskNav and Start here.
 - [x] Product agent: fix confirmed issues in analysis, scanners, evaluation, model settings, reports and Guide.
 - [x] Coordinator: fix shared navigation/layout causes and Start here; keep file ownership disjoint.
 - [x] Integrate fixes, review for behavior preservation and run existing tests/typecheck/build.
-- [ ] Verify every accessible page and affected form visually after integration; resolve remaining issues.
-- [ ] Deploy reviewed corrections, verify source/health and final live layout, release all workers and record coverage/limitations.
+- [x] Verify every accessible page and affected form visually after integration; resolve remaining issues.
+- [x] Deploy reviewed corrections, verify source/health and final live layout, release all workers and record coverage/limitations.
 
 ## Ownership and evidence
 
 Run `run_f8a4ad68c2ad`, base `c2f337d`. Working ledger, reports and screenshot observations are in `.superpowers/ui-audit/2026-10-30/` in the integration workspace. The screenshot worker has exclusive native browser ownership until handed back to the coordinator. Screenshots are emitted through the documented CUA API; files are claimed only if an API actually writes them.
 
 Shared layout review focuses on the fixed-height, non-wrapping Topbar; the advanced form's fixed 220px label column; the Desk navigation/portfolio row; and link/action wrapping in Start here. Page workers own local label-field groups, mixed-height rows, table scroll containers and responsive panels. Confirm each visual symptom before declaring its fix complete.
+
+## Completed result
+
+Code release `cfb1bb0` is live on Dokploy. Existing 97 frontend tests, typecheck and Node production build passed; final production CSS matches the verified local build. Baseline C01–C59 and after A01–A101 accept S01–S12 in available states. See [final audit](../../reviews/2026-10-30-ui-layout-audit.md) for source review, deployment and explicit coverage limits. All owned worker terminals released; QA windows closed, dark restored and user tabs preserved.
