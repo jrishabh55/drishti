@@ -161,10 +161,14 @@ def decide(uid, channel, token, step, word=None):
             _save(t)
             return _reply(t['result'])
         if step == 'request':
-            t.update(stage='confirming', expires_at=now + CONFIRM_S)
-            _save(t)
+            # offered -> confirming happens once; a repeated request re-shows
+            # the prompt but never moves the first confirmation deadline.
+            if t['stage'] == 'offered':
+                t.update(stage='confirming', expires_at=now + CONFIRM_S)
+                _save(t)
+            left = max(1, round((t['expires_at'] - now) / 60))
             return _reply(f"Confirm: {_WORDS[t['action']]} “{t['name']}” v{t['version']}? "
-                          f"Expires in 2 minutes. Reply CONFIRM {token} or CANCEL {token}.",
+                          f"Expires in {left} minute{'s' if left > 1 else ''}. Reply CONFIRM {token} or CANCEL {token}.",
                           [[{'text': 'Confirm', 'callback_data': 'y:' + token},
                             {'text': 'Cancel', 'callback_data': 'n:' + token}]])
         if t['stage'] != 'confirming':
@@ -268,7 +272,8 @@ def daily_summaries():
                          f"{p['open']['positions']} open")
         running = [s for s in get_kite_store().list_strategies(uid) if s.get('mode') != 'off']
         lines.append(f"Strategies running: {len(running)}. Charges are estimates.")
-        store.enqueue(doc['id'], 'summary-' + day, '\n'.join(lines), expires_at=now.timestamp() + 6 * 3600)
+        store.enqueue(doc['id'], 'summary-' + day, '\n'.join(lines), expires_at=now.timestamp() + 6 * 3600,
+                      generation=doc.get('generation'))
 
 
 def live_signal_cards():
@@ -296,5 +301,6 @@ def live_signal_cards():
                         f"Source: {g.get('source', 'unknown')}. This chat cannot place it: open Drishti and "
                         f"enter the exact typed confirmation before {datetime.fromtimestamp(exp, NSE.tz):%H:%M:%S} IST.\n{url}")
                 store.enqueue(doc['id'], f"live-{s['id']}-{g['id']}", text,
-                              [[{'text': 'Open Drishti to confirm', 'url': url}]], expires_at=exp)
+                              [[{'text': 'Open Drishti to confirm', 'url': url}]], expires_at=exp,
+                              generation=doc.get('generation'))
 

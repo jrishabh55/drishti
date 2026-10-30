@@ -126,7 +126,7 @@ def receive(cid, secret, payload):
                 conf.pop('inbound_hash',None)
                 store.secret(doc['user_id'],'whatsapp',conf)
                 store.save(doc)
-                store.enqueue(cid,'linked','WhatsApp replies verified. You can enable paper approvals in Drishti.')
+                store.enqueue(cid,'linked','WhatsApp replies verified. You can enable paper approvals in Drishti.',generation=doc.get('generation'))
             elif doc.get('verified') and doc.get('inbound_verified'):
                 _command(doc,text,recipient,deferred)
         store.mark_seen(cid,str(mid))
@@ -141,7 +141,9 @@ def _command(doc, text, sender, deferred=None):
     handled=supervision.handle(doc,text)
     if handled is not None:
         def reply(out):
-            store.enqueue(doc['id'],'sup-'+secrets.token_hex(8),out[0],out[1])
+            # Pinned to the requesting chat's generation: a re-pair while a deferred
+            # reply computes drops it instead of sending it to the new identity.
+            store.enqueue(doc['id'],'sup-'+secrets.token_hex(8),out[0],out[1],generation=doc.get('generation'))
             return out[0]
         if not callable(handled):
             return reply(handled)
@@ -165,7 +167,7 @@ def _command(doc, text, sender, deferred=None):
         message=result['message']
     except ValueError as exc:
         message=str(exc)
-    store.enqueue(doc['id'],'reply-'+secrets.token_hex(8),message)
+    store.enqueue(doc['id'],'reply-'+secrets.token_hex(8),message,generation=doc.get('generation'))
     return message
 
 
@@ -271,7 +273,7 @@ def sweep():
                     from datetime import datetime
                     at=datetime.fromisoformat(e['at']).timestamp()
                     if at>=max(doc.get('enabled_since',0),store.now().timestamp()-900):
-                        store.enqueue(doc['id'],'alert-'+e['id'],str(e['message']),expires_at=at+900)
+                        store.enqueue(doc['id'],'alert-'+e['id'],str(e['message']),expires_at=at+900,generation=doc.get('generation'))
             flush(doc['id'])
         except Exception:
             logger.warning('Messaging delivery upkeep failed; will retry without affecting trades')

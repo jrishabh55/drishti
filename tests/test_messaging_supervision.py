@@ -287,3 +287,93 @@ def test_whatsapp_text_commands_use_the_same_confirmed_flow(sup, monkeypatch):
     wa('PAUSE ' + tok)
     wa('CONFIRM ' + tok)
     assert ks.get_strategy(strat['id'], 'a')['mode'] == 'off'
+
+
+# ---- fix round 1: T4-1 generation pinning, T4-2 single confirmation window
+
+def _repair(ch='telegram', chat='99'):
+    row = store.connection('a', ch)
+    row.update(generation='B-' + chat, chat=chat, sender=chat, supervision=True,
+               daily_summary=True, live_links=True)
+    store.save(row)
+    return row
+
+
+def _sent(monkeypatch):
+    out = []
+    monkeypatch.setattr(service, 'send', lambda doc, text, buttons=None: out.append((doc['chat'], text)) or 'm1')
+    return out
+
+
+def test_repair_during_deferred_performance_drops_the_old_reply(sup, monkeypatch):
+    def compute(uid):
+        _repair()                     # app re-pairs to chat 99 while marks are fetched
+        return 'old chat 42 request result'
+    monkeypatch.setattr(supervision, 'performance_text', compute)
+    sent = _sent(monkeypatch)
+    send(tg('performance'))
+    cid = store.connection('a', 'telegram')['id']
+    assert not [d for d in store.deliveries(cid) if 'old chat 42' in d['text']]
+    service.flush(cid)
+    assert not [x for x in sent if 'old chat 42' in x[1]]
+
+
+def test_enqueue_refuses_a_changed_generation_and_keeps_current_work(sup):
+    row = store.connection('a', 'telegram')
+    assert store.enqueue(row['id'], 'sup-x', 'stale', generation='old') is False
+    assert store.enqueue(row['id'], 'sup-y', 'fresh', generation=row['generation']) is True
+    assert store.enqueue(row['id'], 'sup-z', 'legacy caller') is True     # default: current generation
+    got = {d['id'].split(':', 1)[1]: d for d in store.deliveries(row['id'])}
+    assert 'sup-x' not in got and got['sup-y']['generation'] == got['sup-z']['generation'] == row['generation']
+
+
+def test_repair_during_summary_or_live_card_generation_queues_nothing(sup, monkeypatch):
+    s, ks, strat, clock = sup
+    from apps.api.evaluation import analytics
+    row = store.connection('a', 'telegram')
+    row.update(daily_summary=True, live_links=True); store.save(row)
+    clock['now'] = NSE.local(datetime(2026, 10, 29).date(), 15 * 60 + 50)
+
+    def perf(uid, **kw):
+        _repair()
+        return {'open': {'positions': 0}, 'trades': []}
+    monkeypatch.setattr(analytics, 'trading_performance', perf)
+    supervision.daily_summaries()
+    assert not [d for d in store.deliveries(row['id']) if ':summary-' in d['id']]
+
+    exp = (clock['now'] + timedelta(minutes=2)).isoformat()
+    ks.put_strategy('a', dict(strat, mode='confirm', signals=[
+        {'id': 'sig1', 'status': 'await_confirm', 'symbol': 'SBIN', 'expires_at': exp,
+         'date': '2026-10-29', 'order': {'qty': 3}}]))
+    stale = [dict(store.connection('a', 'telegram'), generation='A-before')]
+    monkeypatch.setattr(store, 'all_connections', lambda: stale)   # producer read before the re-pair
+    supervision.live_signal_cards()
+    assert not [d for d in store.deliveries(row['id']) if ':live-' in d['id']]
+
+
+@pytest.mark.parametrize('form', ['button', 'text'])
+def test_repeated_requests_cannot_extend_the_confirmation(sup, form):
+    s, ks, strat, clock = sup
+    send(tg('status'))
+    tok = code('pause')
+    for i in range(11):                         # every 90 s, well past both deadlines
+        clock['now'] = NOW + timedelta(seconds=90 * i)
+        send(tg(data='c:' + tok) if form == 'button' else tg('PAUSE ' + tok))   # distinct updates
+    clock['now'] = NOW + timedelta(minutes=16)
+    send(tg(data='y:' + tok) if form == 'button' else tg('CONFIRM ' + tok))
+    assert ks.get_strategy(strat['id'], 'a')['mode'] == 'paper'
+    assert 'expired' in last()['text'].lower()
+
+
+def test_repeat_request_inside_the_window_keeps_the_first_deadline(sup):
+    s, ks, strat, clock = sup
+    send(tg('status'))
+    tok = code('pause')
+    supervision.decide('a', 'telegram', tok, 'request')
+    first = supervision._load('a', tok)['expires_at']
+    clock['now'] = NOW + timedelta(seconds=90)
+    supervision.decide('a', 'telegram', tok, 'request')
+    assert supervision._load('a', tok)['expires_at'] == first
+    clock['now'] = NOW + timedelta(seconds=110)
+    supervision.decide('a', 'telegram', tok, 'confirm')
+    assert ks.get_strategy(strat['id'], 'a')['mode'] == 'off'

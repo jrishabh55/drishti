@@ -114,15 +114,22 @@ def all_actions():
         return [json.loads(r['doc']) for r in c.execute('SELECT doc FROM messaging_actions').fetchall()]
 
 
-def enqueue(cid, key, text, buttons=None, expires_at=None):
-    conn = by_id(cid)
-    if not conn:
-        return
-    doc = {'id':cid+':'+key,'generation':conn.get('generation'),'created_at':now().timestamp(),'text':text,'buttons':buttons,'sent':False,'attempts':0,
-           'next_attempt':0,'expires_at':expires_at or now().timestamp()+900,'message_id':None}
+def enqueue(cid, key, text, buttons=None, expires_at=None, generation=None):
+    """Queue a message for the connection's generation. A producer that read
+    the connection earlier passes that ``generation``: if the connection was
+    re-paired or revoked since, nothing is queued (returns False) rather than
+    relabelling old work with the replacement identity. Check and insert are
+    one statement, so a concurrent re-pair cannot slip in between."""
+    ensure()
+    t=now().timestamp()
+    doc={'id':cid+':'+key,'generation':None,'created_at':t,'text':text,'buttons':buttons,'sent':False,'attempts':0,
+         'next_attempt':0,'expires_at':expires_at or t+900,'message_id':None}
     with db() as c:
-        c.execute('INSERT OR IGNORE INTO messaging_outbox VALUES (?,?,?,?,?)',
-                  (doc['id'],conn['user_id'],cid,now().timestamp(),json.dumps(doc)))
+        cur=c.execute("INSERT OR IGNORE INTO messaging_outbox SELECT ?,user_id,id,?,"
+                      "json_set(?,'$.generation',json_extract(doc,'$.generation')) FROM messaging_connections "
+                      "WHERE id=? AND active=1 AND (? IS NULL OR json_extract(doc,'$.generation')=?)",
+                      (doc['id'],t,json.dumps(doc),cid,generation,generation))
+    return cur.rowcount==1
 
 
 def deliveries(cid, unsent=False):
