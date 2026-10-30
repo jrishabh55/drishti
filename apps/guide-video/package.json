@@ -1,0 +1,29 @@
+{
+  "name": "@drishti/guide-video",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Offline Remotion package that renders the Drishti intro and walkthrough films.",
+  "type": "module",
+  "scripts": {
+    "studio": "node scripts/bootstrap-timings.mjs && remotion studio src/index.ts",
+    "check": "npm run check:logic && npm run check:types",
+    "narrate:audition": "./scripts/run-narration.sh audition",
+    "narrate": "./scripts/run-narration.sh render",
+    "frames": "node scripts/render.mjs frames",
+    "render": "node scripts/render.mjs all",
+    "manifest": "node scripts/manifest.mjs",
+    "check:logic": "node --test src/lib/*.test.mjs",
+    "check:types": "node scripts/bootstrap-timings.mjs && tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.539",
+    "@remotion/media": "4.0.539",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.539"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

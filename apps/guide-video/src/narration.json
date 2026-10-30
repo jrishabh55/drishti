@@ -1,0 +1,227 @@
+{
+  "voiceVersion": "drishti-narrator-v1",
+  "note": "Original designed narrator voice. No cloning of any real person, no Huntik character voices.",
+  "voice": {
+    "id": "narrator-a",
+    "description": "A warm adult Indian English narrator, calm and measured, low mid-pitched, reassuring and precise",
+    "anchorLine": "Drishti is a research and paper trading desk, and this short tour explains how each screen fits together.",
+    "style": "calm, clear and friendly, explaining to a careful beginner",
+    "seed": 1309,
+    "anchorFrom": "audition/narrator-a/anchor.wav"
+  },
+  "videos": {
+    "intro": {
+      "title": "Meet Drishti",
+      "chapters": [
+        {
+          "id": "what",
+          "title": "What Drishti is",
+          "lines": [
+            "Drishti is a research and paper trading desk for Indian equities.",
+            "It brings analysis, scanners, plans, risk checks and a simulated ledger into one workflow.",
+            "Paper capital is simulated trading money, and analysis credits are a separate balance.",
+            "Nothing here promises a profit, and paper results do not prove live execution quality."
+          ]
+        },
+        {
+          "id": "loop",
+          "title": "The working loop",
+          "lines": [
+            "A session follows one loop.",
+            "You set your limits, research a symbol, and write a plan with an entry, a stop and a target.",
+            "You size that plan against your risk checks, and you confirm the paper ticket yourself.",
+            "Then you read the ledger and the performance screen to see what actually happened."
+          ]
+        },
+        {
+          "id": "guards",
+          "title": "What stays guarded",
+          "lines": [
+            "Live broker orders sit behind separate gates.",
+            "In this deployment live order execution is disabled, so every control you will see is guarded or simulated."
+          ]
+        },
+        {
+          "id": "guide",
+          "title": "The in-app Guide",
+          "lines": [
+            "The Guide explains each screen where you are standing.",
+            "Open it from the top bar, read the help for the current route, or follow a short tour.",
+            "Let us walk through the desk."
+          ]
+        }
+      ]
+    },
+    "walkthrough": {
+      "title": "Drishti, screen by screen",
+      "chapters": [
+        {
+          "id": "orientation",
+          "title": "Start here",
+          "lines": [
+            "Drishti opens on the scanner workbench, and the Guide explains the desk from wherever you are standing.",
+            "Paper capital is simulated trading money, and analysis credits are a separate balance that may pay for model analysis.",
+            "The order is simple: limits first, then research, a plan, a sizing check, and a paper ticket you confirm deliberately."
+          ]
+        },
+        {
+          "id": "models",
+          "title": "Models and connections",
+          "lines": [
+            "Extra provider keys live in Model connections, and the Gemini key is set up in the Analysis form.",
+            "Keys are encrypted on the server, and you pick a quick and a deep model in the same analysis form.",
+            "OpenAI analysis may use credits, while Gemini and other personal providers run on your own credentials.",
+            "The guide never fills in or submits a key for you."
+          ]
+        },
+        {
+          "id": "analysis",
+          "title": "Run and read an analysis",
+          "lines": [
+            "On the Analysis screen you pick a company or ticker, an analysis date, the analysts you want and a research depth.",
+            "Review the model choices and the likely usage before you press Run, because you are the one spending credits or provider tokens.",
+            "A failed or interrupted run is not a completed recommendation."
+          ]
+        },
+        {
+          "id": "reports",
+          "title": "Read a report",
+          "lines": [
+            "A run page shows each analyst report, the research debate, and the decision that came out of it.",
+            "Check the selected date, the data sources and the status, and use cancel or export where they apply."
+          ]
+        },
+        {
+          "id": "scanners",
+          "title": "Scanners",
+          "lines": [
+            "Scanners let you build rules you can read, and inspect every match with its date and data timestamp.",
+            "A match is a research candidate, not a guaranteed trade, and missing bars can stop a rule from being calculated at all.",
+            "You decide which candidates move on to research or the watchlist."
+          ]
+        },
+        {
+          "id": "research",
+          "title": "Research",
+          "lines": [
+            "Research gathers watchlist news, deals and company results where that data is available.",
+            "It explains context, and it never establishes an entry or a fill.",
+            "An empty panel can simply mean no matching disclosures, or data that could not be fetched."
+          ]
+        },
+        {
+          "id": "today",
+          "title": "Today and watchlist",
+          "lines": [
+            "Today is the working screen: search a symbol, add it to the watchlist, and follow the opening range and entry timer.",
+            "Those cards depend on market hours and available bars, so read the waiting reason or the no data note before you act.",
+            "Analyse opens the analysis workflow, and it does not confirm a trade."
+          ]
+        },
+        {
+          "id": "plans",
+          "title": "Plans and exits",
+          "lines": [
+            "A plan records the trade you intend to take: entry, stop rule, target rule and a flat by time.",
+            "You can draft one from a symbol and entry, or from a triggered entry timer, and you save your edits before sizing.",
+            "Creating a plan does not place an order."
+          ]
+        },
+        {
+          "id": "timemachine",
+          "title": "Time Machine",
+          "lines": [
+            "Time Machine compares a plan against historical bars and simulated paths.",
+            "Intraday mode needs the entry bar time and at least twenty complete prior session windows.",
+            "When the history is not there, the screen reports it honestly: zero full sessions means no test ran, not a test that passed.",
+            "Simulated odds are not predictions, and a stop is not a guarantee."
+          ]
+        },
+        {
+          "id": "sizing",
+          "title": "Sizing and risk checks",
+          "lines": [
+            "Sizing turns a saved plan into a reviewable ticket.",
+            "It shows quantity, per share risk, total risk, and any check that failed.",
+            "Limits cover daily loss, per trade risk, order value, trade count, concentration and required stops.",
+            "A blocked ticket needs a corrected plan or a deliberate limit review, never a bypass."
+          ]
+        },
+        {
+          "id": "messages",
+          "title": "Telegram and messages",
+          "lines": [
+            "Messages connects a Telegram bot to your account, with a verification step you run yourself.",
+            "Once updates and paper approvals are enabled, a paper proposal arrives with approve, reject and status controls and a link back to the plan.",
+            "Approval is subject to expiry and fresh risk checks, and it only ever applies to a paper proposal.",
+            "WhatsApp is optional and needs its own setup."
+          ]
+        },
+        {
+          "id": "paper",
+          "title": "Paper ledger",
+          "lines": [
+            "The paper ledger is where simulated trades live.",
+            "A confirmed ticket waits for an eligible entry bar, and data and price conditions decide whether it fills.",
+            "Open and closed trades, exits, charges and net profit and loss are all listed, but a paper fill is not evidence of live execution quality."
+          ]
+        },
+        {
+          "id": "performance",
+          "title": "Performance",
+          "lines": [
+            "Performance reviews paper outcomes by day and compares what you expected with what happened.",
+            "Read the charges, the losses and the sample size, not only the gains.",
+            "A new account shows zeros and empty charts, and Drishti leaves them empty rather than filling them in."
+          ]
+        },
+        {
+          "id": "alerts",
+          "title": "Alerts",
+          "lines": [
+            "Alerts are rule based updates you define and then review as triggered events.",
+            "Marking an event as seen changes its read status, and nothing about your positions.",
+            "Delivery needs a verified channel and enabled preferences, and no alert guarantees a price or an executable entry."
+          ]
+        },
+        {
+          "id": "limits",
+          "title": "Limits and settings",
+          "lines": [
+            "Limits is the screen that everything else is measured against.",
+            "Paper capital, per trade loss, daily loss, maximum order value, concentration, trade counts and time restrictions all live here, and stops are required for entries.",
+            "Raising a limit does not make a setup safer, it only moves the line the risk check draws."
+          ]
+        },
+        {
+          "id": "backtests",
+          "title": "Backtests",
+          "lines": [
+            "Evaluation lets you configure a backtest and inspect its status and results.",
+            "Running one is a deliberate action that can consume analysis resources.",
+            "Historical results depend on the data and the assumptions you chose, and they are not a guarantee that an approach works live."
+          ]
+        },
+        {
+          "id": "broker",
+          "title": "Zerodha connection",
+          "lines": [
+            "Broker connection uses your own Kite application and your own credentials, stored encrypted.",
+            "Daily login is separate from arming, and arming is separate from confirming an order.",
+            "Connecting Zerodha does not enable orders, and this deployment keeps live execution disabled."
+          ]
+        },
+        {
+          "id": "live",
+          "title": "Strategies and live controls",
+          "lines": [
+            "Finally, Strategies shows the guarded controls: off, paper and confirm modes, connection and data status, daily arming and the kill switch.",
+            "Live orders need server enablement, daily arming and explicit per order confirmation, and production live execution is currently disabled.",
+            "Paper mode is simulated, and the guide has no action tools, so it never arms a broker or confirms an order.",
+            "That is the desk. Open the Guide on any screen for the help that belongs to it, and start with your limits."
+          ]
+        }
+      ]
+    }
+  }
+}
