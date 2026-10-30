@@ -20,4 +20,13 @@ The captured production dataset, with unchanged missing bars and default price/l
 
 Regression tests first failed against the old behavior. Cases cover the closing transition, exact production gap pattern, holes before the entry deadline, late breakouts, off-grid deadlines, explicit/live/unlimited strictness, stale cached partial candles at 14:46/15:10/15:29/17:00, incomplete final-sweep retries, and failed downloads with current/old/missing caches after 18:00. Independent review found and prompted fixes to deadline shrinking and overnight retries; its final review reported no blockers and independently passed all 50 focused tests.
 
-Final verification: 2,495 backend tests and 103 subtests passed (three integration tests deselected; 42 existing warnings), 81 frontend tests passed, TypeScript checking passed, production Node build passed, and git diff whitespace checks passed. Deployment evidence will be appended after the live check.
+Final verification: 2,495 backend tests and 103 subtests passed (three integration tests deselected; 42 existing warnings), 81 frontend tests passed, TypeScript checking passed, production Node build passed, and git diff whitespace checks passed.
+
+
+## Deployed verification
+
+App commit `1324ef6` was pushed to main and released through Dokploy deployment `nlkwGYLUJle9rR6lNv5Sw` (done). Both containers became healthy. The deployed ORB and ingest files matched local SHA-256 values `b79adafa3b72d4cb7b850ce43021d458453e842850e0736a2d6ab021ba081e19` and `569b38dadb8b7cd450818ef7789d8cb63839d4ce35d6464e28c8c41368883009` respectively.
+
+Read-only production evaluation at 17:36 IST returned 213 usable charts, four illiquid charts, zero unusable entry windows and 101 matches. The unchanged feed still had 217 incomplete full sessions: 66 missing 15:15 and all 217 missing 15:20. Explicit full-session evaluation continued to reject those charts. `KITE_ORDERS_ENABLED` remained `0`.
+
+After reloading the signed-in Chrome page, native accessibility inspection confirmed “213 charts usable of 217 for the entry window”, the separate zero-of-217 full-session summary, explicit gap times, populated breakout rows, “LAST EVALUATED”, and the 14:40 IST evaluated-bar badge for the 14:45 entry deadline. The Default paper portfolio selector was present. Public page and all referenced JavaScript/CSS assets returned HTTP 200. No trades, grants, settings changes or messages were created during validation. The independent reviewer is complete; no review worker remains running.
