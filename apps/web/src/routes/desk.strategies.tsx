@@ -78,7 +78,7 @@ function StrategiesPage() {
         {error && <p className="text-sm text-[var(--err)]">{error}</p>}
 
         {st && ctl && (
-          <Card title="Today's arm state" hint="Nothing is sent to Zerodha unless every check on the connection page passes and you type the order's confirmation.">
+          <Card title="Today's arm state" hint="All live orders require the connection checks and today’s arm. Confirm mode also needs typed ticket confirmation; Auto needs an explicit opt-in for the saved strategy version.">
             <div className="flex flex-wrap items-center gap-2">
               <Pill tone={ctl.killed ? 'err' : ctl.armed ? 'ok' : 'warn'}>
                 {ctl.killed ? 'KILLED for today' : ctl.armed ? 'ARMED' : 'DISARMED'}
