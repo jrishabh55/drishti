@@ -27,3 +27,8 @@ node_modules
 *.sqlite-shm
 **/data_cache/
 reports/
+
+# The API runtime never renders videos or needs offline narration/media.
+output/guide-video/
+apps/guide-video/
+.superpowers/
