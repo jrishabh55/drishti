@@ -106,8 +106,8 @@ export function ConditionRows({ state, onChange }: {
             )}
           </div>
 
-          <div className="hidden items-center gap-1.5 px-2 xl:grid xl:grid-cols-[64px_minmax(0,1fr)_108px_minmax(0,1fr)_64px_28px]">
-            <span className="es-team-label w-16 shrink-0">Timeframe</span>
+          <div className="hidden items-center gap-1.5 px-2 xl:grid xl:grid-cols-[80px_minmax(0,1fr)_108px_minmax(0,1fr)_64px_28px]">
+            <span className="es-team-label w-20 shrink-0">Timeframe</span>
             <span className="es-team-label flex-1">Left operand</span>
             <span className="es-team-label w-[108px] shrink-0">Operator</span>
             <span className="es-team-label flex-1">Right operand</span>
@@ -116,10 +116,10 @@ export function ConditionRows({ state, onChange }: {
           </div>
 
           {g.rows.map((r, ri) => (
-            <div key={ri} className="flex flex-wrap items-center gap-1.5 rounded bg-card/70 p-2 xl:grid xl:grid-cols-[64px_minmax(0,1fr)_108px_minmax(0,1fr)_64px_28px]">
+            <div key={ri} className="flex flex-wrap items-center gap-1.5 rounded bg-card/70 p-2 xl:grid xl:grid-cols-[80px_minmax(0,1fr)_108px_minmax(0,1fr)_64px_28px]">
               <Select value={r.timeframe} onValueChange={(timeframe) =>
                 updateRow(gi, ri, { ...r, timeframe: timeframe as Row['timeframe'] })}>
-                <SelectTrigger className="w-16 shrink-0 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-20 shrink-0 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>{TIMEFRAME_OPTIONS.map((t) =>
                   <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
               </Select>
