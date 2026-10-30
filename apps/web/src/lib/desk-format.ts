@@ -31,6 +31,7 @@ export function rMult(r: number | null | undefined, digits = 2): string {
 /** "delayed:yahoo" -> { live: false, label: 'DELAYED' } */
 export function sourceLabel(source: string | null | undefined): { live: boolean; label: string } {
   if (source?.startsWith('live:')) return { live: true, label: 'LIVE' }
+  if (source === 'mixed') return { live: false, label: 'MIXED KITE / DELAYED' }
   return { live: false, label: 'DELAYED' }
 }
 

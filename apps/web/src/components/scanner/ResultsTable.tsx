@@ -5,6 +5,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '#/components/ui/table'
 import type { ScanMatch, ScanResult } from '#/lib/scanner-types'
+import { ScanProvenance } from './ScanProvenance'
 
 const BASE_COLS: { key: keyof ScanMatch; label: string }[] = [
   { key: 'symbol', label: 'Symbol' },
@@ -53,8 +54,9 @@ export function ResultsTable({ result }: { result: ScanResult }) {
     <div className="space-y-2">
       <p className="es-mono text-xs text-muted-foreground">
         {result.matches.length} of {result.universe} stocks · data as of{' '}
-        {result.data_as_of ? new Date(result.data_as_of).toLocaleString() : '—'} (delayed)
+        {result.data_as_of ? new Date(result.data_as_of).toLocaleString() : '—'}
       </p>
+      <ScanProvenance result={result} />
       <div className="max-h-[560px] overflow-auto rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] shadow-[var(--shadow-1)]">
         <Table>
           <TableHeader>

@@ -53,6 +53,7 @@ export interface LiveSymbol {
   symbol: string
   last_tick_at: string | null
   source: string
+  last_price?: number | null
   /** today's session so far is filled from Kite history; until then: DELAYED */
   backfilled?: boolean
   backfill_error?: string | null
@@ -65,6 +66,10 @@ export interface LiveStatus {
   symbols: LiveSymbol[]
   reconnects: number
   started_at?: string | null
+  bootstrap?: { total: number; completed: number; failed: number; running: boolean; session_ready: number }
+  history_errors?: Record<string, string>
+  max_symbols?: number
+  selection_notes?: string[]
 }
 
 export interface KiteControl {
@@ -220,7 +225,7 @@ export const kite = {
   callback: (request_token: string, state: string, status?: string) =>
     post<KiteStatus>('/kite/callback', { request_token, state, status }),
   disconnect: () => post<KiteStatus>('/kite/disconnect'),
-  liveStart: (symbols: string[]) => post<LiveStatus>('/kite/live/start', { symbols }),
+  liveStart: (symbols: string[], universe?: 'fno' | 'nifty500') => post<LiveStatus>('/kite/live/start', { symbols, universe }),
   liveStop: () => post<LiveStatus>('/kite/live/stop'),
   arm: (ack: string) => post<KiteControl>('/kite/arm', { ack }),
   disarm: () => post<KiteControl>('/kite/disarm'),

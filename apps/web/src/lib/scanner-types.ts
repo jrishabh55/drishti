@@ -49,6 +49,11 @@ export type ScanMatch = {
   volume: number | null
   rvol: number | null
   values: Record<string, number | null>
+  source?: string
+  price_basis?: string
+  sources?: Record<string, string>
+  quote?: number
+  quote_as_of?: string
 }
 
 export type ScanResult = {
@@ -57,6 +62,12 @@ export type ScanResult = {
   /** Timeframe change_pct was computed on (coarsest in the definition, min 1d). */
   change_tf?: string
   matches: ScanMatch[]
+  source?: string
+  notes?: string[]
+  coverage?: {
+    requested: number; live: number; delayed: number; mixed: number
+    by_timeframe: Record<string, { kite: number; delayed: number; missing: number }>
+  }
 }
 
 /** GET /scanners/status — data-freshness summary for the "Last data

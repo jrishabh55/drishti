@@ -105,9 +105,11 @@ def delete_scanner(sid: str, user_id: str = Depends(current_user_id)) -> None:
     get_scanner_store().delete_scanner(sid)
 
 
-def _run_or_422(definition: Group) -> dict:
+def _run_or_422(definition: Group, user_id: str = "") -> dict:
     try:
-        return get_engine().run(definition)
+        engine = get_engine()
+        scoped = getattr(engine, 'run_for_user', None)
+        return scoped(user_id, definition) if scoped else engine.run(definition)
     except (ValueError, KeyError, IndexError) as exc:
         # Point-fixes in engine.py/indicators.py/schema.py should prevent
         # these on validated input; this is a backstop so any residual
@@ -117,13 +119,13 @@ def _run_or_422(definition: Group) -> dict:
 
 @router.post("/scanners/preview")
 def preview(body: PreviewBody, user_id: str = Depends(current_user_id)) -> dict:
-    return _run_or_422(_parse_or_422(body.definition))
+    return _run_or_422(_parse_or_422(body.definition), user_id)
 
 
 @router.post("/scanners/{sid}/run")
 def run_scanner(sid: str, user_id: str = Depends(current_user_id)) -> dict:
     scanner = _owned_or_error(sid, user_id, for_write=False)
-    return _run_or_422(_parse_or_422(scanner["definition"]))
+    return _run_or_422(_parse_or_422(scanner["definition"]), user_id)
 
 
 @router.post("/scanners/nl")

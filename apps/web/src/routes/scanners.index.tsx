@@ -238,8 +238,8 @@ function ScannersPage() {
 
           {status && (
             <p className="es-mono px-1 text-xs text-muted-foreground">
-              Data: daily to {fmtDay(status.latest['1d'])} · intraday to{' '}
-              {fmtTime(latestIntraday(status))} (15-min delayed) · {status.universe} stocks
+              Public snapshot: daily to {fmtDay(status.latest['1d'])} · intraday to{' '}
+              {fmtTime(latestIntraday(status))} (delayed) · {status.universe} stocks. Run results show selected-connection coverage.
             </p>
           )}
         </div>

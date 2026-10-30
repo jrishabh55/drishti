@@ -37,6 +37,9 @@ class ScanEngine:
         self._version = -1
         self._lock = threading.Lock()
 
+    def run_for_user(self, user_id: str, definition: Group) -> dict:
+        return run_for_user(user_id, definition)
+
     # -- panels -----------------------------------------------------------
     def _build_panel(self, timeframe: str) -> Panel:
         """Construct a fresh Panel for `timeframe` from the store. No caching,
@@ -111,7 +114,7 @@ class ScanEngine:
         if chg_tf in ("5m", "15m", "1h"):
             chg_tf = "1d"  # intraday bar-over-bar change is noise; keep daily
         tf_close = panels[chg_tf].close
-        chg_now = tf_close.iloc[-1]
+        chg_now = tf_close.iloc[-1] if len(tf_close) else pd.Series(dtype=float)
         prev = tf_close.iloc[-2] if len(tf_close) > 1 else chg_now
         vol = d1.volume.iloc[-1]
         vol_avg = d1.volume.rolling(20).mean().iloc[-1]
@@ -299,3 +302,24 @@ def get_engine() -> ScanEngine:
         if _engine is None or _engine._store is not store:
             _engine = ScanEngine(store)
         return _engine
+
+
+def run_for_user(user_id: str, definition: Group, *, now=None) -> dict:
+    """Evaluate a disposable selected-owner snapshot; preserve run()'s fields.
+
+    Additive source/coverage/match provenance must be inspected before treating
+    scanner candidates as live. No scanner result authorizes an order.
+    """
+    from apps.api.kite import live
+    from apps.api.scanner.scoped import ScopedEngine, ScopedStore, annotate
+
+    clock = live._now if now is None else lambda: now
+    stamp = clock()
+    snapshot = ScopedStore(get_scanner_store(), user_id, stamp)
+    result = annotate(ScopedEngine(snapshot).run(definition), snapshot, _collect_timeframes(definition))
+    if snapshot.hub and not live.access_valid(user_id, snapshot.owner, clock()):
+        snapshot.hub = None
+        snapshot.frames.clear()
+        snapshot.sources.clear()
+        result = annotate(ScopedEngine(snapshot).run(definition), snapshot, _collect_timeframes(definition))
+    return result

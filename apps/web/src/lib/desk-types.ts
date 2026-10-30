@@ -34,6 +34,7 @@ export interface DeskProfile {
 }
 
 export interface OrbHit {
+  source?: DataSource
   symbol: string
   name: string
   price: number
@@ -50,6 +51,8 @@ export interface OrbHit {
 }
 
 export interface OrbScan {
+  source_coverage?: { requested: number; live: number; delayed: number; missing: number }
+  sources?: Record<string, DataSource>
   date: string
   evaluation_as_of?: string
   coverage?: { complete: number; incomplete: number; missing_times: { start: string; charts: number }[] }

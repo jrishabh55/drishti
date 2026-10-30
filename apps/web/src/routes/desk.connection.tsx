@@ -8,6 +8,7 @@ import { istTime } from '#/lib/desk-format'
 import { kite, kiteError, kiteRedirectParams, type KiteStatus } from '#/lib/kite-api'
 import { Card, Pill, sessionPill } from '#/components/kite/KiteBits'
 import { KiteSharingPanel } from '#/components/kite/KiteSharingPanel'
+import { FeedCoverage } from '#/components/kite/FeedCoverage'
 
 export const Route = createFileRoute('/desk/connection')({
   ssr: false,
@@ -29,8 +30,9 @@ function ConnectionPage() {
   const run = useCallback(async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true); setError(null); setMsg(null)
     try {
-      await fn()
-      if (ok) setMsg(ok)
+      const result = await fn()
+      const notes = (result as { selection_notes?: string[] } | null)?.selection_notes ?? []
+      if (ok) setMsg([ok, ...notes].join(' '))
     } catch (e) {
       setError(kiteError(e))
     } finally {
@@ -159,6 +161,18 @@ function ConnectionPage() {
                 The owner controls streaming symbols; your broker session and orders stay separate.
               </p>}
               {stream.detail && <p className="text-xs text-[var(--text-3)]">{stream.detail}</p>}
+              <FeedCoverage stream={stream} />
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={busy || sharedData || st.session !== 'active'}
+                  onClick={() => void run(() => kite.liveStart([], 'fno'), 'F&O stock feed started.')}>
+                  Stream F&O stocks
+                </Button>
+                <Button variant="outline" disabled={busy || sharedData || st.session !== 'active'}
+                  onClick={() => void run(() => kite.liveStart([], 'nifty500'), 'NIFTY500 feed started.')}>
+                  Stream NIFTY500
+                </Button>
+              </div>
+              <p className="text-xs text-[var(--text-4)]">Up to 500 symbols. History fills in the background at a bounded rate; use source coverage before acting.</p>
               <div className="flex gap-2">
                 <Input placeholder="SBIN, RELIANCE (blank = watchlist)" value={symbols} disabled={sharedData}
                   onChange={(e) => setSymbols(e.target.value.toUpperCase())} />
@@ -179,11 +193,12 @@ function ConnectionPage() {
               {stream.symbols.length > 0 && (
                 <table className="w-full text-sm">
                   <thead><tr className="text-left text-xs text-[var(--text-4)]">
-                    <th>Symbol</th><th>Last tick</th><th>1m bars</th><th>Desk source</th></tr></thead>
+                    <th>Symbol</th><th>Latest quote</th><th>Last tick</th><th>1m bars</th><th>Desk source</th></tr></thead>
                   <tbody>
                     {stream.symbols.map((s) => (
                       <tr key={s.symbol}>
                         <td className="es-mono">{s.symbol}</td>
+                        <td className="es-mono">{s.last_price?.toLocaleString('en-IN') ?? '—'}</td>
                         <td className="es-mono">{s.last_tick_at ? `${istTime(s.last_tick_at)} IST` : '—'}</td>
                         <td className="es-mono">{s.bars_1m}</td>
                         <td><Pill tone={s.source.startsWith('live') ? 'ok' : 'warn'}>

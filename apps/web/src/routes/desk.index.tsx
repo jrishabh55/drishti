@@ -192,6 +192,9 @@ function DeskToday() {
                   {scan.coverage.incomplete ? ` · ${scan.coverage.incomplete} incomplete` : ''}
                 </p>
               )}
+              {scan.source_coverage && <p className="es-mono text-xs text-[var(--text-4)]">
+                Sources: {scan.source_coverage.live} Kite · {scan.source_coverage.delayed} delayed · {scan.source_coverage.missing} missing.
+              </p>}
               {scan.notes.map((n) => <p key={n} className="text-xs text-[var(--run)]">{n}</p>)}
               <div className="overflow-auto rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] shadow-[var(--shadow-1)]">
                 <Table>

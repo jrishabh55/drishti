@@ -18,6 +18,7 @@ describe('desk-format', () => {
   it('labels the data source honestly', () => {
     expect(sourceLabel('delayed:yahoo')).toEqual({ live: false, label: 'DELAYED' })
     expect(sourceLabel('live:kite')).toEqual({ live: true, label: 'LIVE' })
+    expect(sourceLabel('mixed')).toEqual({ live: false, label: 'MIXED KITE / DELAYED' })
     expect(sourceLabel(undefined).label).toBe('DELAYED')
   })
   it('shows exchange (IST) time', () => {

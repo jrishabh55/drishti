@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable, List, Literal, Optional
 
 from apps.api.desk import bars as bars_mod
@@ -49,11 +49,18 @@ def clear_live_providers_for_tests() -> None:
     _providers.clear()
 
 
-def _from_providers(user_id: str, symbol: str, interval: str, kind: Kind
+def _from_providers(user_id: str, symbol: str, interval: str, kind: Kind, *, now=None, expected_owner=None
                     ) -> Optional[BarSeries]:
+    from apps.api.kite import live
+
     for fn in list(_providers):
         try:
-            got = fn(user_id, symbol, interval, kind)
+            # Keep four-argument external providers valid; Kite supports the
+            # explicit replay/test clock as an additive keyword argument.
+            if fn is live.provider:
+                got = fn(user_id, symbol, interval, kind, now=now, expected_owner=expected_owner)
+            else:
+                got = fn(user_id, symbol, interval, kind)
         except Exception:  # noqa: BLE001 — a broken live feed must degrade, not fail
             logger.exception("live bar provider failed; falling back to delayed bars")
             continue
@@ -106,13 +113,57 @@ def get_session_rows(user_id: str, symbol: str, interval: str = "5m", *, now: da
     return BarSeries(sym, interval, rows, "delayed:yahoo", _as_of(rows), notes)
 
 
-def get_session_rows_universe(user_id: str, interval: str = "5m", *, day: date | None = None, symbols=None) -> dict:
-    """Read only the requested NSE session and universe for an ORB scan."""
-    from apps.api.scanner.store import get_scanner_store
+@dataclass
+class UniverseSeries:
+    rows: dict
+    sources: dict
+    coverage: dict
 
-    day = day or datetime.now(NSE.tz).date()
-    df = get_scanner_store().load_session_bars(interval, day.isoformat(), symbols)
-    return {sym: bars_mod.rows_from_long(group) for sym, group in df.groupby("symbol", sort=False)} if not df.empty else {}
+    @property
+    def source(self) -> str:
+        sources = set(self.sources.values())
+        return next(iter(sources)) if len(sources) == 1 else "mixed" if sources else "delayed:yahoo"
+
+
+def get_session_universe(user_id: str, interval: str = "5m", *, day: date | None = None,
+                         symbols=None, now: datetime | None = None) -> UniverseSeries:
+    """Source-aware, cache-only universe read; never performs per-symbol HTTP.
+
+    Private providers overlay only today's requested symbols. Historical replay
+    keeps the public path. Neither private rows nor their provenance are persisted.
+    """
+    from apps.api.scanner.store import get_scanner_store
+    from apps.api.kite import live, sharing
+
+    clock = live._now if now is None else lambda: now
+    stamp = clock()
+    day = day or stamp.astimezone(NSE.tz).date()
+    store = get_scanner_store()
+    selected = sorted({bars_mod.nse_symbol(s) for s in symbols}) if symbols is not None else list(store.instruments_df().index)
+    df = store.load_session_bars(interval, day.isoformat(), selected)
+    public = {sym: bars_mod.rows_from_long(group) for sym, group in df.groupby("symbol", sort=False)} if not df.empty else {}
+    rows, sources = dict(public), {sym: "delayed:yahoo" for sym in public}
+    owner = sharing.owner_for(user_id)
+    if day == stamp.astimezone(NSE.tz).date():
+        for sym in selected:
+            series = _from_providers(user_id, sym, interval, "session", now=stamp, expected_owner=owner)
+            if series is not None:
+                rows[sym] = [r for r in series.rows if r[0].astimezone(NSE.tz).date() == day]
+                sources[sym] = series.source
+        if not live.access_valid(user_id, owner, clock()):
+            rows, sources = dict(public), {sym: "delayed:yahoo" for sym in public}
+    size = timedelta(minutes=1 if interval == "1m" else 5, seconds=2)
+    rows = {s: [r for r in rr if r[0] + size <= stamp] for s, rr in rows.items()}
+    rows = {s: rr for s, rr in rows.items() if rr}
+    sources = {s: sources[s] for s in rows}
+    nlive = sum(s.startswith("live:") for s in sources.values())
+    return UniverseSeries(rows, sources, {"requested": len(selected), "live": nlive,
+                                          "delayed": len(rows) - nlive, "missing": len(selected) - len(rows)})
+
+
+def get_session_rows_universe(user_id: str, interval: str = "5m", *, day: date | None = None, symbols=None) -> dict:
+    """Legacy dict contract; source-aware consumers use get_session_universe."""
+    return get_session_universe(user_id, interval, day=day, symbols=symbols).rows
 
 
 def get_history_rows(user_id: str, symbol: str, interval: str = "5m",

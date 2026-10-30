@@ -27,7 +27,7 @@ keeps the callback behind normal auth and binds it to the same user.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, ValidationError
@@ -199,12 +199,20 @@ def _own_stream(user_id: str) -> None:
 
 class LiveBody(BaseModel):
     symbols: List[str] = Field(default_factory=list, max_length=live.MAX_SYMBOLS)
+    universe: Optional[Literal['fno', 'nifty500']] = None
 
 
 @router.post("/kite/live/start")
 async def live_start(body: LiveBody, user_id: str = Depends(current_user_id)) -> Dict[str, Any]:
     _own_stream(user_id)
     syms = body.symbols or get_desk_store().watchlist(user_id)
+    notes = []
+    if body.universe:
+        if body.symbols:
+            raise HTTPException(422, detail="Choose symbols or a universe, not both.")
+        from apps.api.desk.orb import pick_universe
+        from apps.api.scanner.store import get_scanner_store
+        syms, notes = pick_universe(get_scanner_store().instruments_df(), body.universe)
     try:
         await live.start(user_id, syms, transport=_transport, connect=_connect, now=_now())
     except auth.KiteAuthError as exc:
@@ -213,7 +221,7 @@ async def live_start(body: LiveBody, user_id: str = Depends(current_user_id)) ->
         raise _kite_http(exc, user_id) from exc
     except (ValueError, bars_mod.BarsError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return live.freshness(user_id, _now())
+    return {**live.freshness(user_id, _now()), 'selection_notes': notes}
 
 
 @router.post("/kite/live/stop")

@@ -28,14 +28,14 @@ from typing import Any, Callable, Dict, List, Optional
 from apps.api.desk import bars as bars_mod
 from apps.api.desk.bars_source import BarSeries
 from apps.api.desk.market.session import NSE as NSE_SPEC
-from apps.api.kite import auth, rest, sharing, ticker
+from apps.api.kite import auth, history, rest, sharing, ticker
 from apps.api.scanner.calendar import IST
 
 logger = logging.getLogger(__name__)
 
 SOURCE = "live:kite"
 STALE_AFTER = timedelta(seconds=90)
-MAX_SYMBOLS = 200        # well under Kite's 3,000 per connection
+MAX_SYMBOLS = 500        # bounded NIFTY500; Kite permits 3,000 per websocket
 SESSION_END = time(15, 35)
 BACKFILL_SPACING_S = 0.35   # Kite's historical API allows 3 requests a second
 
@@ -55,6 +55,9 @@ class Hub:
     backfilled: set = field(default_factory=set)
     backfill_errors: Dict[str, str] = field(default_factory=dict)
     backfill_task: Optional[asyncio.Task] = None
+    history: Dict[str, Dict[str, list]] = field(default_factory=dict)
+    history_errors: Dict[str, str] = field(default_factory=dict)
+    history_task: Optional[asyncio.Task] = None
     dropped: bool = False
     on_state: Optional[Callable[[str, Optional[str]], None]] = None
     pump: Optional["PostbackPump"] = None
@@ -102,7 +105,7 @@ async def _backfill(hub: Hub, client: rest.KiteClient, table: Dict[str, Dict[str
                 continue
             now = clock()
             try:
-                candles = await asyncio.to_thread(client.historical, table[sym]["token"],
+                candles = await asyncio.to_thread(history.gate.fetch, hub.user_id, client, table[sym]["token"],
                                                   "minute", session_open(now),
                                                   now.astimezone(IST))
             except rest.KiteError as exc:
@@ -120,6 +123,45 @@ async def _backfill(hub: Hub, client: rest.KiteClient, table: Dict[str, Dict[str
             await asyncio.sleep(BACKFILL_SPACING_S)
         if all(s in hub.backfilled for s in hub.symbols):
             return
+
+
+async def _bootstrap_history(hub: Hub, client, table, clock) -> None:
+    """At most two calls per symbol: 730 calendar days daily + ten days 5m.
+
+    Retain 320 actual candles per series. No retry storm: failures remain
+    visible until an explicit stream restart. Session backfill has its own
+    bounded retry policy and goes first.
+    """
+    for interval, kite_interval, days in (("1d", "day", 730), ("5m", "5minute", 10)):
+        for sym in hub.symbols:
+            now = clock()
+            if auth.load_session(hub.user_id, now) is None:
+                return
+            key = f"{sym}:{interval}"
+            try:
+                candles = await asyncio.to_thread(history.gate.fetch, hub.user_id, client,
+                                                  table[sym]['token'], kite_interval,
+                                                  (now - timedelta(days=days)).astimezone(IST), now.astimezone(IST))
+                if auth.load_session(hub.user_id, clock()) is None:
+                    return
+                rows = _rows(candles)[-320:]
+                hub.history.setdefault(interval, {})[sym] = rows
+                if not rows:
+                    hub.history_errors[key] = "No historical candles available"
+            except rest.KiteError as exc:
+                hub.history_errors[key] = "Historical candles unavailable; restart stream to retry"
+                if exc.token_error:
+                    auth.mark_revoked(hub.user_id)
+                    return
+            except (ValueError, TypeError, IndexError):
+                hub.history_errors[key] = "Invalid historical candle response; restart stream to retry"
+
+
+async def _history_after_session(hub, client, table, clock):
+    if hub.backfill_task:
+        await asyncio.shield(hub.backfill_task)
+    await asyncio.sleep(BACKFILL_SPACING_S)
+    await _bootstrap_history(hub, client, table, clock)
 
 
 class PostbackPump:
@@ -230,6 +272,8 @@ async def start(user_id: str, symbols: List[str], *, transport: Optional[rest.Tr
     else:
         _schedule_backfill(hub, client, table, clock)
     _hubs[user_id] = hub
+    hub.history_task = asyncio.create_task(_history_after_session(hub, client, table, clock),
+                                           name=f"kite-history-{user_id}")
     return hub
 
 
@@ -237,7 +281,7 @@ async def stop(user_id: str) -> bool:
     hub = _hubs.pop(user_id, None)
     if hub is None:
         return False
-    for task in (hub.task, hub.backfill_task):
+    for task in (hub.task, hub.history_task, hub.backfill_task):
         if task and not task.done():
             task.cancel()
             try:
@@ -264,17 +308,26 @@ def freshness(user_id: str, now: Optional[datetime] = None) -> Dict[str, Any]:
     if hub is None:
         return {"state": "off", "detail": None, "symbols": [], "reconnects": 0}
     syms = []
+    active = auth.load_session(user_id, now) is not None
     for s in hub.symbols:
         last = hub.builder.last_tick.get(s)
-        live = hub.state == "live" and last is not None and now - last <= STALE_AFTER \
+        live = active and hub.state == "live" and last is not None and now - last <= STALE_AFTER \
             and s in hub.backfilled
+        minute_rows = hub.builder.rows(s, "1m")
         syms.append({"symbol": s, "last_tick_at": last.isoformat() if last else None,
+                     "last_price": minute_rows[-1][4] if minute_rows and last else None,
                      "source": SOURCE if live else "delayed:yahoo",
                      "backfilled": s in hub.backfilled,
                      "backfill_error": hub.backfill_errors.get(s),
                      "bars_1m": len(hub.builder.rows(s, "1m"))})
     return {"state": hub.state, "detail": hub.detail, "symbols": syms,
-            "reconnects": hub.reconnects, "started_at": hub.started_at}
+            "reconnects": hub.reconnects, "started_at": hub.started_at,
+            "bootstrap": {"total": len(hub.symbols) * 2,
+                          "completed": sum(bool(rows) for ss in hub.history.values() for rows in ss.values()),
+                          "failed": len(hub.history_errors),
+                          "running": hub.history_task is not None and not hub.history_task.done(),
+                          "session_ready": len(hub.backfilled)},
+            "history_errors": dict(hub.history_errors), "max_symbols": MAX_SYMBOLS}
 
 
 # ---------------------------------------------------------------- provider
@@ -284,14 +337,17 @@ _HISTORY_DAYS = {"1m": 30, "5m": 59, "1d": 730}
 
 
 def provider(user_id: str, symbol: str, interval: str, kind: str, *,
-             now: Optional[datetime] = None, transport: Optional[rest.Transport] = None
+             now: Optional[datetime] = None, transport: Optional[rest.Transport] = None,
+             expected_owner: Optional[str] = None
              ) -> Optional[BarSeries]:
     # Explicit timestamps keep replay/test reads deterministic; ordinary
     # requests must re-read the clock after a blocking provider call.
     clock = _now if now is None else lambda: now
     now = now or _now()
     owner_id = sharing.owner_for(user_id)
-    if owner_id != user_id and not sharing.still_allowed(user_id, owner_id, now):
+    if expected_owner is not None and owner_id != expected_owner:
+        return None
+    if not access_valid(user_id, owner_id, now):
         return None
     if kind == "session":
         hub = _hubs.get(owner_id)
@@ -302,7 +358,7 @@ def provider(user_id: str, symbol: str, interval: str, kind: str, *,
                 or symbol not in hub.backfilled:
             return None   # bars_source falls back to delayed bars, labelled as such
         rows = hub.builder.rows(symbol, interval)
-        if not sharing.still_allowed(user_id, owner_id, clock()):
+        if not access_valid(user_id, owner_id, clock()):
             return None
         return BarSeries(symbol, interval, rows, SOURCE,
                          max(r[0] for r in rows).isoformat() if rows else None)
@@ -312,10 +368,12 @@ def provider(user_id: str, symbol: str, interval: str, kind: str, *,
             table = rest.nse_instruments(client, now.astimezone(IST).date())
             if symbol not in table:
                 return None
-            candles = client.historical(table[symbol]["token"], _KITE_INTERVAL[interval],
+            candles = history.gate.fetch(owner_id, client, table[symbol]["token"], _KITE_INTERVAL[interval],
                                         (now - timedelta(days=_HISTORY_DAYS[interval]))
                                         .astimezone(IST), now.astimezone(IST))
             sharing.require_access(user_id, owner_id, clock())
+            if not access_valid(user_id, owner_id, clock()):
+                return None
         except auth.KiteAuthError:
             return None
         except rest.KiteError as exc:
@@ -328,6 +386,11 @@ def provider(user_id: str, symbol: str, interval: str, kind: str, *,
             return None
         return BarSeries(symbol, interval, rows, SOURCE, max(r[0] for r in rows).isoformat())
     return None
+
+
+def access_valid(user_id: str, owner_id: str, now: datetime) -> bool:
+    """Recheck both selection/grant and the owner's session, including own reads."""
+    return sharing.still_allowed(user_id, owner_id, now) and auth.load_session(owner_id, now) is not None
 
 
 def install() -> None:

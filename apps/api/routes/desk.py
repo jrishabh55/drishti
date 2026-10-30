@@ -231,15 +231,46 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
         day = _date.fromisoformat(date) if date else None
     except ValueError as exc:
         raise _unprocessable(ValueError("date wants YYYY-MM-DD")) from exc
-    rows = bars_source.get_session_rows_universe(user_id, "5m", day=day or _now().astimezone(NSE_SPEC.tz).date(), symbols=symbols)
+    from apps.api.kite import live, sharing
+    now = _now()
+    owner = sharing.owner_for(user_id)
+    feed = bars_source.get_session_universe(user_id, "5m", day=day or now.astimezone(NSE_SPEC.tz).date(), symbols=symbols, now=now)
     daily = scan_store.load_bars("1d", limit=21)
     names = inst["name"].to_dict() if not inst.empty else {}
     try:
-        doc = orb.scan(rows, _now(), or_minutes=or_minutes or prof.or_minutes,
-                       no_entries_after=prof.no_entries_after, at=at, day=day,
-                       symbols=symbols, min_price=prof.min_price,
-                       min_avg_value_cr=prof.min_avg_value_cr,
-                       avg_value_cr=orb._avg_value_cr(daily, symbols), names=names)
+        docs = []
+        for source in ("live:kite", "delayed:yahoo"):
+            selected = [s for s in symbols if feed.sources.get(s, "delayed:yahoo") == source]
+            if not selected:
+                continue
+            docs.append(orb.scan({s: feed.rows[s] for s in selected if s in feed.rows}, now,
+                                 or_minutes=or_minutes or prof.or_minutes,
+                                 no_entries_after=prof.no_entries_after, at=at, day=day,
+                                 symbols=selected, min_price=prof.min_price,
+                                 min_avg_value_cr=prof.min_avg_value_cr,
+                                 avg_value_cr=orb._avg_value_cr(daily, symbols), names=names, source=source))
+        if not docs:
+            docs = [orb.scan({}, now, symbols=[], at=at, day=day,
+                             or_minutes=or_minutes or prof.or_minutes)]
+        doc = docs[0]
+        for part in docs[1:]:
+            doc["counts"] = {k: v + part["counts"][k] for k, v in doc["counts"].items()}
+            doc["hits"] += part["hits"]
+            doc["notes"] = list(dict.fromkeys(doc["notes"] + part["notes"]))
+            times = {}
+            for row in doc["coverage"]["missing_times"] + part["coverage"]["missing_times"]:
+                times[row["start"]] = times.get(row["start"], 0) + row["charts"]
+            doc["coverage"] = {"complete": doc["coverage"]["complete"] + part["coverage"]["complete"],
+                               "incomplete": doc["coverage"]["incomplete"] + part["coverage"]["incomplete"],
+                               "missing_times": [{"start": k, "charts": v} for k, v in sorted(times.items())]}
+            doc["data_as_of"] = max(filter(None, [doc["data_as_of"], part["data_as_of"]]), default=None)
+        doc["hits"].sort(key=lambda h: (h["at"], h["symbol"]))
+        for hit in doc["hits"]:
+            hit["source"] = feed.sources.get(hit["symbol"], "delayed:yahoo")
+        if feed.coverage['live'] and not live.access_valid(user_id, owner, _now()):
+            raise HTTPException(409, detail="Market data access changed during scan; refresh and retry.")
+        doc.update(source=feed.source, source_coverage=feed.coverage, sources=feed.sources)
+        doc["notes"].append("Source coverage is per symbol. Liquidity uses public closed daily history. Last evaluated is a completed candle, not a current quote.")
     except (orb.ORBError, ValueError) as exc:
         raise _unprocessable(exc) from exc
     doc["notes"] = notes + doc["notes"]
