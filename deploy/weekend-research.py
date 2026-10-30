@@ -19,7 +19,15 @@ REMOTE = r'''
 import base64,hashlib,io,json,os,pathlib,subprocess,sys,tarfile
 request=json.load(sys.stdin)
 api='drishti-qzkexq-api-1'
-name='drishti-weekend-research-20261031'
+profile=request.get('profile','weekend')
+if profile not in ('weekend','long-daily'):raise RuntimeError('invalid worker profile')
+long_daily=profile=='long-daily'
+name='drishti-long-daily-history-20261031' if long_daily else 'drishti-weekend-research-20261031'
+cpu='0.25' if long_daily else '0.5'
+memory='512m' if long_daily else '1100m'
+memory_swap='768m' if long_daily else '1400m'
+module='research.long_daily' if long_daily else 'research.cli'
+base='/home/appuser/.tradingagents/research-archives/'+('long-daily-20261031-v2' if long_daily else 'weekend-20261031')
 def run(args,**kw):
     return subprocess.run(args,check=True,capture_output=True,text=True,**kw).stdout
 if request['action']=='status':
@@ -60,14 +68,15 @@ values.update(KITE_ORDERS_ENABLED='0',PYTHONDONTWRITEBYTECODE='1',OPENBLAS_NUM_T
               PYTHONPATH='/home/appuser/.tradingagents/.research-tools/'+digest+':/home/appuser/app')
 if any('\n' in v or '\r' in v for v in values.values()):raise RuntimeError('invalid environment')
 args=['docker','run','-d','--name',name,'--label','research.source='+digest,
-      '--restart=on-failure:5','--cpus=0.5','--memory=1100m','--memory-swap=1400m',
+      '--restart=on-failure:5','--cpus='+cpu,'--memory='+memory,'--memory-swap='+memory_swap,
       '--pids-limit=64','--user','1000:1000','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=64m',
       '--cap-drop=ALL','--security-opt=no-new-privileges','--network=bridge',
       '--log-opt','max-size=5m','--log-opt','max-file=2',
       '--volumes-from',api+':rw','--mount','type=bind,src='+str(archive)+',dst=/home/appuser/.tradingagents/research-archives',
       '--env-file','/dev/stdin','--entrypoint','python',image,
-      '-m','research.cli','--base','/home/appuser/.tradingagents/research-archives/weekend-20261031',
+      '-m',module,'--base',base,
       '--engine-version',image+'/research:'+digest,'--watch']
+if long_daily:args+=['--parent-base','/home/appuser/.tradingagents/research-archives/weekend-20261031']
 # Protect each application database file even though SQLite needs writable sidecars.
 for key in ('KITE_DB_PATH','SCANNER_DB_PATH','DESK_DB_PATH'):
     destination=pathlib.Path(values[key])
@@ -78,7 +87,7 @@ for key in ('KITE_DB_PATH','SCANNER_DB_PATH','DESK_DB_PATH'):
 args[2:2]=['--mount','type=bind,src='+str(tools)+',dst=/home/appuser/.tradingagents/.research-tools/'+digest+',readonly']
 container=run(args,input=''.join(k+'='+v+'\n' for k,v in values.items())).strip()
 print(json.dumps({'container':container,'name':name,'source':digest,'image':image,
-                  'cpu_limit':0.5,'memory_mib':1100,'orders_enabled':False}))
+                  'cpu_limit':float(cpu),'memory_mib':int(memory[:-1]),'orders_enabled':False}))
 '''
 
 
@@ -86,8 +95,9 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('action',choices=['launch','status'])
     p.add_argument('--host',default='codeation-dev')
+    p.add_argument('--profile',choices=['weekend','long-daily'],default='weekend')
     args=p.parse_args()
-    request={'action':args.action}
+    request={'action':args.action,'profile':args.profile}
     if args.action=='launch':
         root=Path(__file__).resolve().parents[1]/'apps'/'research'
         buf=io.BytesIO()

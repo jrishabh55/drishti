@@ -29,3 +29,24 @@ The worker is limited to 0.5CPU, 1100MiB RAM, 1400MiB RAM plus swap, 64processes
 Kite login is not refreshed automatically. On expiry, revocation or changed credentials, the worker pauses and rechecks after normal manual connection renewal. Checkpoints survive process/API/host restarts, and completed data is verified on restart. Offline research can run after session expiry if its selected data has already arrived. A new login also gives the application's initial warmup 30 minutes of head start before batch downloads resume. The live-order environment flag stays disabled.
 
 A stopped completed worker need not be restarted. To resume an interrupted existing job, inspect its sanitized status and restart the same container; it reuses the immutable configuration and verified checkpoints. Failed chunks remain explicitly recorded rather than being silently treated as valid data. Investigate failures before resetting them.
+
+## Daily archive extension from 2000
+
+The separate `long-daily` profile requests daily history from 2000-01-01 through the original job's frozen end date. It leaves the two-year intraday worker and its immutable source untouched:
+
+```sh
+python3 deploy/weekend-research.py launch --profile long-daily
+python3 deploy/weekend-research.py status --profile long-daily
+```
+
+Container: `drishti-long-daily-history-20261031`; archive base: `/home/appuser/.tradingagents/research-archives/long-daily-20261031-v2`. Limits: 0.25CPU, 512MiB RAM, 768MiB RAM+swap. Each Kite request is spaced at least two seconds after the previous request completes, alongside the original worker's one request/second. Source data uses the same private owner and broker-account guard, source DB files stay read-only, and no app/API restart or order enablement is required.
+
+Each owner directory contains separate `kite` and `yahoo` archives, with checksummed source-stamped candles, manifests and retry/empty/failure counts. Kite daily requests span at most 1900 calendar days, comfortably under its published 2000-day request limit. Yahoo receives one bounded full-period daily request per symbol. The Yahoo universe includes the current 500 names; Kite uses the 497 matched at initial connection. Missing/pre-listing periods remain absent. Actual earliest/latest dates are recorded; the target start is not a guarantee of coverage.
+
+Yahoo uses explicit `auto_adjust=False`, `back_adjust=False`, `repair=False` and `actions=True`. Its per-chunk private metadata preserves adjusted close, dividends and stock splits with a digest checked on restart. Provider-supplied OHLC is preserved; these settings do not establish historical as-traded prices. No custom adjustment or silent price repair is applied.
+
+`source-comparison.json` is regenerated periodically and on completion. It reports actual date coverage, per-year candle counts for completed overlapping series, source-only dates, OHLC differences above 0.5% (minimum ₹0.01), volume differences above 5% (minimum 1 unit), and sample discrepancies. These are review thresholds, not proof that smaller differences are harmless. Incomplete/failed series remain explicit. **Automatic merging is disabled:** neither source's bars are inserted into the other source's series or fed to new backtests. Reconciled source selection is required before future long-horizon strategy tests. The existing eight intraday comparisons continue using their original Kite-only archive and date bounds.
+
+Live availability probes on 2026-10-31 IST returned RELIANCE daily candles from January 2000 on both sources. For 2008-01-01, Kite close was ₹339.40, Yahoo close ₹325.531006 and Yahoo adjusted close ₹284.750122. That demonstrates why identical exchange/symbol/date does not guarantee comparable price bases; it does not establish which adjustment methodology caused that particular difference. Yahoo's NIFTY index probe only began 2007-09-17, illustrating symbol-specific coverage limits.
+
+The first live import exposed an incomplete latest Yahoo daily candle with a missing close. The corrected importer preserves valid candles and records invalid ones in `rejected_rows` (date, reason, finite values or null) in the checksummed provider metadata. It never fills or repairs those bars. `source-comparison.json` counts rejected Yahoo rows once both full provider series are available. Date-bound violations and conflicting valid duplicates still reject a series. The initial attempt and its archive are preserved in a stopped `drishti-long-daily-history-20261031-rejected-import` container; the active importer uses the `-v2` base above. The original two-year worker was not stopped or changed.

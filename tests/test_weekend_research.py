@@ -261,7 +261,8 @@ def test_live_wal_reader_follows_updates_and_refuses_mutations(tmp_path):
         assert reader.execute('SELECT value FROM records').fetchone()[0]=='second'
 
 
-def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkeypatch):
+@pytest.mark.parametrize('profile',['weekend','long-daily'])
+def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkeypatch,profile):
     import base64,io,os,runpy,subprocess,sys,tarfile
     from pathlib import Path
     script=runpy.run_path(str(Path(__file__).resolve().parents[1]/'deploy/weekend-research.py'))
@@ -284,7 +285,7 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
         tf.addfile(member,io.BytesIO(b''))
     monkeypatch.setattr(subprocess,'run',fake_run)
     monkeypatch.setattr(os,'chown',lambda *args:None)
-    monkeypatch.setattr(sys,'stdin',io.StringIO(json.dumps({'action':'launch','tar':base64.b64encode(payload.getvalue()).decode()})))
+    monkeypatch.setattr(sys,'stdin',io.StringIO(json.dumps({'action':'launch','profile':profile,'tar':base64.b64encode(payload.getvalue()).decode()})))
     exec(compile(script['REMOTE'],'remote-launch-test','exec'),{})
     args,kwargs=calls[-1]
     assert 'private-test-secret' not in ' '.join(args)
@@ -294,3 +295,5 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
     mounts=[args[i+1] for i,v in enumerate(args[:-1]) if v=='--mount']
     assert sum('.sqlite' in m and m.endswith(',readonly') for m in mounts)==3
     assert '--read-only' in args and '--cap-drop=ALL' in args
+    assert ('research.long_daily' if profile=='long-daily' else 'research.cli') in args
+    assert ('--memory=512m' if profile=='long-daily' else '--memory=1100m') in args

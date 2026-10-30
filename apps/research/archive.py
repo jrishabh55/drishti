@@ -73,9 +73,20 @@ class Archive:
                 c.execute("INSERT INTO meta VALUES ('config',?)", (encoded,))
                 tasks = []
                 for sym in sorted(config['symbols']):
-                    ranges = [('1d', date.fromisoformat(config['daily_start']), date.fromisoformat(config['end']))]
+                    intervals = config.get('intervals', ['1d','5m'])
+                    if not intervals or set(intervals)-{'1d','5m'}:
+                        raise ArchiveError('invalid archive intervals')
+                    ranges = []
+                    if '1d' in intervals:
+                        at, end = date.fromisoformat(config['daily_start']), date.fromisoformat(config['end'])
+                        chunk_days = int(config.get('daily_chunk_days',1900))
+                        if not 1 <= chunk_days <= 10000:
+                            raise ArchiveError('invalid daily chunk bound')
+                        while at <= end:
+                            to = min(at+timedelta(days=chunk_days-1),end)
+                            ranges.append(('1d',at,to)); at = to+timedelta(days=1)
                     at, end = date.fromisoformat(config['start']), date.fromisoformat(config['end'])
-                    while at <= end:
+                    while '5m' in intervals and at <= end:
                         to = min(at+timedelta(days=89), end)
                         ranges.append(('5m', at, to))
                         at = to+timedelta(days=1)
@@ -148,6 +159,8 @@ class Archive:
         rows = validate_rows(rows, task['interval'], date.fromisoformat(task['start']), date.fromisoformat(task['end']))
         doc = dict(schema=1, owner_hash=hashlib.sha256(self.config['owner'].encode()).hexdigest(),
                    symbol=task['symbol'], interval=task['interval'], start=task['start'], end=task['end'], rows=rows)
+        if 'provider' in self.config:
+            doc['provider'] = self.config['provider']
         payload = gzip.compress(json.dumps(doc, separators=(',', ':'), allow_nan=False).encode(), mtime=0)
         path = self.chunk_path(task)
         temp = path.with_name(path.name+f'.tmp-{os.getpid()}')
@@ -192,6 +205,8 @@ class Archive:
                 doc = json.loads(gzip.decompress(data))
                 if doc['owner_hash'] != hashlib.sha256(owner.encode()).hexdigest() or doc['symbol'] != symbol or doc['interval'] != interval:
                     raise ArchiveError('archive integrity metadata failure')
+                if 'provider' in self.config and doc.get('provider') != self.config['provider']:
+                    raise ArchiveError('archive integrity provider failure')
                 all_rows.extend(validate_rows(doc['rows'], interval, date.fromisoformat(t['start']), date.fromisoformat(t['end'])))
             except (OSError, ValueError, KeyError, gzip.BadGzipFile) as exc:
                 raise ArchiveError('archive integrity failure') from exc
