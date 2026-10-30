@@ -21,3 +21,13 @@ Production live orders must remain disabled (`KITE_ORDERS_ENABLED=0`). QA does n
 Shared reads consume the owner’s Kite API quota; no separate per-recipient throttle is introduced for this internal deployment. The optional analysis paper-book snapshot uses Default only and explicitly says so in the UI. Named portfolios drive Today, sizing/tickets, ledger and performance.
 
 Do not roll back to a pre-schema-2 application against a database containing named-portfolio trades: old readers ignore portfolio_id and would combine the books. Prefer a forward fix. A rollback across this boundary requires a matching database backup (which excludes later writes) or a reviewed compatibility migration that preserves portfolio filtering. A consistent pre-release desk backup was saved in persistent data/backups/desk-before-portfolios-20261030T074011Z.sqlite with mode 0600.
+
+## Production verification
+
+Released app commit `4f9d71bae0b56c743a3d87d99c1e41dce698d408` through Dokploy deployment `EvCliWXg2E3i3n4AVkkcW` (done). The server checkout matched that commit and the deployed sharing module matched the local SHA-256 `461d645192b8e57cf9eac4628ad0805b14c4d08d50098301c659d6b5b23037cd`. Both API and web containers were healthy.
+
+Read-only production checks confirmed schema 2 and portfolio columns on trades/tickets. Existing paper/trade counts remained zero, with zero named portfolios, grants or source selections; no user data was created during QA. `KITE_ORDERS_ENABLED` remained `0`. Unauthenticated requests to both new settings APIs returned 401.
+
+Signed-in Chrome checks confirmed the Default selector opens, Settings shows the portfolio creation controls, Paper ledger and Performance name Default and display their expected empty states, and the sharing page shows account-ID copying, grant controls and incoming-source selection. The Guide displays the new sharing FAQs. Manifest, intro and walkthrough URLs all returned HTTP 200.
+
+The account had no saved Kite app or daily session. Actual paid Kite connectivity and an owner-to-recipient live feed were not exercised in production; those require the user's app keys/login and chosen recipient. Grant/revoke, quotes, live/history access and secret boundaries were verified using fake providers and isolated test stores. Both implementation/review workers were released; no worker resources remained reclaimable.

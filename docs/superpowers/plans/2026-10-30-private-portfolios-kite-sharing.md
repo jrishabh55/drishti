@@ -41,7 +41,7 @@ tests and guide/docs updates. Never redirect `auth.client_for` globally.
 
 - [x] Inspect combined diff and independent Claude review; resolve blocking findings.
 - [x] Run full pytest, frontend tests/typecheck/production Node build, catalog sync.
-- [ ] Merge/push reviewed changes, deploy via existing Dokploy workflow; verify
+- [x] Merge/push reviewed changes, deploy via existing Dokploy workflow; verify
   health, live-order gate 0, existing guide/media, new portfolio/sharing UI.
 - [x] Do not create real shares/portfolios or use paid Kite credentials during QA;
   demonstrate those mutations through isolated fake-provider tests.
