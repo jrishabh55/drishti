@@ -4,8 +4,14 @@ Open **Guide** in the top bar, the floating Guide button, or press **?** while
 you are not typing. The guide is available after sign-in and activation.
 
 **This screen** explains the page, common questions and prerequisites. Use
-**Take this lesson** for its tour, or watch the corresponding video chapter
-once the media bundle is published.
+**Take this lesson** for its tour, or watch the corresponding video chapter.
+
+The published films have English narration and captions: the
+[introduction](https://drishiti.codeation.io/guide-media/guide-20261030-v1/intro.mp4)
+(1:07) and the
+[full walkthrough](https://drishiti.codeation.io/guide-media/guide-20261030-v1/walkthrough.mp4)
+(6:13). The player includes 18 chapter links. Screens use an illustrative demo
+account; they do not show the signed-in account or execute any action.
 
 **Tours** contains the first paper-trade path and the feature library. Start
 with paper capital and limits, research a company, add it to the watchlist,
