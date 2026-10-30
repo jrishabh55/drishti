@@ -33,10 +33,10 @@ export function ProviderKeySetup({ provider }: { provider: string }) {
   }
   return <div className="space-y-2 rounded-lg border border-[var(--line-1)] p-3 text-sm">
     <p>{state?.configured ? `Connected${state.last4 ? ` · ending ${state.last4}` : ''}` : admin ? 'Administrator connection setup required.' : 'Use your own provider API key.'}</p>
-    {!admin && <div className="flex flex-wrap gap-2">
+    {!admin && <div className="flex flex-wrap items-center gap-2">
       <Input type="password" autoComplete="off" aria-label={`${provider} API key`} placeholder="API key" value={key} onChange={e => setKey(e.target.value)} className="min-w-40 flex-1" />
-      <Button size="sm" disabled={busy || key.trim().length < 8 || state?.encryption_available === false} onClick={save}>Save key</Button>
-      {state?.configured && <Button size="sm" variant="outline" disabled={busy} onClick={remove}>Remove</Button>}
+      <Button disabled={busy || key.trim().length < 8 || state?.encryption_available === false} onClick={save}>Save key</Button>
+      {state?.configured && <Button variant="outline" disabled={busy} onClick={remove}>Remove</Button>}
     </div>}
     {state?.encryption_available === false && <p className="text-[var(--run)]">The administrator must configure encrypted credential storage first.</p>}
     {!admin && <p className="text-xs text-[var(--text-3)]">Stored encrypted. The credential is checked by the provider when you run an analysis; usage is billed by that provider.</p>}

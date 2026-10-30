@@ -91,38 +91,38 @@ export function BatchesPage() {
 
         <section className="es-card space-y-4 p-4">
           <div className="grid gap-3 md:grid-cols-4">
-            <label className="space-y-1 text-xs md:col-span-2">Tickers (comma separated, up to 6)
+            <label className="grid min-w-0 content-start gap-1.5 text-xs md:col-span-2">Tickers (comma separated, up to 6)
               <Input value={tickers} onChange={(e) => setTickers(e.target.value.toUpperCase())} />
             </label>
-            <label className="space-y-1 text-xs">From
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">From
               <Input type="date" value={start} max={iso(new Date())} onChange={(e) => setStart(e.target.value)} />
             </label>
-            <label className="space-y-1 text-xs">To
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">To
               <Input type="date" value={end} max={iso(new Date())} onChange={(e) => setEnd(e.target.value)} />
             </label>
-            <label className="space-y-1 text-xs">Every N days
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">Every N days
               <Input type="number" min={1} max={90} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value) || 1))} />
             </label>
-            <label className="space-y-1 text-xs">Provider
-              <select className="fld-input w-full" value={provider} onChange={(e) => {
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">Provider
+              <select className="fld-input h-8 min-w-0 w-full py-1" value={provider} onChange={(e) => {
                 const ms = config?.models_by_provider[e.target.value] ?? []
                 setProvider(e.target.value); setQuick(ms[0]?.id ?? ''); setDeep(ms[1]?.id ?? ms[0]?.id ?? '')
               }}>
                 {config?.providers.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
               </select>
             </label>
-            <label className="space-y-1 text-xs">Quick model
-              <select className="fld-input w-full" value={quick} onChange={(e) => setQuick(e.target.value)}>
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">Quick model
+              <select className="fld-input h-8 min-w-0 w-full py-1" value={quick} onChange={(e) => setQuick(e.target.value)}>
                 {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </label>
-            <label className="space-y-1 text-xs">Deep model
-              <select className="fld-input w-full" value={deep} onChange={(e) => setDeep(e.target.value)}>
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">Deep model
+              <select className="fld-input h-8 min-w-0 w-full py-1" value={deep} onChange={(e) => setDeep(e.target.value)}>
                 {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </label>
-            <label className="space-y-1 text-xs">Depth
-              <select className="fld-input w-full" value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
+            <label className="grid min-w-0 content-start gap-1.5 text-xs">Depth
+              <select className="fld-input h-8 min-w-0 w-full py-1" value={depth} onChange={(e) => setDepth(Number(e.target.value))}>
                 {(config?.research_depths ?? []).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
             </label>

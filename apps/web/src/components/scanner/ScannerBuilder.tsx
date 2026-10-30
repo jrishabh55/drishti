@@ -91,12 +91,12 @@ export function ScannerBuilder({ initial }: { initial: ScannerSummary | null }) 
   return (
     <div className="space-y-6">
       {/* NL box */}
-      <div className="space-y-2 rounded-md border p-4">
+      <div className="grid gap-2 rounded-md border p-4">
         <Label htmlFor="nl">Describe your scan</Label>
-        <div className="flex gap-2">
+        <div className="flex flex-col items-start gap-2 sm:flex-row">
           <Textarea id="nl" value={nlPrompt} onChange={(e) => setNlPrompt(e.target.value)}
             placeholder="e.g. 20 EMA crosses above 50 EMA, RSI above 60, volume twice the 20-day average"
-            className="min-h-16" />
+            className="min-h-16 min-w-0 flex-1" />
           <Button onClick={generate} disabled={nlBusy || !nlPrompt.trim()}>
             {nlBusy ? 'Generating…' : 'Generate'}
           </Button>
@@ -105,10 +105,10 @@ export function ScannerBuilder({ initial }: { initial: ScannerSummary | null }) 
           Generated: {explanation} Review the conditions below before running.</p>}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div><Label htmlFor="name">Name</Label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-1.5"><Label htmlFor="name">Name</Label>
           <Input id="name" value={name} onChange={(e) => setName(e.target.value)} /></div>
-        <div><Label htmlFor="desc">Description</Label>
+        <div className="grid min-w-0 gap-1.5"><Label htmlFor="desc">Description</Label>
           <Input id="desc" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
       </div>
 
@@ -139,7 +139,7 @@ export function ScannerBuilder({ initial }: { initial: ScannerSummary | null }) 
         </TabsContent>
       </Tabs>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" onClick={runPreview} disabled={busy}>
           {busy ? 'Scanning…' : 'Preview results'}
         </Button>

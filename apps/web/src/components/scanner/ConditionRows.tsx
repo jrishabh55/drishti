@@ -106,7 +106,7 @@ export function ConditionRows({ state, onChange }: {
             )}
           </div>
 
-          <div className="hidden items-center gap-1.5 px-1 sm:flex">
+          <div className="hidden items-center gap-1.5 px-2 xl:grid xl:grid-cols-[64px_minmax(0,1fr)_108px_minmax(0,1fr)_64px_28px]">
             <span className="es-team-label w-16 shrink-0">Timeframe</span>
             <span className="es-team-label flex-1">Left operand</span>
             <span className="es-team-label w-[108px] shrink-0">Operator</span>
@@ -116,7 +116,7 @@ export function ConditionRows({ state, onChange }: {
           </div>
 
           {g.rows.map((r, ri) => (
-            <div key={ri} className="flex flex-wrap items-center gap-1.5 rounded bg-card/70 p-2">
+            <div key={ri} className="flex flex-wrap items-center gap-1.5 rounded bg-card/70 p-2 xl:grid xl:grid-cols-[64px_minmax(0,1fr)_108px_minmax(0,1fr)_64px_28px]">
               <Select value={r.timeframe} onValueChange={(timeframe) =>
                 updateRow(gi, ri, { ...r, timeframe: timeframe as Row['timeframe'] })}>
                 <SelectTrigger className="w-16 shrink-0 text-xs"><SelectValue /></SelectTrigger>
@@ -135,7 +135,7 @@ export function ConditionRows({ state, onChange }: {
                 placeholder="bars" title="Condition must hold on each of the last N bars"
                 value={r.forN ?? ''} onChange={(e) => updateRow(gi, ri, {
                   ...r, forN: e.target.value ? Number(e.target.value) : undefined })} />
-              <Button size="icon-sm" variant="ghost" className="ml-auto shrink-0 text-muted-foreground hover:text-destructive"
+              <Button size="icon-sm" variant="ghost" className="ml-auto h-8 shrink-0 text-muted-foreground hover:text-destructive"
                 aria-label="Remove condition" onClick={() => {
                   const next = structuredClone(state)
                   next.groups[gi].rows.splice(ri, 1)

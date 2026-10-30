@@ -183,13 +183,13 @@ export function FilterPanel({ filter, onChange, onClear, onSaved, onResult, prev
   return (
     <div className="space-y-2">
       {filter.collapsed ? (
-        <div className="flex min-h-10 items-center gap-3 rounded-lg border border-[var(--line-1)] bg-card px-3 py-1.5 shadow-[var(--shadow-1)]">
-          <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-3 rounded-lg border border-[var(--line-1)] bg-card px-3 py-1.5 shadow-[var(--shadow-1)]">
+          <div className="flex min-w-0 max-w-full items-center gap-2">
             <span className="size-2 shrink-0 rounded-full bg-primary" />
-            <span className="text-sm font-semibold">{title}</span>
+            <span className="break-words text-sm font-semibold">{title}</span>
           </div>
           <div className="h-4 w-px shrink-0 bg-border" />
-          <div className="flex flex-1 items-center gap-1.5 overflow-x-auto">
+          <div className="flex min-w-0 basis-full items-center gap-1.5 overflow-x-auto sm:basis-0 sm:flex-1">
             {chips.map((c, i) => (
               <span key={i} className="es-chip">{c}</span>
             ))}
@@ -232,7 +232,7 @@ export function FilterPanel({ filter, onChange, onClear, onSaved, onResult, prev
             </div>
           </div>
 
-          <div className="flex items-center gap-2 px-1">
+          <div className="flex flex-wrap items-center gap-2 px-1">
             <Switch id="liquid-only" size="sm" checked={filter.liquidOnly} disabled={busy}
               onCheckedChange={(v) => onChange({ ...filter, liquidOnly: v })} />
             <Label htmlFor="liquid-only" className="text-xs font-medium">Liquid only</Label>
@@ -322,11 +322,11 @@ function SaveDialog({ open, onOpenChange, filter, getDefinition, onSaved }: {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div>
+          <div className="grid gap-1.5">
             <Label htmlFor="save-name">Name</Label>
             <Input id="save-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </div>
-          <div>
+          <div className="grid gap-1.5">
             <Label htmlFor="save-desc">Description</Label>
             <Textarea id="save-desc" value={description}
               onChange={(e) => setDescription(e.target.value)} className="min-h-16" />

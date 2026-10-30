@@ -194,7 +194,7 @@ function ScannersPage() {
                   <ChevronDown className="size-3.5 opacity-60" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-80 p-0" align="start">
+              <PopoverContent className="w-80 max-w-[calc(100vw-2rem)] p-0" align="start">
                 <Command shouldFilter={false}>
                   <CommandInput placeholder="Search scanners…"
                     value={pickerQuery} onValueChange={setPickerQuery} />
@@ -228,16 +228,16 @@ function ScannersPage() {
 
           <div className="flex flex-wrap items-center gap-2 rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] p-2 shadow-[var(--shadow-1)]">
             <Input
-              className="min-w-64 flex-1"
+              className="min-w-0 basis-full flex-1 sm:basis-64"
               placeholder="Describe a filter to generate, e.g. &quot;RSI above 60 and price above 200 SMA&quot;…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') generateFromQuery() }}
             />
-            <Button size="sm" onClick={generateFromQuery} disabled={!trimmedQuery || nlBusy}>
+            <Button onClick={generateFromQuery} disabled={!trimmedQuery || nlBusy}>
               {nlBusy ? 'Generating…' : 'Generate'}
             </Button>
-            <Button size="sm" variant="outline" onClick={startBlank}>
+            <Button variant="outline" onClick={startBlank}>
               New blank filter
             </Button>
           </div>
@@ -293,7 +293,7 @@ function ScannersPage() {
         )}
         {result && (
           <section ref={resultsRef} className="scroll-mt-4 space-y-3">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="space-y-0.5">
                 <div className="es-team-label">Results</div>
                 <h2 className="text-lg font-semibold">
