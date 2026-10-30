@@ -169,11 +169,12 @@ def test_a_run_without_a_decision_records_nothing(job_store, tmp_path, monkeypat
 # ---------------------------------------------------------------- paper book
 
 def _paper(store, user, symbol, status, qty, entry, pnl_net=None, trade_date="2026-01-05",
-           exit_time="10:30", reason="target", ticket_id=None, r_gross=None, charges=20.0):
+           exit_time="10:30", reason="target", ticket_id=None, r_gross=None, charges=20.0,
+           pf="default"):
     doc = {"ticket_id": ticket_id, "symbol": symbol, "side": "buy", "qty": qty, "order_type": "LIMIT",
            "limit": entry, "stop": entry * 0.99, "target": entry * 1.02, "trade_date": trade_date,
            "status": status, "events": [], "entry_fill": {"time": "09:35", "price": entry} if status != "pending" else None,
-           "exit_fill": None}
+           "exit_fill": None, "portfolio_id": pf}
     if status == "closed":
         doc.update(exit_fill={"time": exit_time, "price": entry, "reason": reason}, pnl_net=pnl_net,
                    pnl_gross=pnl_net + charges, charges=charges, r_net=round(pnl_net / 100, 2),
@@ -194,6 +195,25 @@ def test_snapshot_is_the_users_own_book(desk_store):
     b = portfolio.snapshot("user_b", desk_store)
     assert [p["ticker"] for p in b["positions"]] == ["INFY.NS"]
     assert portfolio.snapshot("user_c", desk_store) == {"cash": 100000.0, "currency": "INR", "positions": []}
+
+
+def test_snapshot_is_the_default_book_only_with_partial_exits_released(desk_store):
+    from apps.api.desk import paper
+    from apps.api.desk.profile import load_profile
+
+    swing = desk_store.create_portfolio("user_a", {"name": "Swing", "capital": 50_000})
+    _paper(desk_store, "user_a", "INFY", "open", 100, 1600.0, pf=swing["id"])
+    _paper(desk_store, "user_a", "TCS", "closed", 5, 4000.0, pnl_net=-999.0, pf=swing["id"])
+    t = _paper(desk_store, "user_a", "SBIN", "open", 10, 100.0)
+    t = {**t, "open_qty": 6, "product": "MIS",
+         "exit_legs": [{"time": "10:00", "price": 110.0, "qty": 4, "reason": "scale_out"}]}
+    desk_store.update_paper(t["id"], "user_a", t)
+    leg = paper.accounting(t, load_profile("user_a", desk_store))["realized"]
+
+    a = portfolio.snapshot("user_a", desk_store)
+    # 100k + the booked leg - 600 still committed to the 6 SBIN left; Swing's book is not here.
+    assert a == {"cash": round(100_000 + leg - 600, 2), "currency": "INR",
+                 "positions": [{"ticker": "SBIN.NS", "quantity": 6.0, "average_price": 100.0}]}
 
 
 def test_client_sent_snapshot_is_never_trusted(desk_store):

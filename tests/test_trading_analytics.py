@@ -294,3 +294,71 @@ def test_version_filter_matches_string_stamped_versions(env):
     desk, *_ = env
     paper(desk, "user_a", "TCS", attribution={**STRAT, "strategy_version": "3"})
     assert [r["symbol"] for r in analytics.journal_rows("user_a", strategy_id="s1", strategy_version=3)] == ["TCS"]
+
+
+# ---- accounting integration: scale-out legs through desk.paper.accounting
+
+def scaled(desk, user, symbol="SBIN", pf="default"):
+    """10 bought at 100; 4 scaled out at 110 at 10:00, 6 still open."""
+    return desk.create_paper(user, {
+        "symbol": symbol, "side": "buy", "status": "open", "trade_date": "2026-10-30", "qty": 10,
+        "open_qty": 6, "stop": 99.0, "initial_stop": 99.0, "target": 120.0, "portfolio_id": pf,
+        "product": "MIS", "interval": "5m", "events": [],
+        "entry_fill": {"time": "09:30", "price": 100.0},
+        "exit_legs": [{"time": "10:00", "price": 110.0, "qty": 4, "reason": "scale_out"}]})
+
+
+def test_open_partial_marks_remaining_qty_and_books_the_leg(env):
+    from apps.api.desk import paper as paper_mod
+    from apps.api.desk.profile import load_profile
+
+    desk, _, client, _, marks, _ = env
+    t = scaled(desk, "user_a")
+    paper(desk, "user_a", "TCS", pnl=100.0, date="2026-10-29")
+    marks["SBIN"] = {"price": 105.0, "source": "live:kite", "as_of": NOW.isoformat()}
+    leg = paper_mod.accounting(t, load_profile("user_a", desk))["realized"]
+    assert 0 < leg < 40.0                                          # 40 gross less leg charges
+
+    out = client.get("/api/evaluation/trading-performance").json()
+    row = next(r for r in out["trades"] if r["symbol"] == "SBIN")
+    assert row["open_qty"] == 6 and row["open_pnl"] == 30.0        # (105-100) x 6, not x 10
+    assert row["partial_pnl_net"] == leg
+    r = out["realized"]
+    assert r["pnl_net"] == round(100.0 + leg, 2) and r["partial_pnl_net"] == leg
+    assert r["closed_pnl_net"] == 100.0 and r["trades"] == 1        # counts stay closed-only
+    assert out["stats"]["trades"] == 1 and out["stats"]["win_rate"] == 1.0
+    assert [(p["kind"], p["pnl"]) for p in out["curve"][1:]] == [
+        ("closed", 100.0), ("partial", round(100.0 + leg, 2))]
+    assert out["by_portfolio"][0]["realized"] == round(100.0 + leg, 2)
+    csv_rows = {c["symbol"]: c for c in csv.DictReader(io.StringIO(
+        client.get("/api/evaluation/trade-journal.csv").text))}
+    assert csv_rows["SBIN"]["open_qty"] == "6" and float(csv_rows["SBIN"]["partial_pnl_net"]) == leg
+
+
+def test_partial_then_full_close_is_counted_once(env):
+    from apps.api.desk import paper as paper_mod
+    from apps.api.desk.profile import load_profile
+
+    desk, _, client, *_ = env
+    t = scaled(desk, "user_a")
+    closed = paper_mod.close_now(t, 105.0, NOW, load_profile("user_a", desk))
+    desk.update_paper(t["id"], "user_a", closed)
+    assert closed["pnl_gross"] == 70.0                              # 4 x 10 + 6 x 5
+
+    out = client.get("/api/evaluation/trading-performance").json()
+    row = out["trades"][0]
+    assert row["status"] == "closed" and row["open_qty"] == 0 and row["partial_pnl_net"] == 0
+    assert out["realized"]["pnl_net"] == closed["pnl_net"]          # not leg + pnl_net
+    assert out["realized"]["partial_pnl_net"] == 0 and out["realized"]["trades"] == 1
+    assert out["realized"]["charges"] == closed["charges"]
+    assert [p["pnl"] for p in out["curve"]] == [0, closed["pnl_net"]]
+    assert out["open"]["positions"] == 0
+
+
+def test_paper_performance_endpoint_stays_closed_only_with_open_partials(env):
+    desk, _, client, *_ = env
+    scaled(desk, "user_a")
+    paper(desk, "user_a", "TCS", pnl=100.0)
+    out = client.get("/api/evaluation/paper-performance").json()
+    assert out["equity"] == 100_100.0 and out["stats"]["trades"] == 1
+    assert len(out["curve"]) == 2

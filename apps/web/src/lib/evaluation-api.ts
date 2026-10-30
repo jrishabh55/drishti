@@ -200,10 +200,18 @@ export interface TradingPerformance {
   generated_at: string
   /** Null when no single account applies (e.g. all paper portfolios). */
   capital: number | null
-  realized: { pnl_net: number; trades: number; charges: number; return_pct: number | null }
+  /** pnl_net = closed trades + open trades' booked scale-out legs; trades counts closed only. */
+  realized: {
+    pnl_net: number
+    trades: number
+    closed_pnl_net?: number
+    partial_pnl_net?: number
+    charges: number
+    return_pct: number | null
+  }
   open: { positions: number; marked: number; unmarked: number; pnl: number; basis: string }
   stats: BookStats
-  curve: { at: string | null; pnl: number; drawdown: number }[]
+  curve: { at: string | null; pnl: number; drawdown: number; kind?: 'closed' | 'partial' | null }[]
   by_strategy: (BookGroup & Attribution & { label: string })[]
   by_portfolio: (BookGroup & { id: string; name: string; capital: number })[]
   benchmark: {

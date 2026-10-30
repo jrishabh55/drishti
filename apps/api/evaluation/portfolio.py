@@ -14,25 +14,25 @@ from apps.api.schemas import RunRequest
 
 
 def paper_portfolio(user_id: str, store=None) -> PortfolioContext:
-    """This user's paper cash and open positions (average fill = cost basis)."""
+    """This user's Default paper book: cash and open positions (remaining
+    quantity at average fill = cost basis). Named portfolios are separate books."""
+    from apps.api.desk import paper
     from apps.api.desk.profile import load_profile
-    from apps.api.desk.store import get_desk_store
+    from apps.api.desk.store import DEFAULT_PORTFOLIO, get_desk_store
 
     store = store or get_desk_store()
     profile = load_profile(user_id, store)
-    trades = store.list_paper(user_id, limit=10_000)
+    trades = store.list_paper(user_id, limit=10_000, portfolio_id=DEFAULT_PORTFOLIO)
     realized, committed = 0.0, 0.0
     held: Dict[str, list] = {}  # symbol -> [qty, cost]
     for t in trades:
-        if t["status"] == "closed":
-            realized += t.get("pnl_net") or 0.0
-        elif t["status"] in ("open", "pending"):
-            px = (t.get("entry_fill") or {}).get("price") or t.get("limit") or t.get("planned_entry") or 0
-            committed += px * t["qty"]
-            if t["status"] == "open":
-                q = held.setdefault(t["symbol"], [0, 0.0])
-                q[0] += t["qty"]
-                q[1] += px * t["qty"]
+        acc = paper.accounting(t, profile)
+        realized += acc["realized"]
+        committed += acc["committed"]
+        if acc["open_qty"]:
+            q = held.setdefault(t["symbol"], [0, 0.0])
+            q[0] += acc["open_qty"]
+            q[1] += acc["committed"]
     positions = [
         # Desk symbols are bare NSE codes; the analysis speaks Yahoo's .NS.
         Position(ticker=f"{sym}.NS", quantity=qty, average_price=round(cost / qty, 4) if qty else None)

@@ -32,8 +32,8 @@ FRESH_MINUTES = {"live": 10, "delayed": 30}
 LIVE_OPEN = ("entry_sent", "protected", "exit_sent", "needs_attention")
 CSV_FIELDS = ("mode", "trade_id", "trade_date", "symbol", "portfolio_id", "portfolio_name",
               "attribution", "strategy_id", "strategy_name", "strategy_version", "status", "qty",
-              "entry_price", "exit_price", "exit_time", "exit_reason", "pnl_gross", "charges",
-              "charges_basis", "pnl_net", "r_net", "mark_price", "mark_source", "mark_as_of",
+              "open_qty", "entry_price", "exit_price", "exit_time", "exit_reason", "pnl_gross", "charges",
+              "charges_basis", "pnl_net", "partial_pnl_net", "partial_charges", "r_net", "mark_price", "mark_source", "mark_as_of",
               "mark_status", "open_pnl", "note", "tags")
 _ATTR = ("strategy_id", "strategy_name", "strategy_version")
 
@@ -100,13 +100,21 @@ def _mark(user_id: str, symbol: str, qty: float, entry: Optional[float], now: da
     return mark, pnl
 
 
-def _paper_row(t: Dict[str, Any]) -> Dict[str, Any]:
+def _paper_row(t: Dict[str, Any], profile) -> Dict[str, Any]:
+    from apps.api.desk import paper
+
     entry, ex = t.get("entry_fill") or {}, t.get("exit_fill") or {}
-    open_qty = t["qty"] if t["status"] == "open" else 0
+    acc = paper.accounting(t, profile)
+    is_open = t["status"] == "open"
+    # An open trade's booked scale-out legs; a closed trade's are inside pnl_net.
     return {"trade_id": t["id"], "portfolio_id": t.get("portfolio_id") or "default",
-            "status": t["status"], "qty": t.get("qty"), "open_qty": open_qty,
+            "status": t["status"], "qty": t.get("qty"), "open_qty": acc["open_qty"] if is_open else 0,
             "entry_price": entry.get("price"), "exit_price": ex.get("price"),
-            "exit_time": ex.get("time"), "exit_reason": ex.get("reason")}
+            "exit_time": ex.get("time"), "exit_reason": ex.get("reason"),
+            "partial_pnl_net": acc["realized"] if is_open else 0.0,
+            "partial_charges": acc["charges"] if is_open else 0.0,
+            "partial_time": (max((x["time"] for x in t.get("exit_legs") or []), default=None)
+                             if is_open else None)}
 
 
 def _live_row(t: Dict[str, Any]) -> Dict[str, Any]:
@@ -116,7 +124,8 @@ def _live_row(t: Dict[str, Any]) -> Dict[str, Any]:
             "qty": t.get("filled_qty") or t.get("qty"), "open_qty": open_qty,
             "entry_price": t.get("entry_avg"), "exit_price": t.get("exit_avg") or ex.get("price"),
             # Live trades record the reason at the top level; exit_fill is {price, time}.
-            "exit_time": ex.get("time"), "exit_reason": t.get("exit_reason") or ex.get("reason")}
+            "exit_time": ex.get("time"), "exit_reason": t.get("exit_reason") or ex.get("reason"),
+            "partial_pnl_net": 0.0, "partial_charges": 0.0, "partial_time": None}
 
 
 def _version(v: Any) -> Optional[int]:
@@ -144,9 +153,13 @@ def journal_rows(user_id: str, *, mode: str = "paper", portfolio_id: str = "defa
     if portfolio_id != ALL and portfolio_id not in names:
         raise NotFound("portfolio not found")
     if mode == "paper":
+        from apps.api.desk.profile import load_profile
+
         docs = store.list_paper(user_id, limit=10_000,
                                 portfolio_id=None if portfolio_id == ALL else portfolio_id)
-        shape = _paper_row
+        # Charges use the shared broker plan; per-portfolio profiles differ only in capital.
+        profile = load_profile(user_id, store)
+        shape = lambda t: _paper_row(t, profile)  # noqa: E731
     else:
         from apps.api.kite.store import get_kite_store
 
@@ -172,7 +185,7 @@ def journal_rows(user_id: str, *, mode: str = "paper", portfolio_id: str = "defa
                "charges_basis": "estimated", "pnl_net": t.get("pnl_net"), "r_net": t.get("r_net"),
                "mark": None, "open_pnl": None, "annotation": notes.get(t["id"])}
         row["portfolio_name"] = names.get(row["portfolio_id"], row["portfolio_id"])
-        open_qty = row.pop("open_qty")
+        open_qty = row["open_qty"]
         if open_qty:
             row["mark"], row["open_pnl"] = _mark(user_id, t["symbol"], open_qty,
                                                  row["entry_price"], now)
@@ -184,6 +197,17 @@ def journal_rows(user_id: str, *, mode: str = "paper", portfolio_id: str = "defa
 
 def _closed(rows):
     return [r for r in rows if r["status"] == "closed" and r["pnl_net"] is not None]
+
+
+def _booked(rows) -> Dict[str, Any]:
+    """Realized money: closed trades' net plus open trades' booked scale-out
+    legs (never both for one trade — see _paper_row). Trade counts stay closed-only."""
+    closed = _closed(rows)
+    partial = round(sum(r["partial_pnl_net"] for r in rows), 2)
+    return {"closed": round(sum(r["pnl_net"] for r in closed), 2), "partial": partial,
+            "pnl_net": round(sum(r["pnl_net"] for r in closed) + partial, 2),
+            "charges": round(sum(r["charges"] or 0 for r in closed)
+                             + sum(r["partial_charges"] for r in rows), 2)}
 
 
 def _stats(rows) -> Dict[str, Any]:
@@ -204,12 +228,18 @@ def _stats(rows) -> Dict[str, Any]:
 
 
 def _curve(rows) -> List[Dict[str, Any]]:
-    pnl, peak, out = 0.0, 0.0, [{"at": None, "pnl": 0, "drawdown": 0}]
-    for r in _closed(rows):
-        pnl = round(pnl + r["pnl_net"], 2)
+    """Realized P&L over time: each closed trade at its exit, and each open
+    trade's booked scale-out legs as one point at its latest leg."""
+    # ponytail: an open trade's legs are one point; per-leg points need per-leg costs.
+    events = [(f"{r['trade_date']} {r['exit_time'] or ''}".strip(), r["pnl_net"], "closed")
+              for r in _closed(rows)]
+    events += [(f"{r['trade_date']} {r['partial_time'] or ''}".strip(), r["partial_pnl_net"],
+                "partial") for r in rows if r["partial_time"]]
+    pnl, peak, out = 0.0, 0.0, [{"at": None, "pnl": 0, "drawdown": 0, "kind": None}]
+    for at, v, kind in sorted(events, key=lambda e: e[0]):
+        pnl = round(pnl + v, 2)
         peak = max(peak, pnl)
-        out.append({"at": f"{r['trade_date']} {r['exit_time'] or ''}".strip(), "pnl": pnl,
-                    "drawdown": round(peak - pnl, 2)})
+        out.append({"at": at, "pnl": pnl, "drawdown": round(peak - pnl, 2), "kind": kind})
     return out
 
 
@@ -223,7 +253,7 @@ def _open(rows) -> Dict[str, Any]:
 def _group(rows, extra: Dict[str, Any]) -> Dict[str, Any]:
     o = _open(rows)
     return {**extra, "trades": len(rows), "closed": len(_closed(rows)),
-            "realized": round(sum(r["pnl_net"] for r in _closed(rows)), 2),
+            "realized": _booked(rows)["pnl_net"],
             "open_pnl": o["pnl"], "open_positions": o["positions"],
             "unmarked": o["unmarked"], "stats": _stats(rows)}
 
@@ -271,7 +301,8 @@ def trading_performance(user_id: str, *, mode: str = "paper", portfolio_id: str 
     capital = (load_profile(user_id, store).capital if mode == "live" else
                next((p["capital"] for p in pfs if p["id"] == portfolio_id), None))
     closed = _closed(rows)
-    realized = round(sum(r["pnl_net"] for r in closed), 2)
+    booked = _booked(rows)
+    realized = booked["pnl_net"]
     groups: Dict[tuple, list] = {}
     for r in rows:
         groups.setdefault((r["strategy_id"], r["strategy_version"]), []).append(r)
@@ -283,7 +314,8 @@ def trading_performance(user_id: str, *, mode: str = "paper", portfolio_id: str 
                                        "strategy_version": strategy_version},
            "generated_at": _now().isoformat(), "capital": capital,
            "realized": {"pnl_net": realized, "trades": len(closed),
-                        "charges": round(sum(r["charges"] or 0 for r in closed), 2),
+                        "closed_pnl_net": booked["closed"], "partial_pnl_net": booked["partial"],
+                        "charges": booked["charges"],
                         "return_pct": round(realized / capital * 100, 3) if capital else None},
            "open": _open(rows), "stats": _stats(rows), "curve": _curve(rows),
            "by_strategy": by_strategy, "by_portfolio": [], "benchmark": _benchmark(rows, capital),

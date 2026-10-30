@@ -68,7 +68,7 @@ function PerformancePage() {
             {perf.curve.length > 1 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="es-card p-3">
-                  <div className="text-sm font-medium">Equity (net of charges)</div>
+                  <div className="text-sm font-medium">Equity from closed trades (net of charges)</div>
                   <Spark values={perf.curve.map((p) => p.equity)} color="var(--accent)" label="Equity curve" />
                 </div>
                 <div className="es-card p-3">

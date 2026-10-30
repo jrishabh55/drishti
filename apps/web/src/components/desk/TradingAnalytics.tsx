@@ -168,7 +168,7 @@ export function TradingAnalytics() {
       {data && (
         <>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            <Tile label={`Realized (${data.realized.trades} closed)`} value={inr(data.realized.pnl_net)} color={tone(data.realized.pnl_net)}
+            <Tile label={`Realized (${data.realized.trades} closed${data.realized.partial_pnl_net ? ' + partial exits' : ''})`} value={inr(data.realized.pnl_net)} color={tone(data.realized.pnl_net)}
               sub={data.realized.return_pct != null ? `${signedPct(data.realized.return_pct)} of ${inr(data.capital, true)}` : 'no single account to divide by'} />
             <Tile label="Open P&L (marked)" value={data.open.positions ? inr(data.open.pnl) : '—'} color={tone(data.open.positions ? data.open.pnl : null)}
               sub={data.open.positions ? `${data.open.marked}/${data.open.positions} fresh marks · ${data.open.basis}` : 'no open positions'} />
