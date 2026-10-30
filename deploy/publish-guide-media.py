@@ -36,6 +36,7 @@ def publish(source: Path, destination: Path, *, dry_run: bool = False) -> dict:
         name, expected = entry.get('name', ''), entry.get('sha256', '')
         if (not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]{0,150}', name)
                 or '..' in name or name in names or name == 'manifest.json'
+                or Path(name).suffix not in {'.mp4', '.vtt', '.jpg', '.png', '.json'}
                 or not re.fullmatch(r'[a-f0-9]{64}', expected)):
             raise ValueError('Invalid or duplicate asset name/hash')
         names.add(name)
@@ -49,7 +50,7 @@ def publish(source: Path, destination: Path, *, dry_run: bool = False) -> dict:
             path = clip.get(field, '')
             if not path.startswith(prefix) or path[len(prefix):] not in names:
                 raise ValueError('Manifest references an unverified asset')
-        if not clip['src'].endswith('.mp4') or clip['src'][len(prefix):].replace('.mp4', '.vtt') not in names:
+        if not clip['src'].endswith('.mp4') or clip['src'][len(prefix):].replace('.mp4', '.vtt') not in names or Path(clip['poster']).suffix not in {'.jpg', '.png'}:
             raise ValueError('Each video needs verified MP4 and VTT files')
         if not isinstance(clip.get('duration'), (int, float)) or not 0 < clip['duration'] < 3600:
             raise ValueError('Invalid video duration')
@@ -60,7 +61,10 @@ def publish(source: Path, destination: Path, *, dry_run: bool = False) -> dict:
     ids = set()
     for chapter in chapters:
         start = chapter.get('start')
-        if not isinstance(start, (int, float)) or not previous <= start < manifest['walkthrough']['duration'] or chapter.get('id') in ids:
+        if (not isinstance(start, (int, float)) or not 0 <= start < manifest['walkthrough']['duration'] or start < previous
+                or not isinstance(chapter.get('id'), str) or not chapter['id'].strip()
+                or not isinstance(chapter.get('title'), str) or not chapter['title'].strip()
+                or chapter['id'] in ids):
             raise ValueError('Invalid chapter order or ID')
         ids.add(chapter.get('id')); previous = start
     target = destination / version

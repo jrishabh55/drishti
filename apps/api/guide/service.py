@@ -228,6 +228,8 @@ def ask(user_id: str, question: str, route: str, provider: str, model: str) -> d
     pattern = normalize_route(route)
     excerpts = retrieve(question, pattern)
     try:
+        if not excerpts:
+            return help_answer([], 'No matching guide source was found; your model provider was not called.')
         llm = _build_llm(provider, model, _personal_key(user_id, provider) or '')
         reply = llm.invoke(_messages(question, pattern, excerpts))
     except Exception as exc:  # provider text may echo credentials: log the type only

@@ -24,6 +24,7 @@ export function GuideAsk() {
   const request = useRef<AbortController | null>(null)
   const generation = useRef(0)
   const selected = providers.find(p => p.id === provider)
+  function cancelAnswer() { generation.current++; request.current?.abort(); setBusy(false); setAnswer(null) }
   useEffect(() => {
     generation.current++; request.current?.abort(); setAnswer(null); setResults(null); setError(''); setBusy(false)
     return () => { generation.current++; request.current?.abort() }
@@ -38,7 +39,7 @@ export function GuideAsk() {
       .finally(() => { if (!controller.signal.aborted) setLoadingProviders(false) })
     return () => controller.abort()
   }, [ai])
-  function findHelp(text: string) { setQuestion(text); setAnswer(null); setError(''); setSource(''); setResults(searchHelp(text, guide.path).map(f => f.id)) }
+  function findHelp(text: string) { cancelAnswer(); setQuestion(text); setError(''); setSource(''); setResults(searchHelp(text, guide.path).map(f => f.id)) }
   async function ask() {
     if (!question.trim() || busy || !ai || !provider || !model) return
     request.current?.abort(); const controller = new AbortController(); request.current = controller
@@ -55,7 +56,7 @@ export function GuideAsk() {
   return <>
     <span className="drishti-guide-kicker">ASK HOW TO USE DRISHTI</span><h3>Questions about the app</h3>
     <p>Built-in help searches the written guide for free. It works without a model key.</p>
-    <form onSubmit={e => { e.preventDefault(); findHelp(question) }}><Input aria-label="Your question" maxLength={1000} value={question} onChange={e => setQuestion(e.target.value)} placeholder="How do I use paper money?" /><div className="drishti-guide-actions"><Button type="submit" size="sm" disabled={!question.trim()}>Find help</Button></div></form>
+    <form onSubmit={e => { e.preventDefault(); findHelp(question) }}><Input aria-label="Your question" maxLength={1000} value={question} onChange={e => { cancelAnswer(); setQuestion(e.target.value); setResults(null); setSource('') }} placeholder="How do I use paper money?" /><div className="drishti-guide-actions"><Button type="submit" size="sm" disabled={!question.trim()}>Find help</Button></div></form>
     <div className="drishti-guide-suggestions">{['Does paper money pay for analysis?', 'Why is there no data?', 'What does Time Machine need?'].map(q => <button key={q} onClick={() => findHelp(q)}>{q}</button>)}</div>
     {results && <div aria-live="polite"><h4>Built-in help</h4>{!results.length && <p>No matching written help found. Try a feature name or a question about using this screen.</p>}{results.map((id, i) => { const f = features.find(v => v.id === id)!; return <article className="drishti-guide-answer" key={id}><strong>{f.title}</strong><p>{i === 0 ? f.body : f.summary}</p><button className="drishti-guide-source" onClick={() => setSource(id)}>Read source: {f.title}</button></article> })}</div>}
     <details className="drishti-guide-ai-settings"><summary>Optional AI answers</summary><p>Your selected personal provider may charge for each question. Only your question, the screen's route pattern and relevant written help are sent. No portfolio, credentials or page contents are sent automatically. Do not include secrets.</p><label className="drishti-guide-consent"><input type="checkbox" checked={ai} onChange={e => setAi(e.target.checked)} />Enable AI using my personal provider</label>{ai && <>

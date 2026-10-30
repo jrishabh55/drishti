@@ -68,6 +68,17 @@ def ask(env, user='alice', **body):
     return env.client.post('/api/guide/ask', json=payload, headers={'x-user': user})
 
 
+def test_unknown_help_has_no_paid_provider_call_and_releases_user_slot(env):
+    providers.save_key('alice', 'anthropic', 'alice-personal-key')
+    response = ask(env, question='xyzzzyplugh', route='/unknown')
+    assert response.status_code == 200
+    assert response.json()['mode'] == 'help'
+    assert response.json()['sources'] == []
+    assert env.built == []
+    service.prepare('alice', 'anthropic', MODEL)
+    service._release('alice')
+
+
 def test_providers_lists_only_the_users_configured_personal_keys(env):
     providers.save_key('alice', 'anthropic', 'alice-anthropic-secret')
     user_keys.save_gemini_key('alice', 'alice-gemini-secret')

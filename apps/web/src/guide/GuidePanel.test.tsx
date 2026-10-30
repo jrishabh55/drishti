@@ -1,15 +1,48 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { GuideProvider, GuideButton } from './GuideProvider'
+import { GuideProvider, GuideButton, useGuide } from './GuideProvider'
 const router = vi.hoisted(() => ({ path: '/desk/paper', navigate: vi.fn() }))
 vi.mock('@tanstack/react-router', () => ({ useRouterState: ({ select }: { select: (s: unknown) => unknown }) => select({ location: { pathname: router.path } }), useNavigate: () => router.navigate }))
-afterEach(() => { cleanup(); localStorage.clear(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); localStorage.clear(); router.path = '/desk/paper'; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 function App({ user = 'alice' }: { user?: string }) {
   return <GuideProvider userId={user}><GuideButton /><main><h1 data-guide="guide-paper">Paper ledger</h1><button onClick={() => { throw Error('must not click') }}>Confirm trade</button></main></GuideProvider>
 }
 describe('contextual guide', () => {
+  it('explains a reset after the lesson catalog changes', () => {
+    localStorage.setItem('drishti-guide:alice', JSON.stringify({ catalogVersion: 'old', tourId: 'paper', stepIndex: 0, completedLessonIds: [] }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))
+    expect(screen.getByText(/previous tour progress has been reset/)).toBeTruthy()
+  })
+  it('uses a neutral fallback for a screen without specific help', () => {
+    router.path = '/unlisted'
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))
+    expect(screen.getByRole('heading', { name: 'Explore Drishti' })).toBeTruthy()
+    router.path = '/desk/paper'
+  })
+  it('collapses the mobile drawer while retaining the tour highlight', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 100, height: 30, x: 0, y: 100, top: 100, left: 0, right: 100, bottom: 130, toJSON() {} })
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Tours' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start first paper trade tour' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show page' }))
+    expect(screen.getByRole('button', { name: 'Resume guide' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Paper ledger' }).hasAttribute('data-guide-highlight')).toBe(true)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+  it('falls back to a real screen and explains a missing dynamic object', () => {
+    function MissingReport() { const guide = useGuide()!; return <button onClick={() => guide.navigate('/runs/$id')}>Open report lesson</button> }
+    render(<GuideProvider userId="alice"><GuideButton /><MissingReport /></GuideProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open report lesson' }))
+    expect(router.navigate).toHaveBeenCalledWith({ to: '/analyse' })
+    expect(screen.getByText(/Choose an existing report/)).toBeTruthy()
+  })
   it('opens relevant help, answers written questions and closes with Escape', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))

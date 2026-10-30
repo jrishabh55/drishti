@@ -106,7 +106,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 function GuidedProduct({ children }: { children: React.ReactNode }) {
   const { user } = useUser()
-  return user ? <GuideProvider userId={user.id}>{children}</GuideProvider> : <>{children}</>
+  return user ? <GuideProvider userId={user.id}>{children}</GuideProvider> : <BootScreen />
 }
 
 /** Full-page pulsing wordmark shown while Clerk hydrates and while the

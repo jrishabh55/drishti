@@ -95,12 +95,12 @@ Render outputs: `intro.mp4`, `walkthrough.mp4`, respective `.vtt`, `poster.jpg`,
 
 ### Task 5: Same-origin streaming and release integration
 
-**Files:** `apps/web/{guide-media.mjs,guide-media.test.mjs,server-node.mjs,vite.config.ts}`, `docker-compose.dokploy.yml`, `deploy/publish-guide-media.py`.
+**Files:** `apps/web/{guide-media.mjs,guide-media.check.mjs,server-node.mjs,vite.config.ts}`, `docker-compose.dokploy.yml`, `deploy/publish-guide-media.py`.
 
 **Interfaces:** `serveGuideMedia(request,root):Promise<Response|null>`; root via `GUIDE_MEDIA_DIR`. GET manifest and immutable versioned files, HEAD/range support.
 
 - [ ] Write Node tests for MP4 MIME, full/suffix/invalid ranges, HEAD, missing files, traversal/symlinks, unrelated path fallback.
-- [ ] Run `node --test apps/web/guide-media.test.mjs`; observe missing implementation failure.
+- [ ] Run `node --test apps/web/guide-media.check.mjs`; observe missing implementation failure.
 - [ ] Implement streaming, guarded path handling, dev adapter and production early routing, read-only persistent mount and hash-verified manifest-last uploader with dry-run support.
 - [ ] Run Node tests, compose validation and dry-run upload manifest checks; commit.
 

@@ -1,6 +1,6 @@
 # Drishti contextual guide and introduction video
 
-Status: design for user review. Layout A selected; implementation has not started.
+Status: approved by the user (go); layout A selected, implementation in progress.
 
 ## Intent and agreed choices
 

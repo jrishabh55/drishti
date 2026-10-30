@@ -2,6 +2,9 @@ import { catalogVersion, features, tourSteps } from './content'
 export type Progress = { catalogVersion: string; tourId: string | null; stepIndex: number; completedLessonIds: string[] }
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
 export const emptyProgress = (): Progress => ({ catalogVersion, tourId: null, stepIndex: 0, completedLessonIds: [] })
+export function progressWasReset(storage: StorageLike | undefined, userId: string) {
+  try { const value = JSON.parse(storage?.getItem(`drishti-guide:${userId}`) ?? 'null'); return Boolean(value?.catalogVersion && value.catalogVersion !== catalogVersion) } catch { return false }
+}
 export function readProgress(storage: StorageLike | undefined, userId: string): Progress {
   try {
     const value = JSON.parse(storage?.getItem(`drishti-guide:${userId}`) ?? 'null')

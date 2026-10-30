@@ -38,3 +38,8 @@ def test_publish_validates_before_manifest_and_is_idempotent(tmp_path):
 def test_publish_rejects_traversal(tmp_path):
     src = source(tmp_path); p = src / 'manifest.json'; manifest = json.loads(p.read_text()); manifest['version'] = '../escape'; p.write_text(json.dumps(manifest))
     with pytest.raises(ValueError): module().publish(src, tmp_path / 'published')
+
+@pytest.mark.parametrize('field,value', [('id', None), ('title', 42), ('start', -0.5)])
+def test_publish_rejects_unplayable_chapter_fields(tmp_path, field, value):
+    src = source(tmp_path); p = src / 'manifest.json'; m = json.loads(p.read_text()); m['chapters'][0][field] = value; p.write_text(json.dumps(m))
+    with pytest.raises(ValueError): module().publish(src, tmp_path / 'published')
