@@ -23,8 +23,8 @@ describe('contextual guide', () => {
     expect(screen.getByRole('heading', { name: 'Explore Drishti' })).toBeTruthy()
     router.path = '/desk/paper'
   })
-  it('collapses the mobile drawer while retaining the tour highlight', () => {
-    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+  it.each([true, false])('reveals the page while retaining the tour highlight (mobile=%s)', mobile => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 100, height: 30, x: 0, y: 100, top: 100, left: 0, right: 100, bottom: 130, toJSON() {} })
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Drishti Guide' }))
@@ -34,6 +34,10 @@ describe('contextual guide', () => {
     expect(screen.getByRole('button', { name: 'Resume guide' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Paper ledger' }).hasAttribute('data-guide-highlight')).toBe(true)
     expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Drishti Guide' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Resume guide' }))
+    expect(screen.getByRole('heading', { name: 'Start here' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Resume guide' })).toBeNull()
   })
   it('falls back to a real screen and explains a missing dynamic object', () => {
     function MissingReport() { const guide = useGuide()!; return <button onClick={() => guide.navigate('/runs/$id')}>Open report lesson</button> }

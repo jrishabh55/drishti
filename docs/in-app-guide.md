@@ -16,7 +16,7 @@ create or confirm a trade, run paid analysis, enter credentials or arm a broker.
 
 Back, Next, Skip, Pause and Restart control the lesson only. Your place is
 saved in this browser for your account. Reopening resumes an active tour.
-**Show page** collapses the phone drawer while keeping the target highlighted;
+**Show page** collapses the guide while keeping the target highlighted;
 **Resume guide** restores the explanation. A missing target shows its
 prerequisite and Retry/Skip controls. Completing a lesson is learning progress,
 not proof that a product action succeeded.
