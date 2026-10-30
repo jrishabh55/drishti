@@ -51,6 +51,8 @@ export interface OrbHit {
 
 export interface OrbScan {
   date: string
+  evaluation_as_of?: string
+  coverage?: { complete: number; incomplete: number; missing_times: { start: string; charts: number }[] }
   as_of: string
   data_as_of: string | null
   or_minutes: number

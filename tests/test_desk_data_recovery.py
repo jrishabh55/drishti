@@ -71,7 +71,7 @@ def test_failed_symbol_refresh_explains_stale_data_without_inventing_bars(tmp_pa
 def test_orb_data_timestamp_is_actual_bar_time_not_the_requested_cutoff():
     doc=orb.scan({},NOW,symbols=['RELIANCE'])
     assert doc['data_as_of'] is None
-    doc=orb.scan({'RELIANCE':session_rows(date(2026,10,29),[100.0]*75)},NOW)
+    doc=orb.scan({'RELIANCE':session_rows(date(2026,10,29),[100.0]*75)},NOW,day=NOW.date())
     assert doc['data_as_of'].startswith('2026-10-29T15:25')
 
 
@@ -163,3 +163,75 @@ def test_final_after_close_sweep_runs_even_when_one_bar_is_current(tmp_path, mon
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(ingest.ingest_loop())
     assert calls.count('5m') == 2  # startup + final delayed-data sweep
+
+
+@pytest.mark.parametrize("start_hour", [15, 16, 19])
+def test_final_sweep_retries_holes_despite_current_latest_bar_and_positive_write_count(tmp_path, monkeypatch, start_hour):
+    store = make_store(tmp_path, {"RELIANCE": [100.0], "TCS": [100.0]})
+    full = session_rows(NOW.date(), [100.0] * 75)
+    gap = [r for i, r in enumerate(full) if i != 73]
+    store.upsert_bars("5m", long(full))
+    store.upsert_bars("5m", long(gap, "TCS"))
+    clock = {"now": NSE.local(NOW.date(), start_hour * 60 + 50), "sleeps": 0}
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"].astimezone(tz or timezone.utc)
+    monkeypatch.setattr(ingest, "datetime", Clock)
+    monkeypatch.setattr(ingest, "get_scanner_store", lambda: store)
+    monkeypatch.setattr(ingest, "INTRADAY_REFRESH_SECONDS", 0)
+    monkeypatch.setattr(ingest, "_publish_and_warm", lambda: None)
+    calls = []
+    def refresh(s, tf, **kw):
+        if tf == "5m":
+            calls.append(clock["now"])
+            # First download returns positive rows but leaves the gap unchanged.
+            if len(calls) == 2:
+                s.upsert_bars("5m", long(full, "TCS"))
+        return 1
+    monkeypatch.setattr(ingest, "refresh_timeframe", refresh)
+    async def tick(_):
+        clock["sleeps"] += 1
+        clock["now"] = NSE.local(NOW.date(), max(start_hour, 16) * 60 + 51 + clock["sleeps"])
+        if clock["sleeps"] > 2:
+            raise asyncio.CancelledError()
+    monkeypatch.setattr(ingest.asyncio, "sleep", tick)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(ingest.ingest_loop())
+    if start_hour < 18:
+        doc = orb.scan(bars_source.get_session_rows_universe("u1", day=NOW.date()), NOW, day=NOW.date())
+        assert doc["counts"]["scanned"] == 2
+        assert len(calls) == 2  # Stops retrying once every bar exists.
+    else:
+        assert len(calls) == 1  # Bounded retry window; don't hammer the vendor overnight.
+
+
+@pytest.mark.parametrize('cached', ['current', 'old', 'none'])
+def test_failed_intraday_feed_does_not_poll_overnight(tmp_path, monkeypatch, cached):
+    store = make_store(tmp_path, {'RELIANCE': [100.0]})
+    if cached != 'none':
+        day = NOW.date() if cached == 'current' else date(2026, 10, 28)
+        store.upsert_bars('5m', long(session_rows(day, [100.0]*75)))
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NSE.local(NOW.date(), 19*60).astimezone(tz or timezone.utc)
+    monkeypatch.setattr(ingest, 'datetime', Clock)
+    monkeypatch.setattr(ingest, 'get_scanner_store', lambda: store)
+    monkeypatch.setattr(ingest, 'INTRADAY_REFRESH_SECONDS', 0)
+    monkeypatch.setattr(ingest, '_publish_and_warm', lambda: None)
+    calls = []
+    def failed_refresh(s, tf, **kw):
+        calls.append(tf)
+        return 0
+    monkeypatch.setattr(ingest, 'refresh_timeframe', failed_refresh)
+    sleeps = 0
+    async def tick(_):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 3:
+            raise asyncio.CancelledError()
+    monkeypatch.setattr(ingest.asyncio, 'sleep', tick)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(ingest.ingest_loop())
+    assert calls.count('5m') == 1  # One bounded startup catch-up, no overnight retries.

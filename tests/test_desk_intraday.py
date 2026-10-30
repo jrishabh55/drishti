@@ -238,3 +238,54 @@ def test_api_orb_accepts_normal_delayed_feed_without_filling_internal_gaps(api, 
     assert doc["counts"]["scanned"] == 2
     assert doc["counts"]["unusable"] == 0
     assert [h["symbol"] for h in doc["hits"]] == ["BRK"]
+
+
+@pytest.mark.parametrize("hour,minute", [(15, 29), (15, 30), (17, 0)])
+def test_automatic_scan_keeps_entry_window_results_when_vendor_has_late_session_holes(hour, minute):
+    # Production 2026-10-30: 15:25 exists but 15:20 (and sometimes 15:15) do not.
+    full = session_rows(DAY, [101.0] * 4 + [103.0] * 71)
+    late_gap = [r for i, r in enumerate(full) if i not in (72, 73)]
+    doc = orb.scan({"BRK": late_gap}, ist(hour, minute))
+    assert doc["counts"]["scanned"] == 1
+    assert doc["hits"][0]["at"] == "09:40"
+    assert doc["data_as_of"].startswith("2026-10-28T14:40")
+    assert doc["evaluation_as_of"].startswith("2026-10-28T14:45")
+    assert doc["coverage"]["incomplete"] == 1
+    assert {x["start"] for x in doc["coverage"]["missing_times"]} == {"15:15", "15:20"}
+    assert any("14:45" in n and "entry window" in n.lower() for n in doc["notes"])
+
+
+def test_entry_window_cutoff_does_not_admit_internal_holes_or_late_breakouts():
+    rows = session_rows(DAY, [101.0] * 4 + [103.0] * 71)
+    gap = [r for i, r in enumerate(rows) if i != 20]
+    late = session_rows(DAY, [101.0] * 66 + [104.0] * 9)
+    doc = orb.scan({"GAP": gap, "LATE": late}, ist(17, 0))
+    assert doc["counts"]["scanned"] == 1
+    assert doc["counts"]["unusable"] == 1
+    assert doc["hits"] == []
+
+
+@pytest.mark.parametrize("kwargs", [{"at": "15:30"}, {"day": DAY}, {"source": "live:kite"}, {"no_entries_after": None}])
+def test_full_session_requests_stay_strict_with_a_current_last_bar_and_internal_gap(kwargs):
+    rows = [r for i, r in enumerate(session_rows(DAY, [101.0] * 75)) if i != 73]
+    doc = orb.scan({"BRK": rows}, ist(17, 0), **kwargs)
+    assert doc["counts"]["scanned"] == 0
+    assert doc["counts"]["unusable"] == 1
+    assert any("15:20" in n for n in doc["notes"])
+
+
+def test_non_grid_entry_deadline_uses_only_bars_closed_before_it():
+    rows = session_rows(DAY, [101.0] * 66 + [104.0] * 9)
+    doc = orb.scan({"LATE": rows}, ist(17, 0), no_entries_after="14:47")
+    assert doc["counts"]["scanned"] == 1
+    assert doc["hits"] == []
+    assert doc["data_as_of"].startswith("2026-10-28T14:40")
+
+
+def test_stale_cached_entry_deadline_row_cannot_become_a_confirmed_close():
+    # 14:40 may have been fetched while forming; wall time alone is no proof.
+    rows = session_rows(DAY, [101.0] * 65 + [104.0])
+    for hour, minute in [(14, 46), (15, 10), (15, 29), (17, 0)]:
+        doc = orb.scan({"PARTIAL": rows}, ist(hour, minute))
+        assert doc["counts"]["scanned"] == 0
+        assert doc["hits"] == []

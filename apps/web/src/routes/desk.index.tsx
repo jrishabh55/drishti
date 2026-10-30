@@ -13,7 +13,7 @@ import {
 import { api, jsonFetch } from '#/lib/api'
 import { EntryRules, type EntryRule } from '#/components/desk/EntryRules'
 import type { AlertEvent, EntryStatus, OrbScan, PaperLedger } from '#/lib/desk-types'
-import { inr, orbEmptyMessage, rMult, signedPct } from '#/lib/desk-format'
+import { inr, istTime, orbEmptyMessage, rMult, signedPct } from '#/lib/desk-format'
 
 export const Route = createFileRoute('/desk/')({
   ssr: false,
@@ -182,16 +182,22 @@ function DeskToday() {
           {scan && (
             <>
               <p className="es-mono text-xs text-[var(--text-4)]">
-                {scan.counts.scanned} charts usable of {scan.counts.universe}
+                {scan.counts.scanned} charts usable of {scan.counts.universe} for the entry window
                 {scan.counts.illiquid ? ` · ${scan.counts.illiquid} under your liquidity floor` : ''}
-                {scan.counts.unusable ? ` · ${scan.counts.unusable} with missing bars` : ''}
+                {scan.counts.unusable ? ` · ${scan.counts.unusable} excluded: missing required bars` : ''}
               </p>
+              {scan.coverage && istTime(scan.as_of) >= '15:30' && (
+                <p className="es-mono text-xs text-[var(--text-4)]">
+                  Full-session data: {scan.coverage.complete} complete of {scan.counts.universe}
+                  {scan.coverage.incomplete ? ` · ${scan.coverage.incomplete} incomplete` : ''}
+                </p>
+              )}
               {scan.notes.map((n) => <p key={n} className="text-xs text-[var(--run)]">{n}</p>)}
               <div className="overflow-auto rounded-[var(--r-lg)] border border-[var(--line-1)] bg-[var(--bg-1)] shadow-[var(--shadow-1)]">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {['Symbol', 'Closed above', 'Trigger', 'Range', '% over', 'Last', 'Vol ×', '₹ cr/day', ''].map((h) => (
+                      {['Symbol', 'Closed above', 'Trigger', 'Range', '% over', 'Last evaluated', 'Vol ×', '₹ cr/day', ''].map((h) => (
                         <TableHead key={h} className="es-team-label whitespace-nowrap">{h}</TableHead>
                       ))}
                     </TableRow>

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import yfinance as yf
 
-from apps.api.scanner.calendar import IST, is_market_open, is_trading_day
+from apps.api.scanner.calendar import IST, OPEN, CLOSE, is_market_open, is_trading_day
 from apps.api.scanner.store import ScannerStore, get_scanner_store
 from apps.api.scanner.universe import enrich_universe, seed_universe
 
@@ -130,6 +130,23 @@ def intraday_stale(latest: str | None, now: datetime) -> bool:
     return stamp < expected
 
 
+def final_session_incomplete(store: ScannerStore, now: datetime) -> bool:
+    """A current MAX timestamp cannot prove that the universe has every bar."""
+    day = now.astimezone(IST).date()
+    symbols = store.instruments_df().index
+    if symbols.empty:
+        return False
+    df = store.load_session_bars("5m", day.isoformat(), symbols)
+    if df.empty:
+        return True
+    expected = pd.date_range(datetime.combine(day, OPEN, IST),
+                             datetime.combine(day, CLOSE, IST), freq="5min", inclusive="left")
+    valid = df.dropna(subset=["open", "high", "low", "close"]).copy()
+    valid["stamp"] = pd.to_datetime(valid["ts"], utc=True)
+    counts = valid[valid["stamp"].isin(expected)].groupby("symbol")["stamp"].nunique()
+    return bool((counts.reindex(symbols, fill_value=0) < len(expected)).any())
+
+
 # Enough recent sessions for 320 retained bars, without refetching years of
 # intraday data just to catch up a deployment after hours.
 CATCHUP_DAYS = {"5m": 14, "15m": 30, "1h": 90}
@@ -189,8 +206,17 @@ async def ingest_loop() -> None:
                 await asyncio.to_thread(apply_fo_membership, store)
                 fo_done_for = today
                 await asyncio.to_thread(_publish_and_warm)
-            final_due = is_trading_day(now.date()) and now.hour >= 16 and final_done_for != today
-            if (is_market_open(now) or intraday_stale(store.latest_ts("5m"), now) or final_due) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
+            # A positive row count only proves the request returned something.
+            # Retry incomplete final sessions at the normal cadence until 18:00;
+            # suspended/vendor-missing symbols must not trigger overnight polling.
+            final_due = (is_trading_day(now.date()) and 16 <= now.hour < EOD_HOUR_IST
+                         and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS
+                         and (final_done_for != today
+                              or await asyncio.to_thread(final_session_incomplete, store, now)))
+            recovery_hours = (is_trading_day(now.date()) and OPEN <= now.time()
+                              and now.hour < EOD_HOUR_IST)
+            stale_due = recovery_hours and intraday_stale(store.latest_ts("5m"), now)
+            if (is_market_open(now) or stale_due or final_due) and loop_t - last_intraday > INTRADAY_REFRESH_SECONDS:
                 last_intraday = loop_t
                 written_5m = 0
                 for tf in ("5m", "15m", "1h"):
