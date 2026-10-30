@@ -137,8 +137,14 @@ def deliveries(cid, unsent=False):
                 "AND json_extract(doc,'$.next_attempt')<=? ORDER BY created_at LIMIT 10",
                 (cid,now().timestamp(),now().timestamp())).fetchall()
         else:
-            rows=c.execute('SELECT doc FROM messaging_outbox WHERE connection_id=? ORDER BY created_at DESC LIMIT 100',(cid,)).fetchall()
+            rows=c.execute('SELECT doc FROM messaging_outbox WHERE connection_id=? ORDER BY created_at DESC, rowid DESC LIMIT 100',(cid,)).fetchall()
     return [json.loads(r['doc']) for r in rows]
+
+
+def has_delivery(cid, key):
+    ensure()
+    with db() as c:
+        return bool(c.execute('SELECT 1 FROM messaging_outbox WHERE id=?',(cid+':'+key,)).fetchone())
 
 
 def save_delivery(doc):

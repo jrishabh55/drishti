@@ -36,7 +36,8 @@ def _save(doc):
 def status(uid, channel):
     doc = store.connection(uid,channel,True) or {}
     conf = store.secret(uid,channel)
-    x = {k:doc.get(k) for k in ('id','connected','verified','alerts','approvals','last_error','bot_username',
+    x = {k:doc.get(k) for k in ('id','connected','verified','alerts','approvals','supervision','daily_summary',
+                               'live_links','last_error','bot_username',
                                'phone','recipient','pending_identity','inbound_verified','pairing_expires_at','cleanup_pending')}
     x.update(configured=bool(doc and doc.get('active')),encryption_available=user_keys.encryption_enabled())
     if channel == 'whatsapp':
@@ -289,18 +290,23 @@ def confirm_pair(uid, channel, code=''):
         # Identity changes revoke every earlier proposal and queued message,
         # while retaining the remote callback URL/owned instance.
         doc['generation']=secrets.token_hex(16)
-        doc.update(alerts=False,approvals=False,enabled_since=store.now().timestamp())
+        doc.update(alerts=False,approvals=False,supervision=False,daily_summary=False,live_links=False,
+                   enabled_since=store.now().timestamp())
         store.secret(uid,channel,conf)
         return _save(doc)
 
 
-def preferences(uid, channel, alerts, approvals):
+def preferences(uid, channel, alerts, approvals, supervision=None, daily_summary=None, live_links=None):
+    """None leaves a supervision preference unchanged (older two-flag callers)."""
     with user_lock(uid):
         doc=_owned(uid,channel)
-        if (alerts or approvals) and not (doc.get('verified') and doc.get('connected')):
+        if (alerts or approvals or supervision or daily_summary or live_links) and not (doc.get('verified') and doc.get('connected')):
             raise ValueError('Verify the private messaging account first')
-        if approvals and not doc.get('inbound_verified'):
+        if (approvals or supervision) and not doc.get('inbound_verified'):
             raise ValueError('Reply to the WhatsApp LINK message first to verify incoming replies')
+        for k,v in (('supervision',supervision),('daily_summary',daily_summary),('live_links',live_links)):
+            if v is not None:
+                doc[k]=v
         if alerts and not doc.get('alerts'):
             doc['enabled_since']=store.now().timestamp()
         doc.update(alerts=alerts,approvals=approvals)
@@ -317,7 +323,8 @@ def disconnect(uid, channel):
         doc=store.connection(uid,channel,True)
         if not doc:
             return status(uid,channel)
-        doc.update(active=False,connected=False,verified=False,alerts=False,approvals=False,cleanup_pending=True)
+        doc.update(active=False,connected=False,verified=False,alerts=False,approvals=False,supervision=False,
+                   daily_summary=False,live_links=False,cleanup_pending=True)
         store.save(doc)  # revoke before any fallible network operation
         conf=store.secret(uid,channel)
         error=None

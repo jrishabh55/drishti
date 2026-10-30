@@ -1,6 +1,6 @@
 """App setup requires Clerk; provider callbacks require a connection secret."""
 import json
-from typing import Literal
+from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from starlette.concurrency import run_in_threadpool
@@ -27,6 +27,10 @@ class Pair(BaseModel):
 class Preferences(BaseModel):
     alerts:bool=False
     approvals:bool=False
+    # Omitted (None) keeps the stored value, so two-flag clients stay compatible.
+    supervision:Optional[bool]=None
+    daily_summary:Optional[bool]=None
+    live_links:Optional[bool]=None
 
 
 def _call(fn,*args):
@@ -98,7 +102,7 @@ def refresh(channel:Channel,uid:str=Depends(current_user_id)):
 
 @router.put('/messaging/{channel}/preferences')
 def preferences(channel:Channel,body:Preferences,uid:str=Depends(current_user_id)):
-    return _call(c.preferences,uid,channel,body.alerts,body.approvals)
+    return _call(c.preferences,uid,channel,body.alerts,body.approvals,body.supervision,body.daily_summary,body.live_links)
 
 
 @router.post('/messaging/{channel}/test')

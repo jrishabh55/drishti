@@ -52,6 +52,7 @@ def authorize(cid, secret):
 def receive(cid, secret, payload):
     doc=authorize(cid,secret)
     acknowledgement=None
+    deferred=[]
     with user_lock(doc['user_id']):
         doc=authorize(cid,secret)  # disconnect may have won the lock
         if not isinstance(payload,dict):
@@ -83,7 +84,7 @@ def receive(cid, secret, payload):
                 return {'ok':True}
             if not doc.get('verified') or str(chat.get('id'))!=doc.get('chat') or str(sender.get('id'))!=doc.get('sender'):
                 return {'ok':True}
-            reply=_command(doc,text,str(sender['id']))
+            reply=_command(doc,text,str(sender['id']),deferred)
             if cb.get('id'):
                 # Telegram supports Bot API methods in webhook responses.
                 # Acknowledge without holding the trade lock for HTTP I/O.
@@ -127,13 +128,34 @@ def receive(cid, secret, payload):
                 store.save(doc)
                 store.enqueue(cid,'linked','WhatsApp replies verified. You can enable paper approvals in Drishti.')
             elif doc.get('verified') and doc.get('inbound_verified'):
-                _command(doc,text,recipient)
+                _command(doc,text,recipient,deferred)
         store.mark_seen(cid,str(mid))
-        return acknowledgement or {'ok':True}
+    # Read-only work (performance marks/benchmark) never holds the trade lock.
+    for fn in deferred:
+        fn()
+    return acknowledgement or {'ok':True}
 
 
-def _command(doc, text, sender):
-    from apps.api.messaging import actions
+def _command(doc, text, sender, deferred=None):
+    from apps.api.messaging import actions, supervision
+    handled=supervision.handle(doc,text)
+    if handled is not None:
+        def reply(out):
+            store.enqueue(doc['id'],'sup-'+secrets.token_hex(8),out[0],out[1])
+            return out[0]
+        if not callable(handled):
+            return reply(handled)
+        def later():
+            try:
+                reply(handled())
+            except Exception:
+                logger.warning('Supervision reply failed')
+                reply(('Performance is unavailable right now; open Drishti for details.',None))
+        if deferred is None:
+            later()
+        else:
+            deferred.append(later)
+        return 'Working on it…'
     parts=text.strip().replace(':',' ',1).split()
     names={'a':'approve','r':'reject','s':'status','approve':'approve','reject':'reject','status':'status'}
     if len(parts)!=2 or parts[0].lower() not in names:
@@ -190,7 +212,10 @@ def flush(cid):
                 key=d['id'].split(':',1)[1]
                 if (d.get('generation')!=doc.get('generation') or
                         (key.startswith('alert-') and (not doc.get('alerts') or d.get('created_at',0)<doc.get('enabled_since',0)))
-                        or (key.startswith(('proposal-','decision-','trade-')) and not doc.get('approvals'))):
+                        or (key.startswith(('proposal-','decision-','trade-')) and not doc.get('approvals'))
+                        or (key.startswith('sup-') and not doc.get('supervision'))
+                        or (key.startswith('summary-') and not doc.get('daily_summary'))
+                        or (key.startswith('live-') and not doc.get('live_links'))):
                     d['cancelled']=True
                     store.save_delivery(d)
                     continue
@@ -230,9 +255,14 @@ def test_message(uid, channel):
 
 
 def sweep():
-    from apps.api.messaging import actions
+    from apps.api.messaging import actions, supervision
     actions.update_transitions()
     store.cleanup()
+    for job in (supervision.daily_summaries,supervision.live_signal_cards):
+        try:
+            job()
+        except Exception:
+            logger.warning('Messaging supervision upkeep failed; will retry')
     ds=get_desk_store()
     for doc in store.all_connections():
         try:
