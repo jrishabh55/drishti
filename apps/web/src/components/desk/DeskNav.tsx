@@ -40,7 +40,7 @@ export function DeskFooter() {
       The Trade Desk is tooling, not advice: setups, replays and rules checks are arithmetic over
       delayed public bars or your connected broker feed. Most people who day trade lose money. Simulated odds are not
       predictions; a stop is a plan, not a guarantee. Paper trades stay in the app.
-      Connected Zerodha orders require live trading to be enabled, daily arming and your explicit confirmation.
+      Connected Zerodha orders require live trading to be enabled and daily arming. Confirm mode needs each ticket’s confirmation; Auto needs an explicit opt-in for the saved strategy version.
       Logic adapted from{' '}
       <a href="https://github.com/Jakeschincariol/day-trader-skill" target="_blank" rel="noreferrer">
         day-trader-skill

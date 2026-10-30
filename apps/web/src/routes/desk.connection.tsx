@@ -214,7 +214,7 @@ function ConnectionPage() {
             </Card>
 
             <Card title="4 · Live orders (owner only)"
-              hint="Orders are never automatic. Each one needs: server switch on, owner account, today's login, today's typed arm, and your typed confirmation.">
+              hint="Live orders require the server switch, owner account, today's login and typed arm. Confirm mode requires each ticket's typed confirmation; Auto additionally requires a deliberate opt-in for that strategy version.">
               <ul className="space-y-1 text-sm">
                 <Check ok={st.orders.server_enabled} text="Server allows live orders (KITE_ORDERS_ENABLED=1)" />
                 <Check ok={st.orders.owner} text="Your account is an authorised owner (AUTOTRADE_USER_IDS)" />
