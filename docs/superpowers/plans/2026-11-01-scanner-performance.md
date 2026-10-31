@@ -24,3 +24,13 @@ Preserve user-selected owner/grants, stale-feed fallback, source provenance, wee
 - Startup now warms existing data before network catch-up. The first cold cache build is still real work; normal repeated scans no longer rebuild panels.
 
 - Full Python suite: 2,749 passed, 3 deselected, 103 subtests passed (42 existing model-name warnings), 55.54s.
+
+## Live first deployment and remaining Trade Desk path
+
+Commit `31dc6ce` deployed through Dokploy; runtime scanner file hashes verified. Authenticated public URL timings after startup: daily scan 0.918–0.965s, 20-day closing breakout 1.112–1.269s (42 matches), 5m scan 1.120–1.302s. Initial cold requests during cache warm took 28.009s daily and 35.717s for 5m; these are not hidden in the warm figures.
+
+A separately measured Trade Desk closed-session ORB request still took 17.138s. Follow-up replaces its daily liquidity SQL read with an adapter over public prepared panels, selecting each symbol's own last 21 persisted rows. Exact row-presence metadata preserves even fully-null stored sessions. No response/private cache or archive writes.
+
+Follow-up also prepares panels before atomically publishing their bar version, keeps concurrent published writes invalidated instead of labeling an older view current, reuses daily charts for weekly/monthly warmup, and retains version invalidation if preparation fails. Regression tests reproduce each cache-publication race before fixing it.
+
+Final follow-up verification: 205 focused tests and 2,762 full-suite tests passed (3 deselected, 103 subtests, 42 known-model warnings); independent final review reran 123 relevant tests and reported no remaining blockers.

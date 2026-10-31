@@ -24,6 +24,10 @@ class Panel:
     volume: pd.DataFrame
     fundamentals: pd.DataFrame  # index: symbol
     meta: pd.DataFrame          # index: symbol
+    # Persisted public row presence, including rows with all-null OHLCV.
+    # Optional for synthetic/derived indicator panels; never infer row count
+    # from non-null prices when converting persisted panels back to long bars.
+    present: Optional[pd.DataFrame] = None
 
 
 Result = Union[pd.DataFrame, pd.Series, float, str, list]

@@ -12,6 +12,7 @@ cache is only consulted/refreshed once, before evaluation starts.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from typing import Dict, Optional, Set, Tuple
 
 import numpy as np
@@ -65,9 +66,13 @@ class ScanEngine:
             wide = long.pivot(index="ts", columns="symbol", values=fld)
             wide.index = pd.to_datetime(wide.index)
             frames[fld] = wide.sort_index()
+        present = long.assign(_present=True).pivot(index='ts', columns='symbol', values='_present').notna()
+        present.index = pd.to_datetime(present.index)
+        present = present.sort_index()
         if timeframe in _RESAMPLE:
             frames = {f: frames[f].resample(_RESAMPLE[timeframe]).agg(_AGG[f])
                       for f in frames}
+            present = present.resample(_RESAMPLE[timeframe]).max().fillna(False).astype(bool)
         fund = pd.DataFrame(list(inst["fundamentals"]), index=inst.index) \
             if len(inst) else pd.DataFrame()
         if len(inst) and "market_cap" not in fund:
@@ -76,19 +81,33 @@ class ScanEngine:
             fund["market_cap"] = fund["market_cap"].fillna(inst["market_cap"])
         meta = inst[["sector", "industry", "index_memberships", "fno"]] \
             if len(inst) else pd.DataFrame()
-        return Panel(fundamentals=fund, meta=meta, **frames)
+        return Panel(fundamentals=fund, meta=meta, present=present, **frames)
 
-    def warm(self) -> None:
-        """Pre-build every panel after an ingest cycle so no user request pays
-        the cold rebuild (~seconds at full-universe size). Called from the
-        ingest loop right after the cycle's version bump. Builds run OUTSIDE
-        the lock — concurrent scans keep serving the previous snapshot (or
-        rebuild for themselves if they observed the bump first) — then the
-        cache swaps in one atomic assignment."""
+    def warm(self, *, publish: bool = False) -> None:
+        """Prepare panels outside the lock; atomically publish when ready.
+
+        Ingest uses publish=True so readers keep their prepared snapshot
+        throughout the build, rather than observing a new DB version before
+        its panels exist. Startup warming does not change the stored version.
+        """
         v = self._store.version()
-        fresh = {tf: self._build_panel(tf)
-                 for tf in ("1d", "1h", "15m", "5m", "1w", "1mo")}
+        daily = self._build_panel('1d')
+        fresh = {'1d': daily, **{tf: self._build_panel(tf) for tf in ('5m', '15m', '1h')}}
+        for tf, rule in _RESAMPLE.items():
+            # Both period views derive from the same daily snapshot, without
+            # two more full-universe SQL reads and five pivots each.
+            frames = {fld: getattr(daily, fld).resample(rule).agg(_AGG[fld])
+                      for fld in _AGG}
+            present = daily.present.resample(rule).max().fillna(False).astype(bool) if daily.present is not None else None
+            fresh[tf] = replace(daily, present=present, **frames)
         with self._lock:
+            if publish:
+                published = self._store.bump_bar_version()
+                # Another writer (e.g. watched-symbol recovery) may publish
+                # after a panel was read. Never label that older view as the
+                # newer version: leave it invalidated for a fresh lazy read.
+                if published == v + 1:
+                    v = published
             self._panels = fresh
             self._version = v
 

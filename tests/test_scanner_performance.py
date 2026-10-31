@@ -102,3 +102,90 @@ def test_streak_needs_all_requested_completed_bars(env, tmp_path, monkeypatch, c
          'right': {'const': 9999}, 'for_n_bars': 2}]})
     got = engine.run_for_user('user_a', scan, now=clock['now'])
     assert got['matches'] == []
+
+
+def test_warm_reuses_daily_read_for_weekly_and_monthly_panels(tmp_path, monkeypatch):
+    from tests.scanner_utils import make_store
+    store = make_store(tmp_path, {'TCS': [100.] * 60})
+    reads = []
+    original = store.load_bars
+    def read(tf, *args, **kwargs):
+        reads.append(tf)
+        return original(tf, *args, **kwargs)
+    monkeypatch.setattr(store, 'load_bars', read)
+    shared = engine.get_engine()
+    shared.warm()
+    assert reads.count('1d') == 1
+    assert shared.run(definition('1w', '1mo'))['matches'][0]['symbol'] == 'TCS'
+
+
+def test_ingest_prepares_before_publishing_new_version(tmp_path, monkeypatch):
+    from tests.scanner_utils import make_store
+    from apps.api.scanner import ingest
+    store = make_store(tmp_path, {'TCS': [100.]})
+    shared = engine.get_engine()
+    shared.warm()
+    old_version = store.version()
+    scan = parse_definition({'logic': 'AND', 'children': [
+        {'timeframe': '1d', 'left': {'field': 'close'}, 'op': '>', 'right': {'const': 150}}]})
+    store.upsert_bars('1d', bars_long('TCS', [200.], start='2026-01-06'))
+    observed = []
+    original = shared._build_panel
+    def build(tf):
+        panel = original(tf)
+        if not observed:
+            observed.append(None)
+            observed[0] = shared.run(scan)['matches']
+        return panel
+    monkeypatch.setattr(shared, '_build_panel', build)
+    ingest._publish_and_warm()
+    assert observed == [[]]  # requests keep the old prepared snapshot during warmup
+    assert store.version() == old_version + 1
+    assert [m['symbol'] for m in shared.run(scan)['matches']] == ['TCS']
+
+
+def test_failed_prepare_still_invalidates_old_published_data(tmp_path, monkeypatch):
+    from tests.scanner_utils import make_store
+    from apps.api.scanner import ingest
+    store = make_store(tmp_path, {'TCS': [100.]})
+    shared = engine.get_engine()
+    shared.warm()
+    old_version = store.version()
+    store.upsert_bars('1d', bars_long('TCS', [200.], start='2026-01-06'))
+    original = shared._build_panel
+    def fail(tf):
+        raise RuntimeError('controlled warm failure')
+    monkeypatch.setattr(shared, '_build_panel', fail)
+    ingest._publish_and_warm()
+    monkeypatch.setattr(shared, '_build_panel', original)
+    assert store.version() == old_version + 1
+    assert shared.run(definition())['matches'][0]['close'] == 200.
+
+
+def test_mid_warm_publication_cannot_hide_newer_watched_symbol_data(tmp_path, monkeypatch):
+    from tests.scanner_utils import make_store
+    from apps.api.scanner import ingest
+    store = make_store(tmp_path, {'TCS': [100.]})
+    shared = engine.get_engine()
+    shared.warm()
+    store.upsert_bars('1d', bars_long('TCS', [200.], start='2026-01-06'))
+    original = shared._build_panel
+    changed = []
+    def build(tf):
+        panel = original(tf)
+        if not changed:
+            changed.append(True)
+            store.upsert_bars('1d', bars_long('TCS', [300.], start='2026-01-06'))
+            store.bump_bar_version()
+        return panel
+    monkeypatch.setattr(shared, '_build_panel', build)
+    ingest._publish_and_warm()
+    assert shared.run(definition())['matches'][0]['close'] == 300.
+
+
+def test_bar_version_increment_returns_its_atomic_published_version(tmp_path):
+    from tests.scanner_utils import make_store
+    store = make_store(tmp_path)
+    before = store.version()
+    assert store.bump_bar_version() == before + 1
+    assert store.bump_bar_version() == before + 2

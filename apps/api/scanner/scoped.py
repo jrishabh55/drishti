@@ -38,7 +38,7 @@ class ScopedEngine(ScanEngine):
                     overlay = long.pivot(index='ts', columns='symbol', values=fld)
                     frames[fld] = public.join(overlay, how='outer').sort_index()
                 sources.update(dict.fromkeys(private, 'live:kite'))
-            panels[tf] = replace(panel, **frames)
+            panels[tf] = replace(panel, present=None, **frames)
             if tf not in _RESAMPLE:
                 self._store.sources[tf] = sources
                 close = frames['close']
@@ -52,7 +52,7 @@ class ScopedEngine(ScanEngine):
                 for fld in ('open', 'high', 'low', 'close', 'volume'):
                     frame = getattr(daily, fld).resample(_RESAMPLE[tf]).agg(_AGG[fld])
                     frames[fld] = frame.loc[self._store.completed_index(frame.index, tf)]
-                panels[tf] = replace(daily, **frames)
+                panels[tf] = replace(daily, present=None, **frames)
         return {tf: panels[tf] for tf in timeframes}
 
 

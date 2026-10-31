@@ -96,16 +96,17 @@ def refresh_all(store: ScannerStore) -> None:
 
 
 def _publish_and_warm() -> None:
-    """Bump the bar version (once per cycle — see bump_bar_version) and
-    pre-build scan panels, so scans serve the previous snapshot during a
-    sweep and never pay the cold rebuild themselves. Late import: engine
+    """Prepare panels, then publish the bar version and cache together so
+    scans keep serving the previous snapshot during a sweep. Late import: engine
     imports the store module; keeping ingest's import lazy avoids a cycle."""
     from apps.api.scanner.engine import get_engine
 
-    get_scanner_store().bump_bar_version()
     try:
-        get_engine().warm()
+        get_engine().warm(publish=True)
     except Exception:  # noqa: BLE001 — warmup is an optimization, never fatal
+        # A failed prepare must not pin readers to old data indefinitely.
+        # Fall back to the ordinary version-invalidated, lazy rebuild path.
+        get_scanner_store().bump_bar_version()
         logger.exception("scanner panel warmup failed")
 
 

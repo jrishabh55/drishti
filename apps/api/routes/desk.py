@@ -216,6 +216,7 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
     from datetime import date as _date
 
     from apps.api.desk import orb
+    from apps.api.desk.scanner_snapshot import public_daily_bars
     from apps.api.scanner.store import get_scanner_store
 
     prof = load_profile(user_id)
@@ -235,7 +236,7 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
     now = _now()
     owner = sharing.owner_for(user_id)
     feed = bars_source.get_session_universe(user_id, "5m", day=day or now.astimezone(NSE_SPEC.tz).date(), symbols=symbols, now=now)
-    daily = scan_store.load_bars("1d", limit=21)
+    daily = public_daily_bars(symbols)
     names = inst["name"].to_dict() if not inst.empty else {}
     try:
         docs = []

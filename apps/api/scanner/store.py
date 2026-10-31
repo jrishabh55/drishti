@@ -88,16 +88,19 @@ class ScannerStore:
                 "INSERT OR REPLACE INTO bars (symbol,timeframe,ts,open,high,low,close,volume) "
                 "VALUES (?,?,?,?,?,?,?,?)", rows)
 
-    def bump_bar_version(self) -> None:
+    def bump_bar_version(self) -> int:
         """Publish written bars to scan engines (they cache panels keyed on
         version()). Deliberately NOT part of upsert_bars: the ingest loop
         writes one chunk at a time across a multi-minute sweep, and a bump
         per chunk made every scan landing mid-sweep pay a full cold panel
-        rebuild. Writers bump once per cycle, right before engine.warm()."""
+        rebuild. Ingest prepares panels first, then bumps once per cycle
+        while atomically publishing the prepared engine snapshot."""
         with self._conn() as c:
-            c.execute(
+            row = c.execute(
                 "INSERT INTO meta (k, v) VALUES ('bar_version', '1') "
-                "ON CONFLICT(k) DO UPDATE SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT)")
+                "ON CONFLICT(k) DO UPDATE SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT) "
+                "RETURNING v").fetchone()
+            return int(row[0])
 
     def load_bars(self, timeframe: str, limit: int = 320) -> pd.DataFrame:
         # Newest `limit` bars per symbol, returned ascending.
