@@ -69,6 +69,7 @@ class Archive:
             CREATE TABLE IF NOT EXISTS tasks(key TEXT PRIMARY KEY,symbol TEXT,interval TEXT,
              start TEXT,end TEXT,status TEXT DEFAULT 'pending',attempts INTEGER DEFAULT 0,
              rows INTEGER DEFAULT 0,sha TEXT,bytes INTEGER DEFAULT 0,error TEXT);''')
+            c.execute('CREATE INDEX IF NOT EXISTS archive_pending_order ON tasks(status,interval,symbol,start)')
             old = c.execute("SELECT v FROM meta WHERE k='config'").fetchone()
             encoded = json.dumps(config, sort_keys=True, allow_nan=False) if config is not None else None
             if old and encoded is not None and old[0] != encoded:
@@ -127,16 +128,15 @@ class Archive:
 
     def next_task(self, selected=None):
         with self.db() as c:
-            rows = [dict(r) for r in c.execute("SELECT * FROM tasks WHERE status='pending' AND attempts<6 "
-                                               "ORDER BY CASE interval WHEN '1d' THEN 0 ELSE 1 END,symbol,start")]
-        if selected:
-            daily = [r for r in rows if r['interval'] == '1d']
-            if daily:
-                return daily[0]
-            preferred = [r for r in rows if r['symbol'] in selected]
-            if preferred:
-                return preferred[0]
-        return rows[0] if rows else None
+            prefix="SELECT * FROM tasks WHERE status='pending' AND attempts<6 AND interval=? "
+            row=c.execute(prefix+'ORDER BY symbol,start LIMIT 1',('1d',)).fetchone()
+            if row:return dict(row)
+            if selected:
+                row=c.execute(prefix+'AND symbol IN ('+','.join('?' for _ in selected)+') ORDER BY symbol,start LIMIT 1',
+                              ['5m',*selected]).fetchone()
+                if row:return dict(row)
+            row=c.execute(prefix+'ORDER BY symbol,start LIMIT 1',('5m',)).fetchone()
+            return dict(row) if row else None
 
     def claim(self, task):
         with self.db() as c:

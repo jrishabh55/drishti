@@ -261,7 +261,7 @@ def test_live_wal_reader_follows_updates_and_refuses_mutations(tmp_path):
         assert reader.execute('SELECT value FROM records').fetchone()[0]=='second'
 
 
-@pytest.mark.parametrize('profile,action',[('weekend','launch'),('long-daily','launch'),('long-daily','upgrade')])
+@pytest.mark.parametrize('profile,action',[('weekend','launch'),('long-daily','launch'),('long-daily','upgrade'),('all-market','launch'),('all-market','upgrade')])
 def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkeypatch,profile,action):
     import base64,io,os,runpy,subprocess,sys,tarfile
     from pathlib import Path
@@ -272,11 +272,13 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
         for name in ['kite','desk','scanner']}}
     info={'Image':'sha256:test-image','Mounts':[{'Source':str(tmp_path),'Destination':'/home/appuser/.tradingagents'}],
           'Config':{'Env':[k+'='+v for k,v in env.items()]}}
+    job_base='all-market-20261101' if profile=='all-market' else 'long-daily-20261031-v2'
+    job_module='research.market_history' if profile=='all-market' else 'research.long_daily'
     if action=='upgrade':
         import hashlib,sqlite3
         prefix=hashlib.sha256(b'scope').hexdigest()
         for provider in ('kite','yahoo'):
-            directory=tmp_path/'research-archives'/'long-daily-20261031-v2'/prefix/provider
+            directory=tmp_path/'research-archives'/job_base/prefix/provider
             directory.mkdir(parents=True)
             with sqlite3.connect(directory/'manifest.sqlite') as c:
                 c.execute('CREATE TABLE meta(k TEXT,v TEXT)')
@@ -289,7 +291,7 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
         if args[:2]==['docker','inspect']:
             if args[2]=='drishti-qzkexq-api-1':return subprocess.CompletedProcess(args,0,json.dumps([info]),'')
             if action=='upgrade':
-                prior={'Image':'sha256:test-image','Config':{'Labels':{'research.source':'a'*64},'Cmd':['research.long_daily','--base','/home/appuser/.tradingagents/research-archives/long-daily-20261031-v2','--engine-version','original-dataset-engine']}}
+                prior={'Image':'sha256:test-image','Config':{'Labels':{'research.source':'a'*64},'Cmd':[job_module,'--base','/home/appuser/.tradingagents/research-archives/'+job_base,'--engine-version','original-dataset-engine']}}
                 return subprocess.CompletedProcess(args,0,json.dumps([prior]),'')
             return subprocess.CompletedProcess(args,1,'','')
         if args[1] in ('update','stop','rename'):return subprocess.CompletedProcess(args,0,'','')
@@ -311,8 +313,9 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
     mounts=[args[i+1] for i,v in enumerate(args[:-1]) if v=='--mount']
     assert sum('.sqlite' in m and m.endswith(',readonly') for m in mounts)==3
     assert '--read-only' in args and '--cap-drop=ALL' in args
-    assert ('research.long_daily' if profile=='long-daily' else 'research.cli') in args
-    assert ('--memory=512m' if profile=='long-daily' else '--memory=1100m') in args
+    assert ('research.market_history' if profile=='all-market' else 'research.long_daily' if profile=='long-daily' else 'research.cli') in args
+    assert ('--memory=768m' if profile=='all-market' else '--memory=512m' if profile=='long-daily' else '--memory=1100m') in args
+    if profile=='all-market':assert '--history-base' in args
 
     if action=='upgrade':
         assert args[args.index('--engine-version')+1]=='original-dataset-engine'

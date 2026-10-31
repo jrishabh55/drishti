@@ -20,15 +20,17 @@ import base64,hashlib,io,json,os,pathlib,re,sqlite3,subprocess,sys,tarfile
 request=json.load(sys.stdin)
 api='drishti-qzkexq-api-1'
 profile=request.get('profile','weekend')
-if profile not in ('weekend','long-daily'):raise RuntimeError('invalid worker profile')
+if profile not in ('weekend','long-daily','all-market'):raise RuntimeError('invalid worker profile')
 long_daily=profile=='long-daily'
-if request['action']=='upgrade' and not long_daily:raise RuntimeError('only daily worker upgrades are supported')
-name='drishti-long-daily-history-20261031' if long_daily else 'drishti-weekend-research-20261031'
+all_market=profile=='all-market'
+batch=long_daily or all_market
+if request['action']=='upgrade' and not batch:raise RuntimeError('only daily worker upgrades are supported')
+name='drishti-all-market-history-20261101' if all_market else 'drishti-long-daily-history-20261031' if long_daily else 'drishti-weekend-research-20261031'
 cpu='0.25' if long_daily else '0.5'
-memory='512m' if long_daily else '1100m'
-memory_swap='768m' if long_daily else '1400m'
-module='research.long_daily' if long_daily else 'research.cli'
-base='/home/appuser/.tradingagents/research-archives/'+('long-daily-20261031-v2' if long_daily else 'weekend-20261031')
+memory='768m' if all_market else '512m' if long_daily else '1100m'
+memory_swap='1024m' if all_market else '768m' if long_daily else '1400m'
+module='research.market_history' if all_market else 'research.long_daily' if long_daily else 'research.cli'
+base='/home/appuser/.tradingagents/research-archives/'+('all-market-20261101' if all_market else 'long-daily-20261031-v2' if long_daily else 'weekend-20261031')
 def run(args,**kw):
     return subprocess.run(args,check=True,capture_output=True,text=True,**kw).stdout
 if request['action']=='status':
@@ -65,7 +67,7 @@ if existing.returncode==0:
         print(json.dumps({'existing':True,'state':old['State']['Status'],'source':digest}));sys.exit(0)
     if request['action']!='upgrade':raise RuntimeError('existing worker has another source version; inspect before replacing')
     command=old['Config'].get('Cmd',[])
-    if old['Image']!=image or 'research.long_daily' not in command or '--base' not in command or command[command.index('--base')+1]!=base:
+    if old['Image']!=image or module not in command or '--base' not in command or command[command.index('--base')+1]!=base:
         raise RuntimeError('existing worker dataset/image is incompatible')
     if not old_source or not re.fullmatch('[0-9a-f]{64}',old_source):raise RuntimeError('invalid prior worker identity')
     dataset_engine=command[command.index('--engine-version')+1]
@@ -87,8 +89,9 @@ args=['docker','run','-d','--name',name,'--label','research.source='+digest,
       '--env-file','/dev/stdin','--entrypoint','python',image,
       '-m',module,'--base',base,
       '--engine-version',dataset_engine,'--watch']
-if long_daily:args+=['--parent-base','/home/appuser/.tradingagents/research-archives/weekend-20261031',
+if batch:args+=['--parent-base','/home/appuser/.tradingagents/research-archives/weekend-20261031',
                     '--runtime-version',image+'/research:'+digest]
+if all_market:args+=['--history-base','/home/appuser/.tradingagents/research-archives/long-daily-20261031-v2']
 # Protect each application database file even though SQLite needs writable sidecars.
 for key in ('KITE_DB_PATH','SCANNER_DB_PATH','DESK_DB_PATH'):
     destination=pathlib.Path(values[key])
@@ -121,7 +124,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('action',choices=['launch','status','upgrade'])
     p.add_argument('--host',default='codeation-dev')
-    p.add_argument('--profile',choices=['weekend','long-daily'],default='weekend')
+    p.add_argument('--profile',choices=['weekend','long-daily','all-market'],default='weekend')
     args=p.parse_args()
     request={'action':args.action,'profile':args.profile}
     if args.action in ('launch','upgrade'):

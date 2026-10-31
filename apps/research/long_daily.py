@@ -117,8 +117,11 @@ class YahooWorker:
         except ArchiveIntegrityError:
             a.retry(task,'saved_source_integrity_review_required',refund=True)
             raise
-        except ArchiveError:
-            a.retry(task,'invalid_yahoo_candles',terminal=True)
+        except ArchiveError as exc:
+            reason=getattr(exc,'archive_reason','invalid_yahoo_candles')
+            if reason not in ('yahoo_history_unavailable','yahoo_identity_mismatch','invalid_yahoo_candles'):
+                reason='invalid_yahoo_candles'
+            a.retry(task,reason,terminal=True)
         except Exception:
             # Never log upstream messages, URLs, cookies or headers.
             a.retry(task,'yahoo_request_failed')
