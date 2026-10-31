@@ -15,8 +15,9 @@ import warnings
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .archive import Archive, ArchiveError, IST, validate_rows
+from .archive import Archive, ArchiveError, ArchiveIntegrityError, IST, validate_rows
 from .cli import Credentials, DownloadWorker, read_database
+from .kite_cache import KiteDailyCache
 from .replay import write_json
 
 SETTINGS = dict(interval='1d',auto_adjust=False,back_adjust=False,repair=False,actions=True)
@@ -93,6 +94,12 @@ class YahooWorker:
 
     def step(self,task):
         a=self.archive; a.check_space()
+        if a.append_only and (task.get('sha') or a.chunk_path(task).exists()):
+            a.recover_existing();a.verify();verify_metadata(a)
+            with a.db() as c:
+                if c.execute('SELECT status FROM tasks WHERE key=?',(task['key'],)).fetchone()[0]=='complete':return
+        if a.append_only and (a.root/(task['key']+'.metadata.json')).exists():
+            raise ArchiveIntegrityError('incomplete saved Yahoo metadata requires review; history preserved')
         self.sleep(max(0,self.next_at-self.clock()))
         self.next_at=self.clock()+2.
         a.claim(task)
@@ -104,9 +111,12 @@ class YahooWorker:
                 owner_hash=hashlib.sha256(a.config['owner'].encode()).hexdigest(),
                 runtime_source_version=a.get_meta('runtime_source_version',a.config.get('engine_version')),
                 fetched_at=datetime.now(timezone.utc).isoformat())
-            write_json(path,metadata)
+            write_json(path,metadata,create_only=a.append_only)
             a.set_meta('metadata:'+task['key'],hashlib.sha256(path.read_bytes()).hexdigest())
             a.complete(task,rows)
+        except ArchiveIntegrityError:
+            a.retry(task,'saved_source_integrity_review_required',refund=True)
+            raise
         except ArchiveError:
             a.retry(task,'invalid_yahoo_candles',terminal=True)
         except Exception:
@@ -117,13 +127,20 @@ class YahooWorker:
 
 def verify_metadata(archive):
     with archive.db() as c:
-        tasks=[dict(r) for r in c.execute("SELECT * FROM tasks WHERE status='complete'")]
+        condition="status IN ('complete','pending','running')" if archive.append_only else "status='complete'"
+        tasks=[dict(r) for r in c.execute('SELECT * FROM tasks WHERE '+condition)]
     for task in tasks:
         path=archive.root/(task['key']+'.metadata.json')
+        if task['status']!='complete':
+            if path.exists():
+                raise ArchiveIntegrityError('incomplete saved Yahoo metadata requires review; history preserved')
+            continue
         expected=archive.get_meta('metadata:'+task['key'])
         try:valid=expected and hashlib.sha256(path.read_bytes()).hexdigest()==expected
         except OSError:valid=False
         if not valid:
+            if archive.append_only:
+                raise ArchiveIntegrityError('Yahoo metadata integrity failure; saved history preserved for review')
             with archive.db() as c:
                 c.execute("UPDATE tasks SET status='pending',attempts=0,error='metadata integrity re-download' WHERE key=?",(task['key'],))
 
@@ -192,7 +209,8 @@ def main():
         if provider=='yahoo':
             config['symbols']=dict(parent['symbols'])|{s:None for s in parent.get('skipped_symbols',[])}
         path=root/provider
-        archive=Archive(path,config,recover=True);archive.verify()
+        archive=Archive(path,config,recover=True,append_only=True)
+        archive.recover_existing();archive.verify()
         version=args.runtime_version or args.engine_version
         history=archive.get_meta('runtime_source_versions',[])
         if version not in history:archive.set_meta('runtime_source_versions',history+[version])
@@ -203,13 +221,14 @@ def main():
     def context():
         ctx=credentials.context(parent['owner'])
         return ctx if ctx and ctx.broker_hash==parent['broker_hash'] else None
-    workers={'kite':DownloadWorker(archives['kite'],context),'yahoo':YahooWorker(archives['yahoo'])}
+    cache=KiteDailyCache(Path(args.parent_base)/prefix/'archive',archives['kite'].config)
+    workers={'kite':DownloadWorker(archives['kite'],cache.wrap_context(context)),'yahoo':YahooWorker(archives['yahoo'])}
     # Separate worker at<=0.5Kite request/s, below the combined historical budget.
     next_kite_at=time.monotonic()
     last_status=0.
     status(base,archives,'downloading')
     while True:
-        progressed=False; paused_disk=False; awaiting=False
+        progressed=False; paused_disk=False; awaiting=False;warming=False
         for provider,archive in archives.items():
             task=archive.next_task()
             if task is None:continue
@@ -219,7 +238,7 @@ def main():
                     awaiting=True;continue
                 headstart=(ctx.login_at+timedelta(minutes=30)-datetime.now(timezone.utc)).total_seconds()
                 if headstart>0:
-                    awaiting=True;continue
+                    warming=True;continue
                 # DownloadWorker enforces1s; this adds a second, slower bound.
                 time.sleep(max(0,next_kite_at-time.monotonic()))
             try:
@@ -233,7 +252,7 @@ def main():
         # Full comparisons grow with the entire archive. Keep that work out of
         # the download loop; cached progress stays cheap and reports run once.
         if now-last_status>=30:
-            status(base,archives,'paused_disk_budget' if paused_disk else 'awaiting_kite_login' if awaiting else 'downloading')
+            status(base,archives,'paused_disk_budget' if paused_disk else 'awaiting_kite_login' if awaiting else 'waiting_for_initial_warmup' if warming else 'downloading')
             last_status=now
         if all(a.next_task() is None for a in archives.values()):
             report(root,archives)

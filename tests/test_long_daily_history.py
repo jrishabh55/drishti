@@ -108,6 +108,7 @@ def test_download_loop_defers_expensive_comparison_until_collection_finishes(tmp
     parent=dict(owner='owner',symbols={'RELIANCE':1},start='2004-01-01',daily_start='2003-01-01',
                 end='2006-01-01',broker_hash='broker',engine_version='test')
     monkeypatch.setattr(long_daily,'snapshot',lambda _:(parent,'a'*64))
+    monkeypatch.setattr(long_daily,'KiteDailyCache',lambda *args:SimpleNamespace(wrap_context=lambda factory:factory))
     ctx=SimpleNamespace(fingerprint='fingerprint',broker_hash='broker',login_at=datetime.now(timezone.utc)-timedelta(hours=1))
     monkeypatch.setattr(long_daily,'Credentials',lambda:SimpleNamespace(context=lambda _:ctx))
     class Worker:

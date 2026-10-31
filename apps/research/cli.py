@@ -23,7 +23,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from apps.api.desk.profile import DeskProfile
 from apps.api.kite import rest
-from .archive import Archive, ArchiveError, IST
+from .archive import Archive, ArchiveError, ArchiveIntegrityError, IST
 from .replay import choose_symbols, run_comparison, write_json
 
 
@@ -133,6 +133,11 @@ class DownloadWorker:
     def step(self, task):
         a = self.archive
         a.check_space()
+        if a.append_only and (task.get('sha') or a.chunk_path(task).exists()):
+            a.recover_existing();a.verify()
+            with a.db() as c:
+                if c.execute('SELECT status FROM tasks WHERE key=?',(task['key'],)).fetchone()[0]=='complete':
+                    return True
         ctx = self.context()
         if ctx is None or ctx.fingerprint == a.get_meta('blocked_fingerprint'):
             a.set_meta('phase','awaiting_login')
@@ -157,7 +162,7 @@ class DownloadWorker:
                 a.retry(task,'connection_changed',refund=True)
                 a.set_meta('phase','awaiting_login')
                 return False
-            a.complete(task, rows)
+            a.complete(task, rows,provenance=getattr(ctx.client,'historical_provenance',None))
             a.set_meta('phase','downloading')
         except rest.KiteError as exc:
             if exc.token_error:
@@ -170,6 +175,9 @@ class DownloadWorker:
             if transient:
                 attempt = task['attempts']
                 self.sleep((10,15,30,60,120,300)[min(attempt,5)])
+        except ArchiveIntegrityError:
+            a.retry(task,'saved_source_integrity_review_required',refund=True)
+            raise
         except ArchiveError:
             a.retry(task,'invalid_candles',terminal=True)
         return True
@@ -246,16 +254,16 @@ def main():
         prefix = json.loads(pointer.read_text())['owner_hash']
         if not re.fullmatch('[0-9a-f]{64}',prefix):
             raise ArchiveError('invalid archive scope pointer')
-        archive = Archive(base/prefix/'archive',recover=True)
+        archive = Archive(base/prefix/'archive',recover=True,append_only=True)
     else:
         owner = credentials.owner()
         if owner is None:
             raise ArchiveError('log in to Kite before starting the research job')
         config = make_config(owner,credentials,args.engine_version)
         prefix = hashlib.sha256(owner.encode()).hexdigest()
-        archive = Archive(base/prefix/'archive',config)
+        archive = Archive(base/prefix/'archive',config,append_only=True)
         write_json(pointer,dict(owner_hash=prefix))
-    archive.verify()
+    archive.recover_existing();archive.verify()
     def context():
         ctx = credentials.context(archive.config['owner'])
         return ctx if ctx and ctx.broker_hash == archive.config['broker_hash'] else None

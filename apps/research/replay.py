@@ -13,7 +13,7 @@ from apps.api.desk import bars_source, paper
 from apps.api.desk.bars_source import BarSeries
 from apps.api.desk.profile import DeskProfile
 from apps.api.kite import backtest, rest, strategies
-from .archive import ArchiveError, IST
+from .archive import ArchiveError, ArchiveIntegrityError, IST
 
 
 class ResearchBody(backtest.BacktestBody):
@@ -51,15 +51,23 @@ def variants(symbols):
     return out
 
 
-def write_json(path, value):
+def write_json(path, value, *, create_only=False):
     import os
     temporary = path.with_suffix(path.suffix+'.tmp')
-    with temporary.open('w') as f:
-        os.chmod(temporary, 0o600)
-        json.dump(value, f, allow_nan=False, separators=(',', ':'))
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temporary, path)
+    try:
+        with temporary.open('w') as f:
+            os.chmod(temporary, 0o600)
+            json.dump(value, f, allow_nan=False, separators=(',', ':'))
+            f.flush()
+            os.fsync(f.fileno())
+        if create_only:
+            try:os.link(temporary,path)
+            except FileExistsError as exc:
+                raise ArchiveIntegrityError('refusing to overwrite saved historical metadata') from exc
+        else:
+            os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def regime_summary(trades, profile, start, end):

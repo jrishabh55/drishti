@@ -9,6 +9,7 @@ import math
 import os
 import shutil
 import sqlite3
+import zlib
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,6 +19,10 @@ IST = ZoneInfo('Asia/Kolkata')
 
 class ArchiveError(ValueError):
     pass
+
+
+class ArchiveIntegrityError(ArchiveError):
+    """Saved source data must be inspected, never silently refreshed."""
 
 
 def validate_rows(rows, interval, start, end):
@@ -52,7 +57,8 @@ def validate_rows(rows, interval, start, end):
 
 
 class Archive:
-    def __init__(self, root, config=None, *, recover=False):
+    def __init__(self, root, config=None, *, recover=False, append_only=False):
+        self.append_only = append_only
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
@@ -155,14 +161,29 @@ class Archive:
         if shutil.disk_usage(self.root).free < reserve or self.progress()['bytes'] >= maximum:
             raise ArchiveError('disk budget reached; download paused')
 
-    def complete(self, task, rows):
+    def complete(self, task, rows, *, provenance=None):
         rows = validate_rows(rows, task['interval'], date.fromisoformat(task['start']), date.fromisoformat(task['end']))
         doc = dict(schema=1, owner_hash=hashlib.sha256(self.config['owner'].encode()).hexdigest(),
                    symbol=task['symbol'], interval=task['interval'], start=task['start'], end=task['end'], rows=rows)
         if 'provider' in self.config:
             doc['provider'] = self.config['provider']
+        if provenance is not None:
+            doc['provenance'] = provenance
         payload = gzip.compress(json.dumps(doc, separators=(',', ':'), allow_nan=False).encode(), mtime=0)
         path = self.chunk_path(task)
+        if self.append_only:
+            with self.db() as c:
+                saved = c.execute('SELECT status,sha FROM tasks WHERE key=?',(task['key'],)).fetchone()
+            if saved is None:
+                raise ArchiveIntegrityError('unknown immutable archive task')
+            if path.exists():
+                existing = path.read_bytes()
+                if existing == payload and (not saved['sha'] or saved['sha']==hashlib.sha256(existing).hexdigest()):
+                    self._checkpoint(task,existing,len(rows))
+                    return
+                raise ArchiveIntegrityError('refusing to overwrite saved historical candles')
+            if saved['status']=='complete' or saved['sha']:
+                raise ArchiveIntegrityError('saved archive integrity failure; missing historical file')
         temp = path.with_name(path.name+f'.tmp-{os.getpid()}')
         try:
             with temp.open('wb') as f:
@@ -170,22 +191,58 @@ class Archive:
                 f.write(payload)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(temp, path)
-            with self.db() as c:
-                c.execute("UPDATE tasks SET status='complete',rows=?,sha=?,bytes=?,error=NULL WHERE key=?",
-                          (len(rows), hashlib.sha256(payload).hexdigest(), len(payload), task['key']))
+            if self.append_only:
+                try:os.link(temp,path)  # Atomic creation, with no replacement race.
+                except FileExistsError as exc:
+                    raise ArchiveIntegrityError('refusing to overwrite saved historical candles') from exc
+            else:
+                os.replace(temp, path)
+            self._checkpoint(task,payload,len(rows))
         finally:
             temp.unlink(missing_ok=True)
 
+    def _checkpoint(self, task, payload, rows):
+        with self.db() as c:
+            c.execute("UPDATE tasks SET status='complete',rows=?,sha=?,bytes=?,error=NULL WHERE key=?",
+                      (rows,hashlib.sha256(payload).hexdigest(),len(payload),task['key']))
+
+    def recover_existing(self):
+        """Recover interrupted manifest commits using saved files, without HTTP."""
+        with self.db() as c:
+            tasks=[dict(r) for r in c.execute("SELECT * FROM tasks WHERE status IN ('pending','running')")]
+        for task in tasks:
+            path=self.chunk_path(task)
+            if not path.exists():
+                if task['sha']:
+                    raise ArchiveIntegrityError('saved archive integrity failure; missing checkpointed file')
+                continue
+            try:
+                payload=path.read_bytes();doc=json.loads(gzip.decompress(payload))
+                if (doc.get('schema')!=1 or doc.get('owner_hash')!=hashlib.sha256(self.config['owner'].encode()).hexdigest()
+                    or any(doc.get(k)!=task[k] for k in ('symbol','interval','start','end'))
+                    or ('provider' in self.config and doc.get('provider')!=self.config['provider'])):
+                    raise ArchiveIntegrityError('orphan archive integrity metadata failure')
+                rows=validate_rows(doc['rows'],task['interval'],date.fromisoformat(task['start']),date.fromisoformat(task['end']))
+                if rows!=doc['rows']:
+                    raise ArchiveIntegrityError('orphan archive integrity canonical row failure')
+                if task['sha'] and hashlib.sha256(payload).hexdigest()!=task['sha']:
+                    raise ArchiveIntegrityError('orphan archive integrity digest failure')
+            except (OSError,ValueError,KeyError,TypeError,zlib.error,EOFError) as exc:
+                raise ArchiveIntegrityError('orphan archive integrity failure; saved file preserved') from exc
+            self._checkpoint(task,payload,len(rows))
+
     def verify(self):
         with self.db() as c:
-            done = [dict(r) for r in c.execute("SELECT * FROM tasks WHERE status='complete'")]
+            condition="status='complete' OR sha IS NOT NULL" if self.append_only else "status='complete'"
+            done = [dict(r) for r in c.execute('SELECT * FROM tasks WHERE '+condition)]
         for t in done:
             try:
                 valid = hashlib.sha256(self.chunk_path(t).read_bytes()).hexdigest() == t['sha']
             except OSError:
                 valid = False
             if not valid:
+                if self.append_only:
+                    raise ArchiveIntegrityError('archive integrity failure; saved history preserved for review')
                 with self.db() as c:
                     c.execute("UPDATE tasks SET status='pending',attempts=0,error='integrity re-download' WHERE key=?", (t['key'],))
 
