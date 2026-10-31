@@ -1,4 +1,4 @@
-"""Disposable private scanner snapshots. No writes to ScannerStore or engine caches."""
+"""Selected-owner scanner views; private candles never enter shared caches."""
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -6,19 +6,18 @@ import pandas as pd
 
 from apps.api.desk.market.session import NSE
 from apps.api.kite import live, sharing
-from apps.api.scanner.engine import ScanEngine, get_engine
+from apps.api.scanner.engine import ScanEngine, get_engine, _AGG, _RESAMPLE
 
 COLS = ['symbol', 'ts', 'open', 'high', 'low', 'close', 'volume']
 
 
 class ScopedEngine(ScanEngine):
     def _resolve_panels(self, timeframes):
-        if self._store.hub is not None:
-            return super()._resolve_panels(timeframes)
-        # Public users share the versioned snapshot published/warmed by ingest.
-        # Filter its small time index, never rebuild/pivot the long bar table or
-        # mutate the cached Panel (legacy run() must keep its original view).
-        cached = get_engine()._resolve_panels(timeframes)
+        # Pin the published public snapshot once. A connected/stopped hub must
+        # never force a new full-universe SQL read and five pivots per request.
+        active = self._store.hub is not None and self._store.hub.state == 'live'
+        base = {('1d' if tf in _RESAMPLE else tf) for tf in timeframes} if active else timeframes
+        cached = get_engine()._resolve_panels(base)
         panels = {}
         for tf, panel in cached.items():
             index = panel.close.index
@@ -26,22 +25,35 @@ class ScopedEngine(ScanEngine):
             keep = self._store.completed_index(local, tf)
             frames = {fld: getattr(panel, fld).loc[keep]
                       for fld in ('open', 'high', 'low', 'close', 'volume')}
+            sources = dict.fromkeys(frames['close'].columns[frames['close'].notna().any()], 'delayed:yahoo')
+            private = self._store.private_rows(tf, frames['close']) if active else {}
+            if private:
+                long = pd.DataFrame([(sym, self._store.local(r[0]), *r[1:])
+                                     for sym, rows in private.items() for r in rows], columns=COLS)
+                for fld, public in frames.items():
+                    # Work only on disposable views. Private columns replace
+                    # their public series; they never enter the shared cache.
+                    public = public.drop(columns=list(private), errors='ignore').copy()
+                    public.index = public.index.tz_localize(NSE.tz) if public.index.tz is None else public.index.tz_convert(NSE.tz)
+                    overlay = long.pivot(index='ts', columns='symbol', values=fld)
+                    frames[fld] = public.join(overlay, how='outer').sort_index()
+                sources.update(dict.fromkeys(private, 'live:kite'))
             panels[tf] = replace(panel, **frames)
-            if tf not in ('1w', '1mo'):
+            if tf not in _RESAMPLE:
+                self._store.sources[tf] = sources
                 close = frames['close']
-                self._store.sources[tf] = dict.fromkeys(close.columns[close.notna().any()], 'delayed:yahoo')
                 self._store.panel_times[tf] = close.index.max().isoformat() if len(close) else None
-        return panels
-
-    def _build_panel(self, timeframe):
-        panel = super()._build_panel(timeframe)
-        if timeframe in ('1w', '1mo'):
-            # W/ME labels are the period's last date. Require it to pass.
-            for fld in ('open', 'high', 'low', 'close', 'volume'):
-                frame = getattr(panel, fld)
-                frame = frame.loc[self._store.completed_index(frame.index, timeframe)]
-                setattr(panel, fld, frame)
-        return panel
+        if active:
+            # Aggregate only after replacing daily columns and dropping forming
+            # candles, so weekly/monthly conditions cannot see unfinished data.
+            for tf in timeframes & _RESAMPLE.keys():
+                daily = panels['1d']
+                frames = {}
+                for fld in ('open', 'high', 'low', 'close', 'volume'):
+                    frame = getattr(daily, fld).resample(_RESAMPLE[tf]).agg(_AGG[fld])
+                    frames[fld] = frame.loc[self._store.completed_index(frame.index, tf)]
+                panels[tf] = replace(daily, **frames)
+        return {tf: panels[tf] for tf in timeframes}
 
 
 class ScopedStore:
@@ -51,80 +63,52 @@ class ScopedStore:
         self.owner = sharing.owner_for(user_id)
         self.hub = live.get_hub(self.owner) if live.access_valid(user_id, self.owner, now) else None
         self.sources = {}
-        self.frames = {}
         self.panel_times = {}
+        self._instruments = None
 
     def instruments_df(self):
-        return self.public.instruments_df()
-
-    def version(self):
-        return 0  # one disposable engine per immutable snapshot
+        if self._instruments is None:
+            self._instruments = self.public.instruments_df()
+        return self._instruments
 
     def latest_ts(self, timeframe):
-        if timeframe in self.panel_times:
-            return self.panel_times[timeframe]
-        df = self.frames.get(timeframe)
-        if df is None:
-            return None
-        return df.ts.max().isoformat() if len(df) else None
+        return self.panel_times.get(timeframe)
 
-    def load_bars(self, timeframe, limit=320):
-        if timeframe in self.frames:
-            return self.frames[timeframe]
-        public = self.public.load_bars(timeframe, limit)
-        # Drop forming candles from both sources before any condition/indicator.
-        if len(public):
-            public = public.copy()
-            public['ts'] = self.local_times(public.ts)
-            public = public.loc[self.completed_index(pd.DatetimeIndex(public.ts), timeframe)]
-        daily_latest = public.groupby('symbol').ts.max() if timeframe == '1d' else {}
+    def private_rows(self, timeframe, public_close, limit=320):
+        """Read the already authorized, pinned hub; reauthorize before return.
+
+        Avoid per-symbol owner/session DB lookups: run_for_user checks access
+        before constructing this snapshot and again after all evaluation and
+        annotation. A revoked or changed source discards the whole result.
+        """
         private = {}
-        if self.hub:
-            for sym in self.hub.symbols:
-                if timeframe == '1d':
-                    last = self.hub.builder.last_tick.get(sym)
-                    if (self.hub.state != 'live' or last is None or self.now - last > live.STALE_AFTER
-                            or sym not in self.hub.backfilled):
-                        continue
-                    rows = self.hub.history.get('1d', {}).get(sym, [])
-                else:
-                    series = live.provider(self.user_id, sym, '5m', 'session', now=self.now, expected_owner=self.owner)
-                    if series is None:
-                        continue
-                    five = {r[0]: r for r in self.hub.history.get('5m', {}).get(sym, [])}
-                    five.update({r[0]: r for r in series.rows})
-                    rows = self.resample(list(five.values()), timeframe)
-                rows = [r for r in rows if self.complete(r[0], timeframe)][-limit:]
-                # A fresh tick cannot make older closed history more recent.
-                # Daily providers may label the same session at different times.
-                if (rows and timeframe == '1d' and sym in daily_latest
-                        and max(self.local(r[0]).date() for r in rows) < daily_latest[sym].date()):
+        if self.hub is None or self.hub.state != 'live':
+            return private
+        for sym in self.hub.symbols:
+            last = self.hub.builder.last_tick.get(sym)
+            if (self.hub.state != 'live' or last is None or self.now - last > live.STALE_AFTER
+                    or sym not in self.hub.backfilled):
+                continue
+            if timeframe == '1d':
+                rows = self.hub.history.get('1d', {}).get(sym, [])
+            else:
+                five = {r[0]: r for r in self.hub.history.get('5m', {}).get(sym, [])}
+                five.update({r[0]: r for r in self.hub.builder.rows(sym, '5m')})
+                rows = self.resample(list(five.values()), timeframe)
+            rows = [r for r in rows if self.complete(r[0], timeframe)][-limit:]
+            # Fresh ticks cannot make an older private daily history newer
+            # than the public closed session. Provider time labels may differ.
+            if rows and timeframe == '1d' and sym in public_close:
+                latest = public_close[sym].last_valid_index()
+                if latest is not None and max(self.local(r[0]).date() for r in rows) < latest.date():
                     continue
-                if rows:
-                    private[sym] = rows
-        self.sources[timeframe] = {s: 'live:kite' if s in private else 'delayed:yahoo'
-                                   for s in set(public.symbol) | set(private)}
-        frames = [public.loc[~public.symbol.isin(private)]]
-        frames.append(pd.DataFrame([(s, self.local(r[0]), *r[1:]) for s, rows in private.items() for r in rows], columns=COLS))
-        frame = pd.concat(frames, ignore_index=True)
-        # Normalize mixed public naive / Kite aware timestamps for pivot ordering.
-        if len(frame):
-            frame['ts'] = pd.to_datetime(frame.ts)
-        self.frames[timeframe] = frame
-        return frame
+            if rows:
+                private[sym] = rows
+        return private
 
     @staticmethod
     def local(ts):
         return ts.replace(tzinfo=NSE.tz) if ts.tzinfo is None else ts.astimezone(NSE.tz)
-
-    @staticmethod
-    def local_times(values):
-        # Public timestamps are exchange-local when naive. Handle mixed ISO
-        # formats/offsets in vectorized batches without a Python call per bar.
-        aware = values.astype(str).str.contains(r'(?:Z|[+-]\d{2}:?\d{2})$', regex=True)
-        parsed = pd.to_datetime(values, format='mixed', utc=True)
-        parsed = parsed.where(aware, parsed - pd.Timedelta(hours=5, minutes=30))
-        return parsed.dt.tz_convert(NSE.tz)
 
     def completed_index(self, local, timeframe):
         if timeframe in ('1w', '1mo'):

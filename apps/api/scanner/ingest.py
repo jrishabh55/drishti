@@ -154,6 +154,15 @@ CATCHUP_DAYS = {"5m": 14, "15m": 30, "1h": 90}
 
 async def ingest_loop() -> None:
     store = get_scanner_store()
+    # Existing volumes already have usable bars. Prepare their read snapshot
+    # before any network catch-up (a full-universe download can take minutes).
+    # Do not bump the version or rewrite/download history just to warm a cache.
+    if store.latest_ts('1d') is not None:
+        from apps.api.scanner.engine import get_engine
+        try:
+            await asyncio.to_thread(get_engine().warm)
+        except Exception:  # noqa: BLE001 — keep ingestion alive if warmup fails
+            logger.exception('scanner existing-data warmup failed')
     if store.instruments_df().empty:
         await asyncio.to_thread(seed_universe, store)
         logger.info("scanner universe seeded")

@@ -20,6 +20,7 @@ import pandas as pd
 from apps.api.scanner.indicators import Panel, describe, eval_operand
 from apps.api.scanner.schema import Condition, Group, Operand
 from apps.api.scanner.store import ScannerStore, get_scanner_store
+from apps.api.scanner.calendar import IST
 
 _RESAMPLE = {"1w": "W", "1mo": "ME"}
 # ponytail: %chg reports on the coarsest timeframe in the definition (1d floor),
@@ -46,6 +47,18 @@ class ScanEngine:
         no locking, no version check — callers own that (see _resolve_panels)."""
         base_tf = "1d" if timeframe in _RESAMPLE else timeframe
         long = self._store.load_bars(base_tf)
+        # Providers store both exchange-local naive and offset ISO labels.
+        # Normalize the distinct labels once, rather than parsing every bar
+        # (or reparsing them in each of the five pivots). This also lets the
+        # shared cache serve private overlays on the same exchange-time grid.
+        if len(long):
+            codes, labels = pd.factorize(long.ts, sort=False)
+            labels = pd.Series(labels.astype(str))
+            aware = labels.str.contains(r'(?:Z|[+-]\d{2}:?\d{2})$', regex=True)
+            times = pd.to_datetime(labels, format='mixed', utc=True)
+            times = times.where(aware, times - pd.Timedelta(hours=5, minutes=30))
+            local = pd.DatetimeIndex(times.dt.tz_convert(IST))
+            long = long.assign(ts=local.take(codes)).drop_duplicates(['symbol', 'ts'], keep='last')
         inst = self._store.instruments_df()
         frames = {}
         for fld in ("open", "high", "low", "close", "volume"):
@@ -167,7 +180,10 @@ class ScanEngine:
 
         frame = self._cond_frame(c, panel)
         if c.for_n_bars:
-            mask = frame.tail(c.for_n_bars).all()
+            # all() is vacuously true on an empty frame; a short history also
+            # cannot prove an N-bar streak. Incomplete candles never qualify.
+            mask = (frame.tail(c.for_n_bars).all() if len(frame) >= c.for_n_bars
+                    else pd.Series(False, index=frame.columns))
         else:
             mask = frame.iloc[-1] if len(frame) else pd.Series(dtype=bool)
 
@@ -319,7 +335,7 @@ def run_for_user(user_id: str, definition: Group, *, now=None) -> dict:
     result = annotate(ScopedEngine(snapshot).run(definition), snapshot, _collect_timeframes(definition))
     if snapshot.hub and not live.access_valid(user_id, snapshot.owner, clock()):
         snapshot.hub = None
-        snapshot.frames.clear()
+        snapshot.panel_times.clear()
         snapshot.sources.clear()
         result = annotate(ScopedEngine(snapshot).run(definition), snapshot, _collect_timeframes(definition))
     return result
