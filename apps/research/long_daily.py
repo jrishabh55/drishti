@@ -102,6 +102,7 @@ class YahooWorker:
             path=a.root/(task['key']+'.metadata.json')
             metadata=metadata|dict(provider='yahoo',symbol=task['symbol'],start=task['start'],end=task['end'],
                 owner_hash=hashlib.sha256(a.config['owner'].encode()).hexdigest(),
+                runtime_source_version=a.get_meta('runtime_source_version',a.config.get('engine_version')),
                 fetched_at=datetime.now(timezone.utc).isoformat())
             write_json(path,metadata)
             a.set_meta('metadata:'+task['key'],hashlib.sha256(path.read_bytes()).hexdigest())
@@ -156,6 +157,7 @@ def report(root,archives):
                 p:dict(rows=len(rows),first=rows[0][0][:10] if rows else None,last=rows[-1][0][:10] if rows else None)
                 for p,rows in loaded.items() if rows is not None})
     write_json(root/'source-comparison.json',dict(requested_start='2000-01-01',symbols=records,
+        generated_at=datetime.now(timezone.utc).isoformat(),
         automatic_merge_allowed=False,
         limitations=['Current constituents only; survivorship and missing/delisted stocks remain.',
           'Pre-listing and unavailable dates remain absent, not synthesized.',
@@ -175,6 +177,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base',required=True);p.add_argument('--parent-base',required=True)
     p.add_argument('--engine-version',default='unknown');p.add_argument('--watch',action='store_true')
+    p.add_argument('--runtime-version',default=None)
     args=p.parse_args()
     base=Path(args.base).resolve();base.mkdir(parents=True,exist_ok=True,mode=0o700);base.chmod(0o700)
     lock=(base/'worker.lock').open('a');os.chmod(base/'worker.lock',0o600)
@@ -190,6 +193,10 @@ def main():
             config['symbols']=dict(parent['symbols'])|{s:None for s in parent.get('skipped_symbols',[])}
         path=root/provider
         archive=Archive(path,config,recover=True);archive.verify()
+        version=args.runtime_version or args.engine_version
+        history=archive.get_meta('runtime_source_versions',[])
+        if version not in history:archive.set_meta('runtime_source_versions',history+[version])
+        archive.set_meta('runtime_source_version',version)
         if provider=='yahoo':verify_metadata(archive)
         archives[provider]=archive
     credentials=Credentials()
@@ -199,7 +206,7 @@ def main():
     workers={'kite':DownloadWorker(archives['kite'],context),'yahoo':YahooWorker(archives['yahoo'])}
     # Separate worker at<=0.5Kite request/s, below the combined historical budget.
     next_kite_at=time.monotonic()
-    last_status=0.;last_report=0.
+    last_status=0.
     status(base,archives,'downloading')
     while True:
         progressed=False; paused_disk=False; awaiting=False
@@ -214,8 +221,7 @@ def main():
                 if headstart>0:
                     awaiting=True;continue
                 # DownloadWorker enforces1s; this adds a second, slower bound.
-                time.sleep(max(0,workers['kite'].next_at-time.monotonic()))
-                next_kite_at=time.monotonic()+2.
+                time.sleep(max(0,next_kite_at-time.monotonic()))
             try:
                 done=workers[provider].step(task)
                 if provider=='kite':next_kite_at=time.monotonic()+2.
@@ -224,8 +230,8 @@ def main():
                 if 'disk budget' not in str(exc):raise
                 paused_disk=True
         now=time.monotonic()
-        if now-last_report>=300:
-            report(root,archives);last_report=now
+        # Full comparisons grow with the entire archive. Keep that work out of
+        # the download loop; cached progress stays cheap and reports run once.
         if now-last_status>=30:
             status(base,archives,'paused_disk_budget' if paused_disk else 'awaiting_kite_login' if awaiting else 'downloading')
             last_status=now

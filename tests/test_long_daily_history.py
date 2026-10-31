@@ -99,3 +99,33 @@ def test_incomplete_latest_yahoo_candle_does_not_discard_valid_history():
     assert meta['rejected_rows'][0]['date']=='2000-01-04'
     assert meta['rejected_rows'][0]['ohlcv'][3] is None
     json.dumps(meta,allow_nan=False)
+
+
+def test_download_loop_defers_expensive_comparison_until_collection_finishes(tmp_path,monkeypatch):
+    from datetime import datetime,timedelta,timezone
+    from types import SimpleNamespace
+    from apps.research import long_daily
+    parent=dict(owner='owner',symbols={'RELIANCE':1},start='2004-01-01',daily_start='2003-01-01',
+                end='2006-01-01',broker_hash='broker',engine_version='test')
+    monkeypatch.setattr(long_daily,'snapshot',lambda _:(parent,'a'*64))
+    ctx=SimpleNamespace(fingerprint='fingerprint',broker_hash='broker',login_at=datetime.now(timezone.utc)-timedelta(hours=1))
+    monkeypatch.setattr(long_daily,'Credentials',lambda:SimpleNamespace(context=lambda _:ctx))
+    class Worker:
+        def __init__(self,archive,*args):self.archive=archive;self.next_at=0
+        def step(self,task):
+            self.archive.claim(task)
+            self.archive.complete(task,[[task['start']+'T00:00:00+05:30',100,102,99,101,1000]])
+            return True
+    monkeypatch.setattr(long_daily,'DownloadWorker',Worker)
+    monkeypatch.setattr(long_daily,'YahooWorker',Worker)
+    monkeypatch.setattr(long_daily.time,'sleep',lambda _:None)
+    monkeypatch.setattr(long_daily.time,'monotonic',lambda:10000.)
+    calls=[]
+    def comparison(root,archives):
+        assert all(a.next_task() is None for a in archives.values()), 'report interrupted pending downloads'
+        calls.append(root)
+    monkeypatch.setattr(long_daily,'report',comparison)
+    import sys
+    monkeypatch.setattr(sys,'argv',['long-daily','--base',str(tmp_path/'archive'),'--parent-base',str(tmp_path/'parent')])
+    long_daily.main()
+    assert len(calls)==1

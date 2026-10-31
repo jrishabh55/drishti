@@ -261,8 +261,8 @@ def test_live_wal_reader_follows_updates_and_refuses_mutations(tmp_path):
         assert reader.execute('SELECT value FROM records').fetchone()[0]=='second'
 
 
-@pytest.mark.parametrize('profile',['weekend','long-daily'])
-def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkeypatch,profile):
+@pytest.mark.parametrize('profile,action',[('weekend','launch'),('long-daily','launch'),('long-daily','upgrade')])
+def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkeypatch,profile,action):
     import base64,io,os,runpy,subprocess,sys,tarfile
     from pathlib import Path
     script=runpy.run_path(str(Path(__file__).resolve().parents[1]/'deploy/weekend-research.py'))
@@ -272,11 +272,27 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
         for name in ['kite','desk','scanner']}}
     info={'Image':'sha256:test-image','Mounts':[{'Source':str(tmp_path),'Destination':'/home/appuser/.tradingagents'}],
           'Config':{'Env':[k+'='+v for k,v in env.items()]}}
+    if action=='upgrade':
+        import hashlib,sqlite3
+        prefix=hashlib.sha256(b'scope').hexdigest()
+        for provider in ('kite','yahoo'):
+            directory=tmp_path/'research-archives'/'long-daily-20261031-v2'/prefix/provider
+            directory.mkdir(parents=True)
+            with sqlite3.connect(directory/'manifest.sqlite') as c:
+                c.execute('CREATE TABLE meta(k TEXT,v TEXT)')
+                cfg=dict(owner='scope',engine_version='original-dataset-engine',provider=provider,
+                         daily_start='2000-01-01',intervals=['1d'])
+                c.execute('INSERT INTO meta VALUES (?,?)',('config',json.dumps(cfg)))
     calls=[]
     def fake_run(args,**kwargs):
         calls.append((args,kwargs))
         if args[:2]==['docker','inspect']:
-            return subprocess.CompletedProcess(args,0,json.dumps([info]),'') if args[2]=='drishti-qzkexq-api-1' else subprocess.CompletedProcess(args,1,'','')
+            if args[2]=='drishti-qzkexq-api-1':return subprocess.CompletedProcess(args,0,json.dumps([info]),'')
+            if action=='upgrade':
+                prior={'Image':'sha256:test-image','Config':{'Labels':{'research.source':'a'*64},'Cmd':['research.long_daily','--base','/home/appuser/.tradingagents/research-archives/long-daily-20261031-v2','--engine-version','original-dataset-engine']}}
+                return subprocess.CompletedProcess(args,0,json.dumps([prior]),'')
+            return subprocess.CompletedProcess(args,1,'','')
+        if args[1] in ('update','stop','rename'):return subprocess.CompletedProcess(args,0,'','')
         assert args[:2]==['docker','run']
         return subprocess.CompletedProcess(args,0,'container-test\n','')
     payload=io.BytesIO()
@@ -285,7 +301,7 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
         tf.addfile(member,io.BytesIO(b''))
     monkeypatch.setattr(subprocess,'run',fake_run)
     monkeypatch.setattr(os,'chown',lambda *args:None)
-    monkeypatch.setattr(sys,'stdin',io.StringIO(json.dumps({'action':'launch','profile':profile,'tar':base64.b64encode(payload.getvalue()).decode()})))
+    monkeypatch.setattr(sys,'stdin',io.StringIO(json.dumps({'action':action,'profile':profile,'tar':base64.b64encode(payload.getvalue()).decode()})))
     exec(compile(script['REMOTE'],'remote-launch-test','exec'),{})
     args,kwargs=calls[-1]
     assert 'private-test-secret' not in ' '.join(args)
@@ -297,3 +313,9 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
     assert '--read-only' in args and '--cap-drop=ALL' in args
     assert ('research.long_daily' if profile=='long-daily' else 'research.cli') in args
     assert ('--memory=512m' if profile=='long-daily' else '--memory=1100m') in args
+
+    if action=='upgrade':
+        assert args[args.index('--engine-version')+1]=='original-dataset-engine'
+        assert args[args.index('--runtime-version')+1]!='original-dataset-engine'
+        operations=[call[0][1] for call in calls]
+        assert operations.index('update')<operations.index('stop')<operations.index('rename')<operations.index('run')

@@ -16,12 +16,13 @@ import subprocess
 import tarfile
 
 REMOTE = r'''
-import base64,hashlib,io,json,os,pathlib,subprocess,sys,tarfile
+import base64,hashlib,io,json,os,pathlib,re,sqlite3,subprocess,sys,tarfile
 request=json.load(sys.stdin)
 api='drishti-qzkexq-api-1'
 profile=request.get('profile','weekend')
 if profile not in ('weekend','long-daily'):raise RuntimeError('invalid worker profile')
 long_daily=profile=='long-daily'
+if request['action']=='upgrade' and not long_daily:raise RuntimeError('only daily worker upgrades are supported')
 name='drishti-long-daily-history-20261031' if long_daily else 'drishti-weekend-research-20261031'
 cpu='0.25' if long_daily else '0.5'
 memory='512m' if long_daily else '1100m'
@@ -55,11 +56,21 @@ with tarfile.open(fileobj=io.BytesIO(payload),mode='r:gz') as tf:
         target=tools.joinpath(*parts);target.parent.mkdir(exist_ok=True)
         target.write_bytes(tf.extractfile(member).read());target.chmod(0o444)
 existing=subprocess.run(['docker','inspect',name],capture_output=True,text=True)
+replacement=None
+dataset_engine=image+'/research:'+digest
 if existing.returncode==0:
     old=json.loads(existing.stdout)[0]
-    if old['Config'].get('Labels',{}).get('research.source')!=digest:
-        raise RuntimeError('existing worker has another source version; inspect before replacing')
-    print(json.dumps({'existing':True,'state':old['State']['Status'],'source':digest}));sys.exit(0)
+    old_source=old['Config'].get('Labels',{}).get('research.source')
+    if old_source==digest:
+        print(json.dumps({'existing':True,'state':old['State']['Status'],'source':digest}));sys.exit(0)
+    if request['action']!='upgrade':raise RuntimeError('existing worker has another source version; inspect before replacing')
+    command=old['Config'].get('Cmd',[])
+    if old['Image']!=image or 'research.long_daily' not in command or '--base' not in command or command[command.index('--base')+1]!=base:
+        raise RuntimeError('existing worker dataset/image is incompatible')
+    if not old_source or not re.fullmatch('[0-9a-f]{64}',old_source):raise RuntimeError('invalid prior worker identity')
+    dataset_engine=command[command.index('--engine-version')+1]
+    replacement=name+'-prior-'+old_source[:12]
+elif request['action']=='upgrade':raise RuntimeError('no existing daily worker to upgrade')
 env=dict(v.split('=',1) for v in info['Config']['Env'])
 keys=['WEBAPP_KEY_ENCRYPTION_SECRET','KITE_DB_PATH','SCANNER_DB_PATH','DESK_DB_PATH']
 values={k:env[k] for k in keys}
@@ -75,8 +86,9 @@ args=['docker','run','-d','--name',name,'--label','research.source='+digest,
       '--volumes-from',api+':rw','--mount','type=bind,src='+str(archive)+',dst=/home/appuser/.tradingagents/research-archives',
       '--env-file','/dev/stdin','--entrypoint','python',image,
       '-m',module,'--base',base,
-      '--engine-version',image+'/research:'+digest,'--watch']
-if long_daily:args+=['--parent-base','/home/appuser/.tradingagents/research-archives/weekend-20261031']
+      '--engine-version',dataset_engine,'--watch']
+if long_daily:args+=['--parent-base','/home/appuser/.tradingagents/research-archives/weekend-20261031',
+                    '--runtime-version',image+'/research:'+digest]
 # Protect each application database file even though SQLite needs writable sidecars.
 for key in ('KITE_DB_PATH','SCANNER_DB_PATH','DESK_DB_PATH'):
     destination=pathlib.Path(values[key])
@@ -85,6 +97,20 @@ for key in ('KITE_DB_PATH','SCANNER_DB_PATH','DESK_DB_PATH'):
     if not source.is_file():raise RuntimeError('database path unavailable')
     args[2:2]=['--mount','type=bind,src='+str(source)+',dst='+str(destination)+',readonly']
 args[2:2]=['--mount','type=bind,src='+str(tools)+',dst=/home/appuser/.tradingagents/.research-tools/'+digest+',readonly']
+if replacement:
+    dataset_path=volume/pathlib.Path(base).relative_to('/home/appuser/.tradingagents')
+    manifests=list(dataset_path.glob('*/kite/manifest.sqlite'))+list(dataset_path.glob('*/yahoo/manifest.sqlite'))
+    if len(manifests)!=2:raise RuntimeError('expected two existing provider archives')
+    for manifest in manifests:
+        with sqlite3.connect(manifest.as_uri()+'?mode=ro',uri=True) as c:
+            dataset=json.loads(c.execute("SELECT v FROM meta WHERE k='config'").fetchone()[0])
+        if dataset.get('engine_version')!=dataset_engine or dataset.get('provider')!=manifest.parent.name or dataset.get('daily_start')!='2000-01-01' or dataset.get('intervals')!=['1d']:
+            raise RuntimeError('existing daily archive contract is incompatible')
+        if hashlib.sha256(dataset['owner'].encode()).hexdigest()!=manifest.parent.parent.name:
+            raise RuntimeError('existing archive owner scope is inconsistent')
+    run(['docker','update','--restart=no',name])
+    run(['docker','stop','-t','15',name])
+    run(['docker','rename',name,replacement])
 container=run(args,input=''.join(k+'='+v+'\n' for k,v in values.items())).strip()
 print(json.dumps({'container':container,'name':name,'source':digest,'image':image,
                   'cpu_limit':float(cpu),'memory_mib':int(memory[:-1]),'orders_enabled':False}))
@@ -93,12 +119,12 @@ print(json.dumps({'container':container,'name':name,'source':digest,'image':imag
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action',choices=['launch','status'])
+    p.add_argument('action',choices=['launch','status','upgrade'])
     p.add_argument('--host',default='codeation-dev')
     p.add_argument('--profile',choices=['weekend','long-daily'],default='weekend')
     args=p.parse_args()
     request={'action':args.action,'profile':args.profile}
-    if args.action=='launch':
+    if args.action in ('launch','upgrade'):
         root=Path(__file__).resolve().parents[1]/'apps'/'research'
         buf=io.BytesIO()
         with tarfile.open(fileobj=buf,mode='w:gz') as tar:
