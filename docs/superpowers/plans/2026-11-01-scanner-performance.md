@@ -10,7 +10,7 @@
 
 - [x] Add failing regressions: stopped/stale hubs do not reread bars; fresh private overlays reuse public panels; no repeated credential checks per symbol; overlay does not mutate public cache; completed candles, publication changes, owner revocation remain correct.
 - [x] Implement scoped panel overlay and verify scanner/source/strategy regression suites. Measure baseline payload on production data using the candidate code in an isolated read-only process.
-- [ ] Independently review, integrate and deploy API. Verify authenticated production preview/status timing and confirm background backfill remains running.
+- [x] Independently review, integrate and deploy API. Verify authenticated production preview/status timing and confirm background backfill remains running.
 
 ## Constraints and review focus
 
@@ -34,3 +34,10 @@ A separately measured Trade Desk closed-session ORB request still took 17.138s. 
 Follow-up also prepares panels before atomically publishing their bar version, keeps concurrent published writes invalidated instead of labeling an older view current, reuses daily charts for weekly/monthly warmup, and retains version invalidation if preparation fails. Regression tests reproduce each cache-publication race before fixing it.
 
 Final follow-up verification: 205 focused tests and 2,762 full-suite tests passed (3 deselected, 103 subtests, 42 known-model warnings); independent final review reran 123 relevant tests and reported no remaining blockers.
+
+## Final production verification
+
+- Runtime code commit `d8a2f01`; API image `sha256:7232efb237e8b645e5a7c9730b1fc464a7cc47a64eddf941adf19f0599918cfa`. All seven changed runtime files match local SHA-256 hashes. Dokploy deployment reports done; API and web are healthy.
+- Authenticated public HTTP after startup: daily baseline 1.262s/1.254s (926 matches, 2,126-symbol universe), 20-day closing breakout 1.639s/2.627s (42 matches), five-minute baseline 1.377s/1.994s (926 matches). Internal initial requests were 2.351s–3.585s before settling to 1.161s–1.473s. Cache preparation and background provider work still consume real startup time.
+- Trade Desk Friday ORB replay: internal 2.102s then 1.229s; public 1.605s/1.805s, versus 17.138s before the adapter. Coverage remains exactly 0 complete/217 incomplete, with the same missing timestamps; performance changes do not fill or ignore missing candles. Sunday/default-today requests return expected HTTP 422 for a non-trading session; benchmark uses explicit Friday replay.
+- Historical all-market worker remains running, zero restarts. No raw historical archive changes are introduced by this patch.
