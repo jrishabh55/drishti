@@ -76,3 +76,18 @@ Long daily Kite collection now reuses verified daily chunks from the original pr
 Live verification after the controlled update: all 5864 previously saved candle files (289147709 bytes) retained their original SHA, size and modification timestamp; zero changed or missing. A production RELIANCE request for 2026-01-01 through 2026-10-30 returned 204 existing daily candles with **zero HTTP calls**, recording one cached source segment and no network segments. The active worker retained the same v2 archive/configuration and source account. The updated source digest is `83559e4ce758ace55cc8599fcd0c778f67397716ed1d2d19b6b90d5534620b4a`.
 
 156 relevant tests pass on the combined final patch, including overwrite refusal, orphan recovery without credentials/network, incomplete metadata preservation, source-account/instrument checks, cached/prefix-only requests, changed sessions and atomic provenance. A separate broad regression run before final wiring passed 2700 tests and 103 subtests; the final focused checks above cover the completed wiring and guards. Yahoo completed 500 of 500 histories (1990170 daily provider records). Kite remains incomplete until the warmup grace ends, with one explicitly failed ASHOKLEY source chunk retained for review. These counts are provider records, not a deduplicated count of every exchange candle since 2000.
+
+## Closing-auction re-run (2026-11-02)
+
+The original eight comparisons silently excluded every session after 2026-08-03: the backtester required 75 five-minute bars, while Kite returns 72 continuous bars (09:15–15:10) for F&O stocks under SEBI's closing auction session. All 20 research symbols are F&O, so August–October (half of the 183-day held-out window) had zero trades. Commit `eb72899` judges completeness against each stock's continuous session and keeps auction-period rows out of entries and exits.
+
+The re-run used a copy of the archive; the original archive, manifest and results are unchanged (timestamps 2026-10-30). New results: `research-archives/weekend-20261031-cas-rerun-20261102/results/`. Training figures are identical to the original run; only the held-out window changed.
+
+| Variant | Test trades (old → new) | Test net ₹ (old → new) | Test PF (old → new) | All-period PF |
+|---|---|---|---|---|
+| orb15-mid-2r | 30 → 54 | −4,160 → −2,927 | 0.32 → 0.69 | 0.73 |
+| orb30-mid-2r | 52 → 94 | +420 → −1,390 | 1.06 → 0.90 | 0.86 |
+| orb15-low-2r | 107 → 211 | +1,750 → +212 | 1.14 → 1.01 | 0.87 |
+| orb15-mid-volume-2r | 88 → 144 | −2,219 → −4,050 | 0.85 → 0.82 | 0.88 |
+
+The two held-out windows that looked profitable were artefacts of the missing months. With complete data, no variant has a profit factor above 1.0 over the full two years after estimated charges; orb15-low is break-even on the held-out window only (PF 1.01, 1.03 under higher slippage). These remain predefined comparisons on a current-universe sample, not evidence of future profitability.
