@@ -425,6 +425,49 @@ def test_backtest_bounds(bt):
         assert client.post("/api/kite/strategy-backtests", json={**base, **c}).status_code == 422, c
 
 
+
+def test_backtest_counts_closing_auction_sessions_as_complete_for_fno_stocks(env, tmp_path, monkeypatch):
+    # Since 2026-08-03 Kite returns 72 continuous bars (09:15-15:10) for F&O
+    # stocks. Requiring 75 dropped every such session from backtests.
+    from tests.scanner_utils import make_store
+    client, desk, user, fake, clock = env
+    days = trading_days(DAY - timedelta(days=1), 4)
+    rows = []
+    for d in days:
+        full = _full_session(d)
+        # Yahoo adds a 15:15 stub and the 15:25 auction print; neither is a
+        # continuous bar, so neither may stop out or close a trade.
+        ts, o, h, lo, c, v = full[72]
+        rows += full[:72] + [(ts, o, h, 1.0, c, v), full[74]]
+
+    def history(user_id, symbol, interval, kind):
+        if kind == "history" and user_id == "user_a":
+            got = rows if symbol in ("SBIN", "INFY") else []
+            return bars_source.BarSeries(symbol, interval, got, "live:kite",
+                                         got[-1][0].isoformat() if got else None)
+    bars_source.register_live_provider(history)
+    scan = make_store(tmp_path, None)
+    scan.upsert_instruments([{"symbol": sym, "yf_symbol": f"{sym}.NS", "name": sym,
+                              "index_memberships": ["NIFTY500"], "fno": sym == "SBIN"}
+                             for sym in ("SBIN", "INFY")])
+    desk.put("/api/desk/profile", json={"flat_by": "15:19"})
+    clock["now"] = ist(16, 0)
+    monkeypatch.setattr(bt_routes, "_now", lambda: clock["now"])
+    bclient, _ = desk_client(bt_routes.router, user)
+    s = _strategy(client, symbols=["SBIN", "INFY"], target_r=5)
+    res = bclient.post("/api/kite/strategy-backtests", json={
+        "strategy_id": s["id"], "start_date": days[0].isoformat(),
+        "end_date": days[-1].isoformat()}).json()
+    assert res["coverage"]["SBIN"]["status"] == "ok"
+    # A cash-only stock still trades to 15:30: 72 bars remain incomplete.
+    assert res["coverage"]["INFY"]["status"] == "insufficient_history"
+    assert {t["symbol"] for t in res["trades"]} == {"SBIN"}
+    assert len(res["trades"]) == len(days)
+    for t in res["trades"]:
+        assert t["exit_fill"]["time"] <= "15:15", t["exit_fill"]
+        assert t["exit_fill"]["price"] > 800, t["exit_fill"]
+
+
 # ---------------------------------------------------------------- research price levels
 
 def test_price_stop_and_fixed_target_validate(env):

@@ -7,7 +7,7 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from apps.research.archive import Archive, ArchiveError, validate_rows
+from apps.research.archive import IST, Archive, ArchiveError, validate_rows
 from apps.research.replay import ResearchBody, choose_symbols, variants
 from apps.api.kite.backtest import BacktestBody
 
@@ -322,3 +322,29 @@ def test_launcher_keeps_env_on_stdin_and_database_files_readonly(tmp_path,monkey
         assert args[args.index('--runtime-version')+1]!='original-dataset-engine'
         operations=[call[0][1] for call in calls]
         assert operations.index('update')<operations.index('stop')<operations.index('rename')<operations.index('run')
+
+
+def test_rerun_counts_closing_auction_sessions_and_preserves_saved_results(tmp_path,monkeypatch):
+    from apps.research.replay import run_comparison
+    from apps.api.desk.profile import DeskProfile
+    from tests.desk_utils import random_walk_sessions
+    cfg=config() | dict(symbols={'SBIN':1},start='2026-03-01',end='2026-10-30',
+                        daily_start='2025-03-01',profile=DeskProfile().model_dump())
+    a=Archive(tmp_path/'archive',cfg)
+    a.set_meta('research_symbols',['SBIN'])
+    # Kite since 2026-08-03: 72 continuous bars per F&O session.
+    rows=[r for r in random_walk_sessions(date(2026,10,30),3)
+          if r[0].astimezone(IST).strftime('%H:%M')<'15:15']
+    normalized=[[r[0].isoformat(),*r[1:]] for r in rows]
+    with a.db() as c:
+        tasks=[dict(r) for r in c.execute("SELECT * FROM tasks WHERE interval='5m' ORDER BY start")]
+    for task in tasks:
+        a.complete(task,[r for r in normalized if task['start']<=r[0][:10]<=task['end']])
+    saved=a.root/'comparison.csv'; saved.write_text('original')
+    out=tmp_path/'rerun'; out.mkdir()
+    run_comparison(a,out=out,cas_symbols={'SBIN'})
+    detail=json.loads((out/'research-orb15-mid-2r.json').read_text())
+    assert set(detail['coverage']['SBIN']['days'].values())>={'complete'}
+    assert sum(v=='complete' for v in detail['coverage']['SBIN']['days'].values())==3
+    assert saved.read_text()=='original'
+    assert a.get_meta('research_complete') is None

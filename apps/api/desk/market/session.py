@@ -14,7 +14,7 @@ on its TSLA fixture (port-correctness); nothing in the product uses it.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -87,7 +87,9 @@ def continuous_spec(spec: SessionSpec, d: date, fno: bool) -> SessionSpec:
     ponytail: uses today's F&O list for past dates; a stock that entered or
     left F&O after 2026-08-03 is judged by its current membership.
     """
-    return NSE_CAS if fno and spec is NSE and d >= CAS_FROM else spec
+    if fno and spec.name == "NSE" and d >= CAS_FROM:
+        return replace(spec, close_min=NSE_CAS.close_min)
+    return spec
 
 
 def parse_clock(text: str) -> int:

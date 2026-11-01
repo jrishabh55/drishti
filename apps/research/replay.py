@@ -84,7 +84,11 @@ def regime_summary(trades, profile, start, end):
     return dict(months=months, quarters={k:paper.stats(v,profile) for k,v in quarters.items()})
 
 
-def run_comparison(archive):
+def run_comparison(archive, *, out=None, cas_symbols=()):
+    """``out`` writes a re-run beside the archive: saved results and archive
+    metadata stay untouched. ``cas_symbols`` see ``backtest.run``."""
+    root = out or archive.root
+    set_meta = archive.set_meta if out is None else (lambda *_: None)
     config = archive.config
     start, end = date.fromisoformat(config['start']), date.fromisoformat(config['end'])
     selected = archive.get_meta('research_symbols')
@@ -114,7 +118,8 @@ def run_comparison(archive):
             for stress in (False, True):
                 p = profile if not stress else DeskProfile(**(profile.model_dump() | {
                     'slippage_ticks':min(50,max(profile.slippage_ticks+2,profile.slippage_ticks*2))}))
-                result = backtest.run(owner, s, body, datetime.now(timezone.utc), p)
+                result = backtest.run(owner, s, body, datetime.now(timezone.utc), p,
+                                      cas_symbols=cas_symbols)
                 result['regimes'] = regime_summary(result['trades'], p, start, end)
                 label = s['id']+('-stress' if stress else '')
                 result['research'] = dict(archive_source_version=config['engine_version'],
@@ -123,11 +128,11 @@ def run_comparison(archive):
                     slippage_increased=p.slippage_ticks > profile.slippage_ticks,
                     survivorship_bias='Current eligible NIFTY500; delisted/renamed/missing constituents are not reconstructed.',
                     execution='Offline replay; no broker calls, paper-ledger writes or enabled strategies.')
-                write_json(archive.root/f'{label}.json', result)
+                write_json(root/f'{label}.json', result)
                 results.append(dict(id=label, stress=stress, summary=result['summary'],
                                     costs=result['costs'], coverage=result['coverage']))
-                archive.set_meta('research_completed_variants', len(results))
-    csv_path = archive.root/'comparison.csv'
+                set_meta('research_completed_variants', len(results))
+    csv_path = root/'comparison.csv'
     with csv_path.open('w', newline='') as f:
         import os
         os.chmod(csv_path, 0o600)
@@ -138,7 +143,7 @@ def run_comparison(archive):
             for period, metrics in r['summary'].items():
                 writer.writerow(dict(variant=r['id'], period=period,
                     **{k:metrics.get(k) for k in columns[2:]}))
-    write_json(archive.root/'comparison.json', dict(start=str(start),end=str(end),
+    write_json(root/'comparison.json', dict(start=str(start),end=str(end),
                split=str(end-timedelta(days=182)),symbols=selected,results=results,
                note='Predefined research comparisons, not an optimization winner or evidence of future profitability.'))
     lines = ['# Historical strategy research', '', f'Period: {start} to {end}. Held-out boundary: {end-timedelta(days=182)}.',
@@ -150,7 +155,7 @@ def run_comparison(archive):
              '', 'Detailed continuous-account results, coverage, train/test and trade legs are in the private JSON files.', '']
     for r in results:
         lines += ['## '+r['id'], '', '```json', json.dumps(r['summary'],indent=2,allow_nan=False),'```','']
-    report = archive.root/'comparison.md'
+    report = root/'comparison.md'
     report.write_text('\n'.join(lines)); report.chmod(0o600)
-    archive.set_meta('research_complete', True)
+    set_meta('research_complete', True)
     return results

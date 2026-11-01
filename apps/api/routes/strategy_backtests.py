@@ -46,7 +46,10 @@ def create_backtest(body: backtest.BacktestBody, user_id: str = Depends(current_
         raise HTTPException(status_code=404, detail="strategy not found")
     try:
         profile = pf_mod.profile_for(user_id, s.get("portfolio_id") or pf_mod.DEFAULT)
-        result = backtest.run(user_id, s, body, _now(), profile)
+        from apps.api.scanner.store import get_scanner_store
+        inst = get_scanner_store().instruments_df()
+        fno = set(inst.index[inst["fno"].astype(bool)]) if "fno" in inst else set()
+        result = backtest.run(user_id, s, body, _now(), profile, cas_symbols=fno)
     except pf_mod.PortfolioError as exc:
         raise HTTPException(status_code=422, detail=f"strategy portfolio: {exc}") from exc
     except backtest.BacktestError as exc:

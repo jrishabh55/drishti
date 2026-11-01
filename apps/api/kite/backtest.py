@@ -30,7 +30,7 @@ are refused, never evaluated with today's values.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -39,7 +39,7 @@ import pandas as pd
 from apps.api.desk import bars as bars_mod, bars_source, entry as entry_mod, exit_plan, \
     paper, risk, sizing
 from apps.api.desk.bars import session_bars
-from apps.api.desk.market.session import parse_clock
+from apps.api.desk.market.session import continuous_spec, parse_clock
 from apps.api.kite import strategies
 
 MAX_SYMBOLS = 20
@@ -219,10 +219,14 @@ def _account(capital: float, realized: float, day_trades: List[Dict[str, Any]], 
             "values": values, "entries": entries}
 
 
-def run(user_id: str, s: Dict[str, Any], body: BacktestBody, now: datetime, profile
-        ) -> Dict[str, Any]:
+def run(user_id: str, s: Dict[str, Any], body: BacktestBody, now: datetime, profile,
+        cas_symbols: Iterable[str] = ()) -> Dict[str, Any]:
     """Pure apart from reading bars through bars_source (and the strategy's
-    scanner definition). Deterministic for the same bars."""
+    scanner definition). Deterministic for the same bars.
+
+    ``cas_symbols`` (F&O stocks) end continuous trading at 15:15 from the
+    closing-auction launch; their sessions are complete without later bars.
+    """
     interval = s.get("interval") or "5m"
     spec = bars_source.spec_for(interval)
     if body.end_date > now.astimezone(spec.tz).date():
@@ -246,6 +250,7 @@ def run(user_id: str, s: Dict[str, Any], body: BacktestBody, now: datetime, prof
             for i in range((body.end_date - body.start_date).days + 1)]
     days = [d for d in days if spec.is_trading_day(d)]
     stamp = strategies.attribution(s)
+    cas = set(cas_symbols)
     sources: Dict[str, str] = {}
     coverage: Dict[str, Dict[str, Any]] = {}
     rows_by: Dict[str, Dict[str, list]] = {}
@@ -257,21 +262,29 @@ def run(user_id: str, s: Dict[str, Any], body: BacktestBody, now: datetime, prof
             continue
         sources[sym] = series.source
         bars, _ = session_bars(series.rows, spec, now)
-        counts: Dict[str, int] = {}
+        slots: Dict[str, set] = {}
         for b in bars:
-            counts[b["date"]] = counts.get(b["date"], 0) + 1
+            slots.setdefault(b["date"], set()).add(b["slot"])
         by_day: Dict[str, list] = {}
         for r in series.rows:
             by_day.setdefault(spec.to_local(r[0]).date().isoformat(), []).append(r)
         state = {}
         for d in days:
-            n = counts.get(d.isoformat(), 0)
-            state[d.isoformat()] = "no_data" if n == 0 else \
-                "complete" if n >= spec.n_bars else "incomplete"
+            need = continuous_spec(spec, d, sym in cas).n_bars
+            got = slots.get(d.isoformat(), set())
+            n = sum(k < need for k in got)
+            state[d.isoformat()] = "no_data" if not got else \
+                "complete" if n >= need else "incomplete"
         complete = [d for d, v in state.items() if v == "complete"]
         coverage[sym] = {"status": "insufficient_history" if not complete else
                          "ok" if len(complete) == len(days) else "partial", "days": state}
-        rows_by[sym] = {d: by_day.get(d, []) for d in complete}
+        # Auction-period rows (Yahoo's 15:15 stub, 15:25 print) are not
+        # continuous bars: keep them out of entries, stops and exits.
+        rows_by[sym] = {}
+        for d in complete:
+            close = spec.local(date.fromisoformat(d),
+                               continuous_spec(spec, date.fromisoformat(d), sym in cas).close_min)
+            rows_by[sym][d] = [r for r in by_day.get(d, []) if r[0] < close]
 
     scanner_out = None
     panel = None
