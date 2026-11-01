@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from apps.api.desk.bars import Bar, Row, session_bars
-from apps.api.desk.market.session import (NSE, NSE_CAS, SessionSpec, clock12, clock24, continuous_spec,
+from apps.api.desk.market.session import (NSE, SessionSpec, clock12, clock24, continuous_spec,
                                           parse_clock)
 
 
@@ -249,7 +249,7 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
         notes.append("Delayed feed: each chart is evaluated through its latest completed bar. "
                      "The newest cached bar is held back until a later bar confirms completion; "
                      "missing bars within that window still exclude a chart.")
-    if cas_used and cutoff > spec.local(d, NSE_CAS.close_min):
+    if cas_used:
         notes.append("F&O stocks stop continuous trading at 15:15 for the closing auction "
                      "(since 3 Aug 2026); their sessions end with the 15:10 bar.")
     if late and not after_close:

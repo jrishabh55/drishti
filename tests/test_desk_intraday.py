@@ -344,3 +344,10 @@ def test_delayed_closing_auction_chart_holds_back_its_unconfirmed_last_bar_befor
     doc = orb.scan({"FNO": rows}, ist(15, 20), no_entries_after=None, cas_symbols={"FNO"})
     assert doc["hits"] == []
     assert doc["counts"]["scanned"] == 1
+
+
+def test_closing_auction_note_shows_during_the_session_too():
+    doc = orb.scan({"FNO": brk_rows()}, ist(10, 0), cas_symbols={"FNO"})
+    assert any("closing auction" in n.lower() for n in doc["notes"])
+    doc = orb.scan({"CASH": brk_rows()}, ist(10, 0))
+    assert not any("closing auction" in n.lower() for n in doc["notes"])
