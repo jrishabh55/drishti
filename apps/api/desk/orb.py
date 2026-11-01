@@ -23,7 +23,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from apps.api.desk.bars import Bar, Row, session_bars
-from apps.api.desk.market.session import NSE, SessionSpec, clock12, clock24, parse_clock
+from apps.api.desk.market.session import (NSE, NSE_CAS, SessionSpec, clock12, clock24, continuous_spec,
+                                          parse_clock)
 
 
 class ORBError(ValueError):
@@ -139,8 +140,13 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
          day: Optional[date] = None, symbols: Optional[Sequence[str]] = None,
          min_price: float = 0.0, min_avg_value_cr: float = 0.0,
          avg_value_cr: Optional[Dict[str, float]] = None, names: Optional[Dict[str, str]] = None,
-         spec: SessionSpec = NSE, source: str = "delayed:yahoo") -> Dict[str, Any]:
-    """The scan document: hits sorted by trigger time, plus counts and notes."""
+         spec: SessionSpec = NSE, source: str = "delayed:yahoo",
+         cas_symbols: Iterable[str] = ()) -> Dict[str, Any]:
+    """The scan document: hits sorted by trigger time, plus counts and notes.
+
+    ``cas_symbols`` (F&O stocks) end continuous trading at 15:15 from the
+    closing-auction launch; their sessions are judged against that close.
+    """
     d, cutoff = orb_window(now, or_minutes, no_entries_after, at, day, spec)
     n_range = or_minutes // spec.bar_min
     last_entry_min = parse_clock(no_entries_after) if no_entries_after else None
@@ -158,20 +164,29 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
         deadline = spec.local(d, last_entry_min)
         if spec.local(d, spec.open_min + or_minutes + spec.bar_min) <= deadline < cutoff:
             evaluation_cutoff = deadline
-    expected = int((cutoff - spec.local(d, spec.open_min)).total_seconds() // (spec.bar_min * 60))
+    # Wall-clock, not per-stock close: after an F&O stock's 15:15 close nothing
+    # confirms its cached 15:10 bar until the session ends.
+    rolling_delayed = (source.startswith("delayed:") and at is None and day is None
+                       and cutoff < spec.local(d, spec.close_min))
+    cas = set(cas_symbols)
+    cas_used = False
     missing_slots: Dict[int, int] = {}
     incomplete = 0
     # Yahoo arrives behind the exchange clock, sometimes by different amounts
     # per symbol. A complete delayed prefix is usable; an internal hole is not.
     # Keep explicit replays and live feeds strict.
-    rolling_delayed = (source.startswith("delayed:") and at is None and day is None
-                       and cutoff < spec.local(d, spec.close_min))
     delayed_window = False
     for sym in syms:
         rows = rows_by_symbol.get(sym)
         if rows:
             counts["with_data"] += 1
-        bars, _ = session_bars(rows or [], spec, as_of)
+        sspec = continuous_spec(spec, d, sym in cas)
+        cas_used |= sspec is not spec
+        sym_cutoff = min(cutoff, sspec.local(d, sspec.close_min))
+        sym_eval = min(evaluation_cutoff, sym_cutoff)
+        expected = int((sym_cutoff - spec.local(d, spec.open_min)).total_seconds()
+                       // (spec.bar_min * 60))
+        bars, _ = session_bars(rows or [], sspec, as_of)
         bars = [b for b in bars if b["date"] == d.isoformat()]
         present = {b["slot"] for b in bars}
         missing = set(range(expected)) - present
@@ -181,11 +196,11 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
                 missing_slots[slot] = missing_slots.get(slot, 0) + 1
         if not rows:
             continue
-        chart_cutoff = evaluation_cutoff
+        chart_cutoff = sym_eval
         last_start = (spec.local(d, spec.open_min + bars[-1]["slot"] * spec.bar_min)
                       if bars else None)
-        window_confirmed = (last_start is not None and evaluation_cutoff < cutoff
-                            and last_start >= evaluation_cutoff)
+        window_confirmed = (last_start is not None and sym_eval < sym_cutoff
+                            and last_start >= sym_eval)
         held_back = False
         if rolling_delayed and bars and not window_confirmed:
             # Match ingest's freshness tolerance on the latest received row.
@@ -194,10 +209,10 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
             if last_start >= cutoff - timedelta(minutes=30):
                 bars = bars[:-1]
                 held_back = True
-                if len(bars) > n_range and evaluation_cutoff == cutoff:
+                if len(bars) > n_range and sym_eval == sym_cutoff:
                     chart_cutoff = last_start
                     delayed_window = True
-        if (automatic_delayed and evaluation_cutoff < cutoff and bars
+        if (automatic_delayed and sym_eval < sym_cutoff and bars
                 and not window_confirmed and not held_back):
             # No later row confirms this cached snapshot's last close.
             bars = bars[:-1]
@@ -205,7 +220,7 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
         if bars:
             stamp = spec.local(d, spec.open_min + bars[-1]["slot"] * spec.bar_min)
             newest_bar = max(newest_bar, stamp) if newest_bar is not None else stamp
-        if not usable(bars, chart_cutoff, n_range, spec):
+        if not usable(bars, chart_cutoff, n_range, sspec):
             counts["unusable"] += 1
             continue
         value = (avg_value_cr or {}).get(sym)
@@ -213,7 +228,7 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
             counts["illiquid"] += 1
             continue
         counts["scanned"] += 1
-        h = orb_hit(bars, n_range, spec, last_entry_min)
+        h = orb_hit(bars, n_range, sspec, last_entry_min)
         if h:
             last = bars[-1]["c"]
             hits.append(dict(h, symbol=sym, name=(names or {}).get(sym, ""),
@@ -234,6 +249,9 @@ def scan(rows_by_symbol: Dict[str, List[Row]], now: datetime, *, or_minutes: int
         notes.append("Delayed feed: each chart is evaluated through its latest completed bar. "
                      "The newest cached bar is held back until a later bar confirms completion; "
                      "missing bars within that window still exclude a chart.")
+    if cas_used and cutoff > spec.local(d, NSE_CAS.close_min):
+        notes.append("F&O stocks stop continuous trading at 15:15 for the closing auction "
+                     "(since 3 Aug 2026); their sessions end with the 15:10 bar.")
     if late and not after_close:
         notes.append(f"It's after {no_entries_after}, your last time for new entries: these "
                      "breakouts are for review, not for entering now.")

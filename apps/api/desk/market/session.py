@@ -6,6 +6,8 @@ excluded. Bar ``k`` starts at ``open + 5k`` and *closes* at ``open + 5(k+1)``;
 an entry "at 09:35" is the close of bar 3. Special sessions (Muhurat, weekend
 budget-day sessions) and shortened days are detected from the data: a session
 without every bar is "not full" and is never used as replay pool material.
+Since the 2026-08-03 closing auction, F&O stocks' continuous session ends at
+15:15 (72 bars): see ``continuous_spec``.
 
 The NYSE spec only exists so tests can reproduce the upstream reel's numbers
 on its TSLA fixture (port-correctness); nothing in the product uses it.
@@ -70,6 +72,22 @@ class SessionSpec:
 
 NSE = SessionSpec("NSE", IST, 9 * 60 + 15, 15 * 60 + 30)
 NYSE = SessionSpec("NYSE", ZoneInfo("America/New_York"), 9 * 60 + 30, 16 * 60)
+
+# SEBI closing auction session (CAS), live 2026-08-03: F&O-eligible stocks stop
+# continuous trading at 15:15; 15:15-15:35 is an auction with a single closing
+# print, so no continuous bars exist after the 15:10 bar. Cash-only stocks
+# still trade to 15:30.
+CAS_FROM = date(2026, 8, 3)
+NSE_CAS = SessionSpec("NSE", IST, 9 * 60 + 15, 15 * 60 + 15)
+
+
+def continuous_spec(spec: SessionSpec, d: date, fno: bool) -> SessionSpec:
+    """The continuous-trading session for one stock on ``d``.
+
+    ponytail: uses today's F&O list for past dates; a stock that entered or
+    left F&O after 2026-08-03 is judged by its current membership.
+    """
+    return NSE_CAS if fno and spec is NSE and d >= CAS_FROM else spec
 
 
 def parse_clock(text: str) -> int:

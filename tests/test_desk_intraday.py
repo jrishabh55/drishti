@@ -289,3 +289,58 @@ def test_stale_cached_entry_deadline_row_cannot_become_a_confirmed_close():
         doc = orb.scan({"PARTIAL": rows}, ist(hour, minute))
         assert doc["counts"]["scanned"] == 0
         assert doc["hits"] == []
+
+
+def cas_rows(day=DAY):
+    # Production shape since SEBI's closing auction: continuous bars to the
+    # 15:10 bar, sometimes a 15:15 stub, then one 15:25 auction print.
+    rows = session_rows(day, [101.0] * 4 + [103.0] * 71)
+    return [r for i, r in enumerate(rows) if i < 72 or i == 74]
+
+
+@pytest.mark.parametrize("kwargs", [{"at": "15:30"}, {"day": DAY}, {}])
+def test_closing_auction_stocks_have_complete_continuous_sessions_at_15_15(kwargs):
+    doc = orb.scan({"FNO": cas_rows(), "CASH": cas_rows()}, ist(17, 0),
+                   cas_symbols={"FNO"}, **kwargs)
+    # The F&O stock's continuous session ends at 15:15; the cash-only stock
+    # still trades to 15:30, so its missing 15:15/15:20 bars stay real holes.
+    assert doc["coverage"]["complete"] == 1
+    assert {x["start"] for x in doc["coverage"]["missing_times"]} == {"15:15", "15:20"}
+    assert "FNO" in [h["symbol"] for h in doc["hits"]]
+    assert any("closing auction" in n.lower() for n in doc["notes"])
+
+
+def test_closing_auction_session_applies_only_from_its_launch():
+    before = date(2026, 7, 31)
+    doc = orb.scan({"FNO": cas_rows(before)}, NSE.local(before, 17 * 60),
+                   cas_symbols={"FNO"}, day=before)
+    assert doc["coverage"]["incomplete"] == 1
+    assert doc["counts"]["scanned"] == 0
+
+
+def test_api_orb_replay_treats_fno_stocks_as_closing_auction_sessions(tmp_path, monkeypatch):
+    reset_desk_store_for_tests(tmp_path / "desk.sqlite")
+    scan = make_store(tmp_path, None)
+    scan.upsert_instruments([{"symbol": s, "yf_symbol": f"{s}.NS", "name": s,
+                              "index_memberships": ["NIFTY500"], "fno": s == "FNO"}
+                             for s in ("FNO", "CASH")])
+    long = pd.DataFrame([{"symbol": s, "ts": r[0].isoformat(), "open": r[1], "high": r[2],
+                          "low": r[3], "close": r[4], "volume": r[5]}
+                         for s in ("FNO", "CASH") for r in cas_rows()])
+    scan.upsert_bars("5m", long)
+    monkeypatch.setattr(desk_routes, "_now", lambda: ist(17, 0))
+    client, _ = desk_client(desk_routes.router)
+    client.put("/api/desk/profile", json={"min_avg_value_cr": 0, "min_price": 0,
+                                          "universe": "nifty500"})
+    doc = client.get(f"/api/desk/orb?date={DAY.isoformat()}").json()
+    assert doc["coverage"]["complete"] == 1 and doc["coverage"]["incomplete"] == 1
+    assert [h["symbol"] for h in doc["hits"]] == ["FNO"]
+
+
+@pytest.mark.parametrize("n", [72, 71])
+def test_delayed_closing_auction_chart_holds_back_its_unconfirmed_last_bar_before_15_30(n):
+    # 15:15-15:30: no later continuous bar can confirm the cached 15:10 close.
+    rows = session_rows(DAY, [101.0] * 71 + [104.0])[:n]
+    doc = orb.scan({"FNO": rows}, ist(15, 20), no_entries_after=None, cas_symbols={"FNO"})
+    assert doc["hits"] == []
+    assert doc["counts"]["scanned"] == 1

@@ -238,6 +238,7 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
     feed = bars_source.get_session_universe(user_id, "5m", day=day or now.astimezone(NSE_SPEC.tz).date(), symbols=symbols, now=now)
     daily = public_daily_bars(symbols)
     names = inst["name"].to_dict() if not inst.empty else {}
+    cas_symbols = set(inst.index[inst["fno"].astype(bool)]) if "fno" in inst else set()
     try:
         docs = []
         for source in ("live:kite", "delayed:yahoo"):
@@ -249,7 +250,8 @@ def orb_scan(or_minutes: Optional[int] = None, at: Optional[str] = None,
                                  no_entries_after=prof.no_entries_after, at=at, day=day,
                                  symbols=selected, min_price=prof.min_price,
                                  min_avg_value_cr=prof.min_avg_value_cr,
-                                 avg_value_cr=orb._avg_value_cr(daily, symbols), names=names, source=source))
+                                 avg_value_cr=orb._avg_value_cr(daily, symbols), names=names, source=source,
+                                 cas_symbols=cas_symbols))
         if not docs:
             docs = [orb.scan({}, now, symbols=[], at=at, day=day,
                              or_minutes=or_minutes or prof.or_minutes)]
