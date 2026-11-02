@@ -206,6 +206,13 @@ def step_or_pause(worker, task, watch):
         time.sleep(60)
 
 
+def fno_symbols():
+    """F&O stocks from the scanner DB: their sessions end at 15:15 (closing auction)."""
+    path = Path(os.environ.get('SCANNER_DB_PATH','data/scanner.sqlite')).resolve()
+    with read_database(path) as c:
+        return {s for (s,) in c.execute('SELECT symbol FROM instruments WHERE fno=1')}
+
+
 def prepare_research(archive):
     selected = archive.get_meta('research_symbols')
     if not selected:
@@ -229,7 +236,7 @@ def prepare_research(archive):
                    ','.join('?' for _ in selected)+") AND status!='complete'",selected).fetchone()[0]
         if not missing:
             archive.set_meta('phase','research'); status(archive)
-            run_comparison(archive)
+            run_comparison(archive, cas_symbols=fno_symbols())
             status(archive)
     return selected
 

@@ -348,3 +348,14 @@ def test_rerun_counts_closing_auction_sessions_and_preserves_saved_results(tmp_p
     assert sum(v=='complete' for v in detail['coverage']['SBIN']['days'].values())==3
     assert saved.read_text()=='original'
     assert a.get_meta('research_complete') is None
+
+
+def test_research_worker_reads_fno_symbols_for_closing_auction(tmp_path,monkeypatch):
+    import sqlite3
+    from apps.research.cli import fno_symbols
+    db=tmp_path/'scanner.sqlite'
+    with sqlite3.connect(db) as c:
+        c.execute('CREATE TABLE instruments (symbol TEXT, fno INTEGER)')
+        c.executemany('INSERT INTO instruments VALUES (?,?)',[('SBIN',1),('CASHONLY',0)])
+    monkeypatch.setenv('SCANNER_DB_PATH',str(db))
+    assert fno_symbols()=={'SBIN'}
