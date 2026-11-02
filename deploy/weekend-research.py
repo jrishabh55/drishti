@@ -67,7 +67,9 @@ if existing.returncode==0:
         print(json.dumps({'existing':True,'state':old['State']['Status'],'source':digest}));sys.exit(0)
     if request['action']!='upgrade':raise RuntimeError('existing worker has another source version; inspect before replacing')
     command=old['Config'].get('Cmd',[])
-    if old['Image']!=image or module not in command or '--base' not in command or command[command.index('--base')+1]!=base:
+    # The app image may move on (redeploys); the dataset stays pinned to its
+    # original --engine-version and --runtime-version records the new image.
+    if module not in command or '--base' not in command or command[command.index('--base')+1]!=base:
         raise RuntimeError('existing worker dataset/image is incompatible')
     if not old_source or not re.fullmatch('[0-9a-f]{64}',old_source):raise RuntimeError('invalid prior worker identity')
     dataset_engine=command[command.index('--engine-version')+1]
