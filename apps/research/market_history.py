@@ -21,6 +21,10 @@ import urllib.request
 
 from .archive import Archive,ArchiveError,ArchiveIntegrityError,validate_rows
 from .cli import Credentials,Context,DownloadWorker,read_database
+
+# Kite allows 3 historical requests/second per API key, shared with the live
+# app; 2.5/s leaves the app 0.5/s.
+KITE_GAP=0.4
 from .long_daily import SETTINGS,YahooWorker,normalize_yahoo,snapshot,verify_metadata
 from .market_universe import CATALOG_URLS,MAX_BYTES,build_universe,fetch_catalogs
 from .replay import write_json
@@ -283,7 +287,7 @@ def run_provider(provider,archive,credentials,parent,entries,budget,states,state
         ctx=credentials.context(parent['owner'])
         if ctx is None or ctx.broker_hash!=parent['broker_hash']:return None
         return Context(ObservedClient(ctx.client,tokens,observed,version),ctx.fingerprint,ctx.login_at,ctx.broker_hash)
-    worker=DownloadWorker(archive,context) if provider=='kite' else YahooWorker(
+    worker=DownloadWorker(archive,context,gap=KITE_GAP) if provider=='kite' else YahooWorker(
         archive,fetch=lambda task:fetch_yahoo_listing(task,entries,observed))
     failures=0
     while not stop.is_set():

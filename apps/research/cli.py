@@ -126,9 +126,9 @@ def make_config(owner, credentials, engine_version):
 
 
 class DownloadWorker:
-    def __init__(self, archive, context, *, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, archive, context, *, clock=time.monotonic, sleep=time.sleep, gap=1.):
         self.archive, self.context, self.clock, self.sleep = archive,context,clock,sleep
-        self.next_at = 0.
+        self.next_at, self.gap = 0., gap
 
     def step(self, task):
         a = self.archive
@@ -151,7 +151,7 @@ class DownloadWorker:
             a.set_meta('phase','awaiting_login')
             return False
         a.claim(task)
-        self.next_at = self.clock()+1.
+        self.next_at = self.clock()+self.gap
         try:
             rows = ctx.client.historical(a.config['symbols'][task['symbol']],
                 'day' if task['interval']=='1d' else '5minute',

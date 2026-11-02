@@ -192,3 +192,17 @@ def test_market_queue_prioritizes_nse_and_corroborated_bse_without_reset(tmp_pat
     restarted=MarketQueue(a,{e['key']:e for e in items})
     assert restarted.next_task()['symbol']=='BSE:200001'
     assert a.progress()['completed']==1 and a.progress()['failed']==1
+
+
+def test_kite_requests_stay_under_the_shared_historical_limit(tmp_path):
+    from types import SimpleNamespace
+    from apps.research.archive import Archive
+    from apps.research.cli import DownloadWorker
+    from apps.research.market_history import KITE_GAP
+    from tests.test_weekend_research import config
+    a = Archive(tmp_path, config())
+    now = [0.]
+    ctx = SimpleNamespace(client=SimpleNamespace(historical=lambda *_: []), fingerprint='same')
+    w = DownloadWorker(a, lambda: ctx, clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0]+s), gap=KITE_GAP)
+    w.step(a.next_task()); w.step(a.next_task())
+    assert now[0] == KITE_GAP and 1/KITE_GAP < 3   # Kite: 3 historical req/s per API key
