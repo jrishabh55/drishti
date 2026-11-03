@@ -21,15 +21,14 @@ import urllib.request
 
 from .archive import Archive,ArchiveError,ArchiveIntegrityError,validate_rows
 from .cli import Credentials,Context,DownloadWorker,read_database
-
-# Kite allows 3 historical requests/second per API key, shared with the live
-# app; 2.5/s leaves the app 0.5/s.
-KITE_GAP=0.4
 from .long_daily import SETTINGS,YahooWorker,normalize_yahoo,snapshot,verify_metadata
 from .market_universe import CATALOG_URLS,MAX_BYTES,build_universe,fetch_catalogs
 from .replay import write_json
 
 START='2000-01-01'
+# Kite allows 3 historical requests/second per API key, shared with the live
+# app; 2.5/s leaves the app 0.5/s.
+KITE_GAP=0.4
 
 
 class HistoryUnavailable(ArchiveError):
@@ -251,11 +250,21 @@ class ObservedClient:
     def historical(self,token,interval,start,end):
         entry=self.entries.get(token)
         if entry is None or interval!='day':raise ArchiveIntegrityError('market historical instrument not in frozen plan')
-        rows=validate_rows(self.client.historical(token,interval,start,end),'1d',start.date(),end.date())
-        coverage=dict(first=rows[0][0] if rows else None,last=rows[-1][0] if rows else None,rows=len(rows))
+        raw,rejected=self.client.historical(token,interval,start,end),[]
+        # Kite has occasional days whose open/close lie outside high-low. Like
+        # Yahoo's rejected_rows, drop and record just those days instead of the
+        # whole 1900-day chunk; every other check still rejects the chunk.
+        for r in list(raw):
+            try:validate_rows([r],'1d',start.date(),end.date())
+            except ArchiveError as exc:
+                if str(exc)=='incoherent candle range':
+                    raw.remove(r);rejected.append(dict(date=str(r[0])[:10],reason=str(exc),ohlcv=list(r[1:6])))
+        rows=validate_rows(raw,'1d',start.date(),end.date())
+        coverage=dict(first=rows[0][0] if rows else None,last=rows[-1][0] if rows else None,rows=len(rows),
+                      rejected_rows=len(rejected))
         self.observed['coverage']=coverage
         self.historical_provenance=dict(provider='kite',exchange=entry['exchange'],listing_key=entry['key'],
-            isin=entry['isin'],source_version=self.version,coverage=coverage)
+            isin=entry['isin'],source_version=self.version,coverage=coverage,rejected_rows=rejected)
         return rows
 
     def __getattr__(self,name):return getattr(self.client,name)
@@ -379,6 +388,11 @@ def main():
             symbols=plan['new_symbols'][provider],engine_version=plan['dataset_engine'],
             universe='frozen_current_NSE_BSE_ordinary_equity',catalog_sha256=plan['catalog_sha256'])
         a=Archive(root/provider,cfg,recover=True,append_only=True);a.recover_existing();a.verify()
+        if provider=='kite' and not a.get_meta('incoherent_rows_retried'):
+            # One-time: chunks rejected before incoherent days were dropped per row.
+            with a.db() as c:
+                c.execute("UPDATE tasks SET status='pending',attempts=0,error=NULL WHERE status='failed' AND error='invalid_candles'")
+            a.set_meta('incoherent_rows_retried',True)
         version=args.runtime_version or args.engine_version;a.set_meta('runtime_source_version',version)
         if provider=='yahoo':verify_metadata(a)
         archives[provider]=a

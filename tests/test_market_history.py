@@ -206,3 +206,17 @@ def test_kite_requests_stay_under_the_shared_historical_limit(tmp_path):
     w = DownloadWorker(a, lambda: ctx, clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0]+s), gap=KITE_GAP)
     w.step(a.next_task()); w.step(a.next_task())
     assert now[0] == KITE_GAP and 1/KITE_GAP < 3   # Kite: 3 historical req/s per API key
+
+
+def test_kite_incoherent_day_is_dropped_and_recorded_not_the_whole_chunk():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from apps.research.archive import IST
+    from apps.research.market_history import ObservedClient
+    good=['2014-04-16T00:00:00+05:30',3.0,3.2,2.9,3.1,100]
+    bad=['2014-04-17T00:00:00+05:30',3.18,3.18,3.18,3.34,10000]   # close above high: real Kite row
+    entry=dict(exchange='BSE',key='BSE:532100',isin='INE000000000')
+    c=ObservedClient(SimpleNamespace(historical=lambda *_:[good,bad]),{7:entry},{},'v')
+    rows=c.historical(7,'day',datetime(2014,4,1,tzinfo=IST),datetime(2014,4,30,tzinfo=IST))
+    assert [r[0][:10] for r in rows]==['2014-04-16']
+    assert c.historical_provenance['rejected_rows']==[dict(date='2014-04-17',reason='incoherent candle range',ohlcv=bad[1:6])]
