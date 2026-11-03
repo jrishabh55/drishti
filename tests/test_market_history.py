@@ -220,3 +220,17 @@ def test_kite_incoherent_day_is_dropped_and_recorded_not_the_whole_chunk():
     rows=c.historical(7,'day',datetime(2014,4,1,tzinfo=IST),datetime(2014,4,30,tzinfo=IST))
     assert [r[0][:10] for r in rows]==['2014-04-16']
     assert c.historical_provenance['rejected_rows']==[dict(date='2014-04-17',reason='incoherent candle range',ohlcv=bad[1:6])]
+
+
+def test_kite_day_with_two_different_candles_is_dropped_and_recorded():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from apps.research.archive import IST
+    from apps.research.market_history import ObservedClient
+    keep=['2023-11-22T00:00:00+0530',6400,6500,6390,6480,500]
+    a=['2023-11-23T00:00:00+0530',6500.3,6625,6500.3,6614.05,657]   # real Kite pair for ATUL (BSE)
+    b=['2023-11-23T00:00:00+0530',6570,6570,6570,6570,18]
+    c=ObservedClient(SimpleNamespace(historical=lambda *_:[keep,a,b]),{7:dict(exchange='BSE',key='BSE:500027',isin='INE100A01010')},{},'v')
+    rows=c.historical(7,'day',datetime(2023,11,1,tzinfo=IST),datetime(2023,11,30,tzinfo=IST))
+    assert [r[0][:10] for r in rows]==['2023-11-22']
+    assert [(x['date'],x['reason']) for x in c.historical_provenance['rejected_rows']]==[('2023-11-23','conflicting duplicate candle')]*2

@@ -259,6 +259,14 @@ class ObservedClient:
             except ArchiveError as exc:
                 if str(exc)=='incoherent candle range':
                     raw.remove(r);rejected.append(dict(date=str(r[0])[:10],reason=str(exc),ohlcv=list(r[1:6])))
+        # Kite also returns two different candles for some days; neither can be
+        # trusted over the other, so the whole day is dropped and recorded.
+        days={}
+        for r in raw:days.setdefault(str(r[0])[:10],[]).append(r)
+        for day,group in days.items():
+            if len({tuple(r[1:6]) for r in group})>1:
+                for r in group:
+                    raw.remove(r);rejected.append(dict(date=day,reason='conflicting duplicate candle',ohlcv=list(r[1:6])))
         rows=validate_rows(raw,'1d',start.date(),end.date())
         coverage=dict(first=rows[0][0] if rows else None,last=rows[-1][0] if rows else None,rows=len(rows),
                       rejected_rows=len(rejected))
@@ -388,11 +396,11 @@ def main():
             symbols=plan['new_symbols'][provider],engine_version=plan['dataset_engine'],
             universe='frozen_current_NSE_BSE_ordinary_equity',catalog_sha256=plan['catalog_sha256'])
         a=Archive(root/provider,cfg,recover=True,append_only=True);a.recover_existing();a.verify()
-        if provider=='kite' and not a.get_meta('incoherent_rows_retried'):
-            # One-time: chunks rejected before incoherent days were dropped per row.
+        if provider=='kite' and not a.get_meta('conflicting_days_retried'):
+            # One-time: chunks rejected before bad days were dropped per day.
             with a.db() as c:
                 c.execute("UPDATE tasks SET status='pending',attempts=0,error=NULL WHERE status='failed' AND error='invalid_candles'")
-            a.set_meta('incoherent_rows_retried',True)
+            a.set_meta('conflicting_days_retried',True)
         version=args.runtime_version or args.engine_version;a.set_meta('runtime_source_version',version)
         if provider=='yahoo':verify_metadata(a)
         archives[provider]=a
